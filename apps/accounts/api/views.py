@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import timedelta, timezone as datetime_timezone
 import hashlib
+import hmac
 from math import asin, cos, radians, sin, sqrt
 import re
 import secrets
@@ -35,6 +36,7 @@ from .serializers import (
     AccountDeleteSerializer,
     AvatarUploadSerializer,
     EmailVerifyConfirmSerializer,
+    EmailVerifyRequestSerializer,
     FriendRequestCreateSerializer,
     FriendRequestRespondSerializer,
     FriendRequestSerializer,
@@ -99,6 +101,8 @@ class AvatarWriteThrottle(FixedRateScopedThrottle):
 LOGIN_LOCKOUT_THRESHOLD = 8
 LOGIN_LOCKOUT_TTL_SECONDS = 15 * 60
 EMAIL_VERIFY_TOKEN_TTL_SECONDS = int(getattr(settings, "EMAIL_VERIFY_TOKEN_TTL_SECONDS", 24 * 60 * 60) or 24 * 60 * 60)
+EMAIL_VERIFY_OTP_TTL_SECONDS = int(getattr(settings, "EMAIL_VERIFY_OTP_TTL_SECONDS", 10 * 60) or 10 * 60)
+EMAIL_VERIFY_OTP_MAX_ATTEMPTS = int(getattr(settings, "EMAIL_VERIFY_OTP_MAX_ATTEMPTS", 5) or 5)
 PASSWORD_RESET_TOKEN_TTL_SECONDS = int(getattr(settings, "PASSWORD_RESET_TOKEN_TTL_SECONDS", 60 * 60) or 60 * 60)
 OIDC_DISCOVERY_CACHE_TTL_SECONDS = int(getattr(settings, "OIDC_DISCOVERY_CACHE_TTL_SECONDS", 60 * 60) or 60 * 60)
 CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -291,6 +295,71 @@ def _consume_auth_action_token(raw_token, *, purpose):
     token.used_at = timezone.now()
     token.save(update_fields=["used_at", "updated_at"])
     return token
+
+
+def _email_otp_hash(user_id, code):
+    return _token_hash(f"{user_id}:{code}")
+
+
+def _send_email_verification_otp(user):
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    now = timezone.now()
+    AuthActionToken.objects.filter(
+        user=user,
+        purpose=AuthActionToken.Purpose.EMAIL_VERIFY,
+        used_at__isnull=True,
+    ).update(used_at=now)
+    AuthActionToken.objects.create(
+        user=user,
+        purpose=AuthActionToken.Purpose.EMAIL_VERIFY,
+        token_hash=_email_otp_hash(user.id, code),
+        email=user.email,
+        expires_at=now + timedelta(seconds=EMAIL_VERIFY_OTP_TTL_SECONDS),
+        metadata={"kind": "otp", "attempts": 0},
+    )
+    _send_account_email(
+        subject="Your Crescentsphere verification code",
+        body=(
+            f"Your Crescentsphere verification code is: {code}\n\n"
+            f"It expires in {max(1, EMAIL_VERIFY_OTP_TTL_SECONDS // 60)} minutes. "
+            "If you did not create this account, you can ignore this email."
+        ),
+        recipients=[user.email],
+    )
+
+
+def _consume_email_verification_otp(*, email, code):
+    user = User.objects.filter(email__iexact=_normalize_email(email), is_active=True).first()
+    if not user:
+        raise AuthenticationFailed("Code is invalid or expired.")
+    with transaction.atomic():
+        action_token = (
+            AuthActionToken.objects.select_for_update()
+            .filter(
+                user=user,
+                purpose=AuthActionToken.Purpose.EMAIL_VERIFY,
+                used_at__isnull=True,
+                expires_at__gt=timezone.now(),
+                metadata__kind="otp",
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if not action_token:
+            raise AuthenticationFailed("Code is invalid or expired.")
+        attempts = int((action_token.metadata or {}).get("attempts", 0))
+        if not hmac.compare_digest(action_token.token_hash, _email_otp_hash(user.id, code)):
+            attempts += 1
+            action_token.metadata = {**(action_token.metadata or {}), "attempts": attempts}
+            if attempts >= EMAIL_VERIFY_OTP_MAX_ATTEMPTS:
+                action_token.used_at = timezone.now()
+                action_token.save(update_fields=["metadata", "used_at", "updated_at"])
+            else:
+                action_token.save(update_fields=["metadata", "updated_at"])
+            raise AuthenticationFailed("Code is invalid or expired.")
+        action_token.used_at = timezone.now()
+        action_token.save(update_fields=["used_at", "updated_at"])
+        return action_token
 
 
 def _mark_email_verified(user, *, email=None):
@@ -654,18 +723,7 @@ class RegisterView(generics.CreateAPIView):
         _clear_ip_failures(request, "register")
         user = User.objects.get(id=response.data["id"])
         if user.email:
-            raw_token = _create_auth_action_token(
-                user=user,
-                purpose=AuthActionToken.Purpose.EMAIL_VERIFY,
-                ttl_seconds=EMAIL_VERIFY_TOKEN_TTL_SECONDS,
-                email=user.email,
-            )
-            verify_url = _build_frontend_url("/auth/verify-email", token=raw_token)
-            _send_account_email(
-                subject="Verify your email",
-                body=f"Use this link to verify your email address:\n\n{verify_url}",
-                recipients=[user.email],
-            )
+            _send_email_verification_otp(user)
         response.data["email_verification_required"] = bool(getattr(settings, "AUTH_REQUIRE_EMAIL_VERIFICATION", False))
         return response
 
@@ -780,27 +838,20 @@ class PasswordResetConfirmView(APIView):
 
 
 class EmailVerifyRequestView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     throttle_classes = [EmailVerifyThrottle]
 
     def post(self, request):
-        if not request.user.email:
-            return Response({"detail": "Add an email address before requesting verification."}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.email_verified:
-            return Response({"detail": "This email address is already verified."})
-        raw_token = _create_auth_action_token(
-            user=request.user,
-            purpose=AuthActionToken.Purpose.EMAIL_VERIFY,
-            ttl_seconds=EMAIL_VERIFY_TOKEN_TTL_SECONDS,
-            email=request.user.email,
-        )
-        verify_url = _build_frontend_url("/auth/verify-email", token=raw_token)
-        _send_account_email(
-            subject="Verify your email",
-            body=f"Use this link to verify your email address:\n\n{verify_url}\n\nIf you did not request this, you can ignore this email.",
-            recipients=[request.user.email],
-        )
-        return Response({"detail": "Verification email sent."})
+        serializer = EmailVerifyRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if request.user.is_authenticated:
+            user = request.user
+        else:
+            email = serializer.validated_data.get("email", "")
+            user = User.objects.filter(email__iexact=email, is_active=True).first() if email else None
+        if user and user.email and not user.email_verified:
+            _send_email_verification_otp(user)
+        return Response({"detail": "If the account is awaiting verification, a new code has been sent."})
 
 
 class EmailVerifyConfirmView(APIView):
@@ -812,7 +863,13 @@ class EmailVerifyConfirmView(APIView):
         serializer = EmailVerifyConfirmSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            action_token = _consume_auth_action_token(serializer.validated_data["token"], purpose=AuthActionToken.Purpose.EMAIL_VERIFY)
+            if serializer.validated_data.get("token"):
+                action_token = _consume_auth_action_token(serializer.validated_data["token"], purpose=AuthActionToken.Purpose.EMAIL_VERIFY)
+            else:
+                action_token = _consume_email_verification_otp(
+                    email=serializer.validated_data["email"],
+                    code=serializer.validated_data["code"],
+                )
         except Exception:
             _record_ip_failure(request, "email_verify_confirm")
             raise
@@ -1171,7 +1228,7 @@ MeView.patch = extend_schema(request=MeUpdateSerializer, responses=MeSerializer)
 PasswordChangeView.post = extend_schema(request=PasswordChangeSerializer, responses=PasswordChangeResponseSerializer)(PasswordChangeView.post)
 PasswordResetRequestView.post = extend_schema(request=PasswordResetRequestSerializer, responses=DetailResponseSerializer)(PasswordResetRequestView.post)
 PasswordResetConfirmView.post = extend_schema(request=PasswordResetConfirmSerializer, responses=PasswordChangeResponseSerializer)(PasswordResetConfirmView.post)
-EmailVerifyRequestView.post = extend_schema(request=None, responses=DetailResponseSerializer)(EmailVerifyRequestView.post)
+EmailVerifyRequestView.post = extend_schema(request=EmailVerifyRequestSerializer, responses=DetailResponseSerializer)(EmailVerifyRequestView.post)
 EmailVerifyConfirmView.post = extend_schema(request=EmailVerifyConfirmSerializer, responses=DetailResponseSerializer)(EmailVerifyConfirmView.post)
 SocialLoginView.post = extend_schema(request=SocialLoginSerializer, responses=SocialLoginResponseSerializer)(SocialLoginView.post)
 SessionListView.get = extend_schema(responses=UserSessionSerializer(many=True))(SessionListView.get)

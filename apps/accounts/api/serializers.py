@@ -461,10 +461,27 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 
 class EmailVerifyConfirmSerializer(serializers.Serializer):
-    token = serializers.CharField(max_length=255)
+    token = serializers.CharField(max_length=255, required=False)
+    email = serializers.EmailField(required=False)
+    code = serializers.RegexField(r"^\d{6}$", required=False)
 
     def validate_token(self, value):
         return _clean_text(value, max_length=255)
+
+    def validate_email(self, value):
+        return User.objects.normalize_email(_clean_text(value, max_length=254)).lower()
+
+    def validate(self, attrs):
+        if attrs.get("token") or (attrs.get("email") and attrs.get("code")):
+            return attrs
+        raise serializers.ValidationError("Provide a token or an email and six-digit code.")
+
+
+class EmailVerifyRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=False)
+
+    def validate_email(self, value):
+        return User.objects.normalize_email(_clean_text(value, max_length=254)).lower()
 
 
 class SocialLoginSerializer(serializers.Serializer):

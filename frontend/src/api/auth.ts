@@ -232,6 +232,14 @@ export const authApi = {
     const response = await http.post(centralPath("/accounts/email/verify/request/"));
     return unwrapData<{ detail: string }>(response.data);
   },
+  async resendRegistrationCode(email: string) {
+    const response = await http.post(centralPath("/accounts/email/verify/request/"), { email });
+    return unwrapData<{ detail: string }>(response.data);
+  },
+  async confirmRegistrationCode(email: string, code: string) {
+    const response = await http.post(centralPath("/accounts/email/verify/confirm/"), { email, code });
+    return unwrapData<{ detail: string }>(response.data);
+  },
   async confirmEmailVerification(token: string) {
     const response = await http.post(centralPath("/accounts/email/verify/confirm/"), { token });
     return unwrapData<{ detail: string }>(response.data);

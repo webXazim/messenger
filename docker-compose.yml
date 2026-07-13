@@ -95,7 +95,15 @@ services:
     expose:
       - "8000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health/live/"]
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - -H
+        - "Host: ${APP_DOMAIN:-localhost}"
+        - -H
+        - "X-Forwarded-Proto: https"
+        - http://127.0.0.1:8000/api/v1/health/live/
       interval: 20s
       timeout: 8s
       retries: 10
@@ -142,6 +150,7 @@ services:
     logging: *default-logging
     build:
       context: ./frontend
+      network: host
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
         VITE_AUTH_BASE_URL: ${VITE_AUTH_BASE_URL:-/api/v1}

@@ -54,6 +54,8 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
   const {
     login,
     register,
+    confirmRegistrationCode,
+    resendRegistrationCode,
     requestPasswordReset,
     confirmPasswordReset,
     confirmEmailVerification,
@@ -66,6 +68,8 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<ApiFieldErrors>({});
@@ -112,15 +116,54 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
           setFieldErrors({ password_confirm: "Passwords do not match." });
           return;
         }
-        await register({ username: username.trim(), email: email.trim(), password, password_confirm: password });
+        const result = await register({ username: username.trim(), email: email.trim(), password, password_confirm: password });
+        if (result.emailVerificationRequired) {
+          setVerificationEmail(email.trim());
+          setMessage("We sent a six-digit verification code to your email.");
+          return;
+        }
       } else {
         await login({ username: identifier.trim(), password });
       }
       navigate("/chat", { replace: true });
     } catch (reason) {
       const parsed = parseApiError(reason, isSignup ? "Unable to create the account." : "Unable to sign in with those details.");
+      if (!isSignup && parsed.message.toLowerCase().includes("email verification") && identifier.includes("@")) {
+        setVerificationEmail(identifier.trim());
+        await resendRegistrationCode(identifier.trim()).catch(() => undefined);
+        setMessage("We sent a new six-digit verification code to your email.");
+        return;
+      }
       setError(parsed.message);
       setFieldErrors(parsed.fields);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitVerificationCode(event: FormEvent) {
+    event.preventDefault();
+    resetFeedback();
+    setBusy(true);
+    try {
+      await confirmRegistrationCode(verificationEmail, verificationCode);
+      await login({ username: username.trim() || identifier.trim() || verificationEmail, password });
+      navigate("/chat", { replace: true });
+    } catch (reason) {
+      setError(parseApiError(reason, "That code is invalid or has expired.").message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendVerificationCode() {
+    resetFeedback();
+    setBusy(true);
+    try {
+      const payload = await resendRegistrationCode(verificationEmail);
+      setMessage(payload.detail || "A new verification code has been sent.");
+    } catch (reason) {
+      setError(parseApiError(reason, "Unable to resend the code right now.").message);
     } finally {
       setBusy(false);
     }
@@ -176,6 +219,36 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
         {error ? <div className="auth-alert" role="alert"><strong>We couldn't verify this email</strong><span>{error}</span></div> : null}
         {message ? <div className="auth-success" role="status"><strong>Verification complete</strong><span>{message}</span></div> : null}
         <Link className="auth-submit auth-submit--link" to={isAuthenticated ? "/settings" : "/login"}>{isAuthenticated ? "Return to settings" : "Continue to sign in"}</Link>
+      </AuthFormShell>
+    );
+  }
+
+  if (verificationEmail) {
+    return (
+      <AuthFormShell kicker="Verify your email" title="Enter your six-digit code" description={`We sent a verification code to ${verificationEmail}. It expires in 10 minutes.`}>
+        <form className="auth-inline-form" onSubmit={submitVerificationCode} noValidate>
+          {error ? <div className="auth-alert" role="alert"><strong>We couldn't verify the code</strong><span>{error}</span></div> : null}
+          {message ? <div className="auth-success" role="status"><strong>Check your inbox</strong><span>{message}</span></div> : null}
+          <label>
+            <span>Verification code</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              value={verificationCode}
+              onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="000000"
+              aria-label="Six-digit verification code"
+              autoFocus
+              required
+            />
+          </label>
+          <button className="auth-submit" type="submit" disabled={busy || verificationCode.length !== 6}>{busy ? <><span className="auth-spinner" />Verifying…</> : "Verify and continue"}</button>
+          <p className="auth-switch">Didn't receive it? <button type="button" className="auth-link-button" onClick={() => void resendVerificationCode()} disabled={busy}>Send a new code</button></p>
+          <p className="auth-switch"><button type="button" className="auth-link-button" onClick={() => { setVerificationEmail(""); resetFeedback(); }}>Change email</button></p>
+        </form>
       </AuthFormShell>
     );
   }

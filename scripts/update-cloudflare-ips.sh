@@ -25,6 +25,7 @@ fetch_ranges() {
     printf 'set_real_ip_from %s;\n' "$network"
   done < <(
     fetch_ranges https://www.cloudflare.com/ips-v4
+    echo
     fetch_ranges https://www.cloudflare.com/ips-v6
   )
 } > "$tmp"

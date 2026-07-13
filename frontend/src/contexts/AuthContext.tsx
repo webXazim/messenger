@@ -16,7 +16,9 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (payload: LoginPayload) => Promise<void>;
-  register: (payload: RegisterPayload) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<{ emailVerificationRequired: boolean }>;
+  confirmRegistrationCode: (email: string, code: string) => Promise<{ detail: string }>;
+  resendRegistrationCode: (email: string) => Promise<{ detail: string }>;
   requestPasswordReset: (email: string) => Promise<{ detail: string }>;
   confirmPasswordReset: (token: string, newPassword: string) => Promise<{ detail: string; revoked_sessions?: number }>;
   confirmEmailVerification: (token: string) => Promise<{ detail: string }>;
@@ -114,9 +116,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (payload: RegisterPayload) => {
-    await authApi.register(payload);
-    await login({ username: payload.username, password: payload.password });
+    const result = await authApi.register(payload);
+    const emailVerificationRequired = Boolean(result?.email_verification_required);
+    if (!emailVerificationRequired) {
+      await login({ username: payload.username, password: payload.password });
+    }
+    return { emailVerificationRequired };
   };
+
+  const confirmRegistrationCode = async (email: string, code: string) => authApi.confirmRegistrationCode(email, code);
+  const resendRegistrationCode = async (email: string) => authApi.resendRegistrationCode(email);
 
   const requestPasswordReset = async (email: string) => authApi.requestPasswordReset(email);
   const confirmPasswordReset = async (token: string, newPassword: string) => authApi.confirmPasswordReset(token, newPassword);
@@ -158,7 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient, user?.id]);
 
   const value = useMemo(
-    () => ({ user, isAuthenticated: !!user, isLoading, login, register, requestPasswordReset, confirmPasswordReset, confirmEmailVerification, logout, refreshMe, setUser }),
+    () => ({ user, isAuthenticated: !!user, isLoading, login, register, confirmRegistrationCode, resendRegistrationCode, requestPasswordReset, confirmPasswordReset, confirmEmailVerification, logout, refreshMe, setUser }),
     [user, isLoading, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
