@@ -1,0 +1,52 @@
+.ms-user-avatar {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: visible;
+  border: 1px solid var(--ms-color-line);
+  background: var(--ms-color-surface-strong);
+  color: var(--ms-color-ink);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+
+.ms-user-avatar--circle { border-radius: var(--ms-radius-pill); }
+.ms-user-avatar--rounded { border-radius: var(--ms-radius-sm); }
+.ms-user-avatar--xs { width: 1.75rem; height: 1.75rem; font-size: 0.625rem; }
+.ms-user-avatar--sm { width: 2.25rem; height: 2.25rem; font-size: 0.6875rem; }
+.ms-user-avatar--md { width: 2.75rem; height: 2.75rem; font-size: var(--ms-font-size-xs); }
+.ms-user-avatar--lg { width: 3.5rem; height: 3.5rem; font-size: var(--ms-font-size-sm); }
+.ms-user-avatar--xl { width: 4.75rem; height: 4.75rem; font-size: var(--ms-font-size-lg); }
+
+.ms-user-avatar > img,
+.ms-user-avatar__fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+}
+
+.ms-user-avatar > img {
+  object-fit: cover;
+  background: var(--ms-color-surface-strong);
+}
+
+.ms-presence-badge {
+  position: absolute;
+  right: -0.0625rem;
+  bottom: -0.0625rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 0.125rem solid var(--ms-color-surface);
+  border-radius: var(--ms-radius-pill);
+  background: #9a9a9a;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.04);
+}
+
+.ms-presence-badge.is-online { background: #25a56a; }
+.ms-user-avatar--xs .ms-presence-badge { width: 0.55rem; height: 0.55rem; border-width: 0.1rem; }
+.ms-user-avatar--lg .ms-presence-badge,
+.ms-user-avatar--xl .ms-presence-badge { width: 0.85rem; height: 0.85rem; }

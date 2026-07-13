@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "strict": true,
+    "skipLibCheck": true,
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "outDir": ".upload-test-build",
+    "rootDir": "src",
+    "types": [
+      "vite/client"
+    ]
+  },
+  "include": [
+    "src/components/composer/uploadPolicy.ts"
+  ]
+}

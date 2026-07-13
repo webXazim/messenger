@@ -1,0 +1,66 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.production.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+db.sqlite3
+media/
+private_media/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Android / Gradle
+SNM/.gradle/
+SNM/.idea/
+SNM/.kotlin/
+SNM/local.properties
+SNM/**/build/
+SNM/*.jks
+SNM/*.keystore
+SNM/google-services.json
+SNM/**/google-services.json
+SNM/*service-account*.json
+
+# Editors and OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Build and archive artifacts
+*.zip
+*.tar
+*.tar.gz
+*.log
+
+# Production runtime data
+secrets/*
+!secrets/.gitkeep
+!secrets/tls/
+secrets/tls/*
+!secrets/tls/.gitkeep
+!secrets/tls/README.txt
+backups/*
+!backups/.gitkeep

@@ -1,0 +1,191 @@
+name: cs-messenger
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend-common: &backend-common
+  build: .
+  restart: unless-stopped
+  logging: *default-logging
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DB_ENGINE: ${DB_ENGINE:-postgres}
+    DB_NAME: ${DB_NAME:-messenger_api}
+    DB_USER: ${DB_USER:-messenger_user}
+    DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
+    DB_HOST: postgres
+    DB_PORT: 5432
+    REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+    REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
+    CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+    CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,web,nginx}
+    CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+    FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
+    SITE_URL: ${SITE_URL:-http://localhost:8080}
+  volumes:
+    - private_media:/app/private_media
+    - media:/app/media
+    - ./secrets:/run/secrets:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${DB_NAME:-messenger_api}
+      POSTGRES_USER: ${DB_USER:-messenger_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-messenger_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-messenger_user} -d ${DB_NAME:-messenger_api}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [messenger]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: redis-server --appendonly yes --save 60 1000
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [messenger]
+
+  web:
+    <<: *backend-common
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi:application
+    environment:
+      DB_ENGINE: ${DB_ENGINE:-postgres}
+      DB_NAME: ${DB_NAME:-messenger_api}
+      DB_USER: ${DB_USER:-messenger_user}
+      DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,web,nginx}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
+      SITE_URL: ${SITE_URL:-http://localhost:8080}
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
+      RUN_COLLECTSTATIC: "1"
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health/live/"]
+      interval: 20s
+      timeout: 8s
+      retries: 10
+      start_period: 30s
+    networks: [messenger]
+
+  worker:
+    <<: *backend-common
+    command: celery -A config worker -l ${CELERY_LOG_LEVEL:-INFO} --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
+    environment:
+      DB_ENGINE: ${DB_ENGINE:-postgres}
+      DB_NAME: ${DB_NAME:-messenger_api}
+      DB_USER: ${DB_USER:-messenger_user}
+      DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+    networks: [messenger]
+
+  beat:
+    <<: *backend-common
+    command: celery -A config beat -l ${CELERY_LOG_LEVEL:-INFO}
+    environment:
+      DB_ENGINE: ${DB_ENGINE:-postgres}
+      DB_NAME: ${DB_NAME:-messenger_api}
+      DB_USER: ${DB_USER:-messenger_user}
+      DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      RUN_MIGRATIONS: "0"
+      RUN_COLLECTSTATIC: "0"
+    networks: [messenger]
+
+  frontend:
+    logging: *default-logging
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_AUTH_BASE_URL: ${VITE_AUTH_BASE_URL:-/api/v1}
+        VITE_CENTRAL_AUTH_ORIGIN: ${VITE_CENTRAL_AUTH_ORIGIN:-http://localhost:8080}
+        VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
+        VITE_APP_NAME: ${VITE_APP_NAME:-Crescentsphere Messenger}
+        VITE_SOCIAL_BASE_URL: ${VITE_SOCIAL_BASE_URL:-http://localhost:8080}
+    restart: unless-stopped
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    networks: [messenger]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - ${NGINX_CONF_PATH:-./nginx/snm.conf}:/etc/nginx/conf.d/default.conf:ro
+      - media:/app/media:ro
+    expose:
+      - "80"
+    depends_on:
+      web:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --header='X-Forwarded-Proto: https' -q -O /dev/null http://127.0.0.1/api/v1/health/live/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    networks: [messenger]
+
+volumes:
+  postgres_data:
+  redis_data:
+  private_media:
+  media:
+
+networks:
+  messenger:
+    driver: bridge

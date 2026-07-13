@@ -1,0 +1,837 @@
+.ms-video-call {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  min-width: 0;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: #050505;
+  color: #fff;
+  isolation: isolate;
+}
+
+.ms-video-call button {
+  font: inherit;
+}
+
+.ms-call-remote-audio {
+  display: none;
+}
+
+.ms-video-call:fullscreen,
+.ms-video-call.is-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+}
+
+/* Header */
+.ms-video-call__header {
+  position: absolute;
+  inset: max(0.75rem, env(safe-area-inset-top)) 0 auto;
+  z-index: 14;
+  min-height: 3.5rem;
+  display: grid;
+  grid-template-columns: 2.65rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.4rem clamp(0.75rem, 2vw, 1.25rem);
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 180ms ease, transform 180ms ease;
+  pointer-events: none;
+}
+
+.ms-video-call.is-chrome-hidden .ms-video-call__header {
+  opacity: 0;
+  transform: translateY(-0.75rem);
+  pointer-events: none;
+}
+
+.ms-video-call__back,
+.ms-video-call__header-button {
+  width: 2.65rem;
+  height: 2.65rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.5);
+  color: #fff;
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.ms-video-call__back:hover,
+.ms-video-call__header-button:hover {
+  background: rgb(255 255 255 / 0.16);
+}
+
+.ms-video-call__back svg,
+.ms-video-call__header-button svg,
+.ms-video-call__control svg,
+.ms-video-call__more-menu svg,
+.ms-call-participants svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-video-call__identity {
+  min-width: 0;
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 0.62rem;
+  max-width: min(28rem, calc(100vw - 8rem));
+  padding: 0.38rem 0.68rem 0.38rem 0.42rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.ms-video-call__identity-avatar {
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+  color: #111;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.ms-video-call__identity > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 0.04rem;
+}
+
+.ms-video-call__identity strong,
+.ms-video-call__identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-video-call__identity strong {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.ms-video-call__identity small {
+  color: rgb(255 255 255 / 0.7);
+  font-size: 0.68rem;
+}
+
+.ms-video-call__header-actions {
+  position: relative;
+  justify-self: end;
+  pointer-events: auto;
+}
+
+.ms-video-call__more-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: 13.5rem;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.4rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 0.9rem;
+  background: rgb(16 16 16 / 0.96);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.42);
+  backdrop-filter: blur(20px);
+}
+
+.ms-video-call__more-menu button {
+  min-height: 2.7rem;
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: #fff;
+  text-align: left;
+}
+
+.ms-video-call__more-menu button:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.ms-video-call__more-menu button:disabled {
+  opacity: 0.45;
+}
+
+.ms-video-call__more-menu span {
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* Video stage and tiles */
+.ms-video-call__stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #0b0b0b;
+  touch-action: none;
+}
+
+.ms-video-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: linear-gradient(145deg, #1a1a1a, #090909);
+}
+
+.ms-video-tile--remote {
+  width: 100%;
+  height: 100%;
+}
+
+.ms-video-tile__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.ms-video-tile__video.is-visible {
+  opacity: 1;
+}
+
+.ms-video-tile--local .ms-video-tile__video,
+.ms-video-tile--main-local .ms-video-tile__video {
+  transform: scaleX(-1);
+}
+
+.ms-video-tile.is-unmirrored .ms-video-tile__video {
+  transform: none;
+}
+
+.ms-video-tile.is-interactive {
+  cursor: pointer;
+}
+
+.ms-video-tile.is-interactive:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.ms-video-tile__fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.ms-video-tile__label {
+  position: absolute;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 2;
+  max-width: calc(100% - 1.5rem);
+  overflow: hidden;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.45rem;
+  background: rgb(0 0 0 / 0.52);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+}
+
+.ms-video-call__avatar-state {
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  padding: 1.5rem;
+  color: #fff;
+  text-align: center;
+}
+
+.ms-video-call__avatar {
+  width: clamp(5.25rem, 12vw, 8rem);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 50%;
+  background: #f2f2f2;
+  color: #111;
+  font-size: clamp(1.25rem, 3vw, 2rem);
+  font-weight: 850;
+}
+
+.ms-video-call__avatar-state strong {
+  font-size: clamp(1rem, 2vw, 1.35rem);
+}
+
+.ms-video-call__avatar-state small {
+  color: rgb(255 255 255 / 0.62);
+}
+
+/* Draggable picture-in-picture */
+.ms-video-call__floating-local {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 8;
+  width: clamp(9rem, 18vw, 14rem);
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.25);
+  border-radius: 1rem;
+  background: #171717;
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.38);
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+  user-select: none;
+  will-change: transform;
+}
+
+.ms-video-call__floating-local.is-positioned {
+  opacity: 1;
+}
+
+.ms-video-call__floating-local.is-dragging {
+  cursor: grabbing;
+  box-shadow: 0 22px 64px rgb(0 0 0 / 0.52);
+}
+
+.ms-video-call__floating-local .ms-video-tile {
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ms-video-call__floating-local .ms-video-call__avatar {
+  width: 4rem;
+  font-size: 1rem;
+}
+
+.ms-video-call__floating-local .ms-video-call__avatar-state strong,
+.ms-video-call__floating-local .ms-video-call__avatar-state small {
+  display: none;
+}
+
+.ms-video-call__floating-hint {
+  position: absolute;
+  top: 0.55rem;
+  left: 50%;
+  z-index: 3;
+  max-width: calc(100% - 1rem);
+  overflow: hidden;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.54);
+  color: rgb(255 255 255 / 0.78);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 150ms ease;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+
+.ms-video-call__floating-local:hover .ms-video-call__floating-hint,
+.ms-video-call__floating-local.is-dragging .ms-video-call__floating-hint {
+  opacity: 1;
+}
+
+.ms-video-call__floating-local:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* Call state and notices */
+.ms-video-call__status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 5;
+  min-width: min(20rem, calc(100vw - 2rem));
+  display: grid;
+  justify-items: center;
+  gap: 0.3rem;
+  padding: 0.8rem 1rem;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+}
+
+.ms-video-call__status strong {
+  font-size: 1.05rem;
+}
+
+.ms-video-call__status span,
+.ms-video-call__status small {
+  color: rgb(255 255 255 / 0.68);
+  font-size: 0.78rem;
+}
+
+.ms-video-call__notices {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 5.9rem);
+  z-index: 12;
+  width: min(34rem, calc(100% - 1.5rem));
+  display: grid;
+  gap: 0.4rem;
+  transform: translateX(-50%);
+}
+
+.ms-video-call__notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 0.75rem;
+  background: rgb(0 0 0 / 0.62);
+  color: rgb(255 255 255 / 0.84);
+  font-size: 0.72rem;
+  backdrop-filter: blur(14px);
+}
+
+.ms-video-call__notice.is-danger {
+  border-color: rgb(255 104 104 / 0.35);
+}
+
+.ms-video-call__notice button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+/* Controls */
+.ms-video-call__controls {
+  position: absolute;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.52rem;
+  padding: 0.5rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 1.15rem;
+  background: rgb(0 0 0 / 0.56);
+  box-shadow: 0 16px 42px rgb(0 0 0 / 0.3);
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  transition: opacity 180ms ease, transform 180ms ease;
+  backdrop-filter: blur(18px);
+}
+
+.ms-video-call.is-chrome-hidden .ms-video-call__controls {
+  opacity: 0;
+  transform: translateX(-50%) translateY(1rem);
+  pointer-events: none;
+}
+
+.ms-video-call__control {
+  position: relative;
+  min-width: 4rem;
+  height: 3.8rem;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.18rem;
+  padding: 0 0.55rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 0.9rem;
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+}
+
+.ms-video-call__control:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+
+.ms-video-call__control.is-off {
+  background: #fff;
+  color: #111;
+}
+
+.ms-video-call__control.is-end,
+.ms-video-call__control.is-decline {
+  border-color: #d42f3a;
+  background: #d42f3a;
+  color: #fff;
+}
+
+.ms-video-call__control.is-accept {
+  border-color: #fff;
+  background: #fff;
+  color: #111;
+}
+
+.ms-video-call__control:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.ms-video-call__control span {
+  font-size: 0.6rem;
+  font-weight: 750;
+}
+
+.ms-video-call__control-count {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  min-width: 1rem;
+  height: 1rem;
+  display: grid;
+  place-items: center;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: #fff;
+  color: #111;
+  font-size: 0.55rem;
+  line-height: 1;
+}
+
+.ms-video-call__control.is-off .ms-video-call__control-count {
+  background: #111;
+  color: #fff;
+}
+
+.ms-video-call__control:focus-visible,
+.ms-video-call__back:focus-visible,
+.ms-video-call__header-button:focus-visible,
+.ms-video-call__more-menu button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+/* Group layout */
+.ms-video-call__group-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 0.45rem;
+  padding: clamp(4.8rem, 8vh, 6rem) 0.65rem clamp(6.4rem, 11vh, 8rem);
+  background: #050505;
+}
+
+.ms-video-tile--group {
+  min-height: 0;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 1rem;
+}
+
+/* Participant drawer */
+.ms-call-participants {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 0.36);
+  backdrop-filter: blur(4px);
+}
+
+.ms-call-participants__drawer {
+  width: min(23rem, 92vw);
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-left: 1px solid rgb(255 255 255 / 0.14);
+  background: #111;
+  box-shadow: -18px 0 50px rgb(0 0 0 / 0.38);
+}
+
+.ms-call-participants__header {
+  min-height: 4.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem 0.8rem;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.ms-call-participants__header > span {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.ms-call-participants__header strong {
+  font-size: 1rem;
+}
+
+.ms-call-participants__header small,
+.ms-call-participants__copy small {
+  color: rgb(255 255 255 / 0.62);
+  font-size: 0.7rem;
+}
+
+.ms-call-participants__header button {
+  width: 2.4rem;
+  height: 2.4rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+
+.ms-call-participants__list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0.55rem;
+}
+
+.ms-call-participants__row {
+  display: grid;
+  grid-template-columns: 2.65rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 4.1rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.8rem;
+}
+
+.ms-call-participants__row:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+
+.ms-call-participants__avatar {
+  width: 2.65rem;
+  height: 2.65rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #f1f1f1;
+  color: #111;
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.ms-call-participants__copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.ms-call-participants__copy strong,
+.ms-call-participants__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-call-participants__copy strong {
+  font-size: 0.8rem;
+}
+
+.ms-call-participants__media {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.ms-call-participants__media > span {
+  width: 1.8rem;
+  height: 1.8rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.1);
+  color: #fff;
+}
+
+.ms-call-participants__media > span.is-off {
+  background: rgb(255 255 255 / 0.04);
+  color: rgb(255 255 255 / 0.42);
+}
+
+.ms-call-participants__media svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .ms-video-call__header {
+    grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    padding-inline: 0.65rem;
+  }
+
+  .ms-video-call__back,
+  .ms-video-call__header-button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .ms-video-call__identity {
+    max-width: calc(100vw - 7rem);
+  }
+
+  .ms-video-call__floating-local {
+    width: clamp(7rem, 31vw, 9rem);
+    border-radius: 0.85rem;
+  }
+
+  .ms-video-call__controls {
+    gap: 0.38rem;
+    padding: 0.42rem;
+    border-radius: 1rem;
+  }
+
+  .ms-video-call__control {
+    min-width: 3.55rem;
+    height: 3.5rem;
+    padding-inline: 0.4rem;
+  }
+
+  .ms-video-call__notices {
+    bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 5.45rem);
+  }
+
+  .ms-video-call__group-grid {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .ms-video-tile--group {
+    min-height: 16rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .ms-video-call__controls {
+    width: min(calc(100% - 1rem), 22rem);
+  }
+
+  .ms-video-call__control {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 3.25rem;
+    border-radius: 50%;
+  }
+
+  .ms-video-call__control span {
+    display: none;
+  }
+
+  .ms-video-call__floating-hint {
+    display: none;
+  }
+
+  .ms-call-participants {
+    align-items: flex-end;
+  }
+
+  .ms-call-participants__drawer {
+    width: 100%;
+    height: min(70dvh, 34rem);
+    border-top: 1px solid rgb(255 255 255 / 0.14);
+    border-left: 0;
+    border-radius: 1.1rem 1.1rem 0 0;
+    box-shadow: 0 -18px 50px rgb(0 0 0 / 0.38);
+  }
+
+  .ms-call-participants__header {
+    padding-top: 0.8rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .ms-video-call__identity-avatar {
+    display: none;
+  }
+
+  .ms-video-call__identity {
+    padding-left: 0.68rem;
+  }
+
+  .ms-video-call__control {
+    height: 3.1rem;
+  }
+
+  .ms-video-call__control-count {
+    top: 0.18rem;
+    right: 0.2rem;
+  }
+
+  .ms-video-call__notice {
+    justify-content: space-between;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .ms-video-call__header {
+    top: 0.35rem;
+  }
+
+  .ms-video-call__floating-local {
+    width: clamp(7rem, 17vw, 9rem);
+    aspect-ratio: 4 / 3;
+  }
+
+  .ms-video-call__controls {
+    bottom: 0.4rem;
+  }
+
+  .ms-video-call__notices {
+    bottom: 4.9rem;
+  }
+
+  .ms-call-participants__drawer {
+    width: min(22rem, 52vw);
+    height: 100%;
+    border-radius: 0;
+  }
+}
+
+@media (hover: none) {
+  .ms-video-call__floating-hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-video-call__header,
+  .ms-video-call__controls,
+  .ms-video-tile__video {
+    transition: none;
+  }
+}

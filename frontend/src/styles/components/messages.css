@@ -1,0 +1,1182 @@
+/* Production chat-message system.
+   The outer message card is intentionally transparent. Each content type owns
+   its surface so text stays narrow while media remains borderless. */
+
+.ms-message-row {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.55rem;
+  padding-inline: clamp(0.75rem, 5vw, 4.5rem);
+}
+
+.ms-message-row--own {
+  justify-content: flex-end;
+}
+
+.ms-message-row--incoming {
+  justify-content: flex-start;
+}
+
+.ms-message-row.is-grouped {
+  margin-top: -0.15rem;
+}
+
+.ms-message-avatar {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-pill);
+  background: linear-gradient(180deg, #f7f7f7 0%, #f1f1f1 100%);
+  color: var(--ms-color-ink-muted);
+  font-size: 0.625rem;
+  font-weight: 800;
+}
+
+.ms-message-avatar.is-hidden {
+  visibility: hidden;
+}
+
+.ms-message-gesture {
+  position: absolute;
+  top: 50%;
+  opacity: 0;
+  color: var(--ms-color-ink-faint);
+  font-size: 1rem;
+  transform: translateY(-50%) scale(0.8);
+  transition: opacity var(--ms-transition-fast), transform var(--ms-transition-fast);
+  pointer-events: none;
+}
+
+.ms-message-row--own .ms-message-gesture {
+  right: min(3vw, 2.25rem);
+}
+
+.ms-message-row--incoming .ms-message-gesture {
+  left: min(3vw, 2.25rem);
+}
+
+.ms-message-gesture.is-visible {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+.ms-message-stack {
+  width: fit-content;
+  max-width: min(34rem, 72%);
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
+  transition: transform 120ms ease;
+}
+
+.ms-message-stack.has-rich-content {
+  width: min(28rem, 72%);
+}
+
+.ms-message-stack--rich-only {
+  width: min(28rem, 72%);
+}
+
+.ms-message-card {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  gap: 0.4rem;
+  background: transparent;
+  color: var(--ms-color-ink);
+  touch-action: pan-y;
+}
+
+.message-reference-active .ms-message-card {
+  outline: 2px solid rgb(17 17 17 / 0.14);
+  outline-offset: 0.35rem;
+  border-radius: var(--ms-radius-md);
+}
+
+.ms-message-author {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding-inline: 0.25rem;
+}
+
+.ms-message-row--own .ms-message-author {
+  justify-content: flex-end;
+}
+
+.ms-message-author strong {
+  overflow: hidden;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-2xs);
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-message-author span {
+  padding: 0.125rem 0.375rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-pill);
+  color: var(--ms-color-ink-faint);
+  font-size: 0.5625rem;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+/* Text/reply/link surface */
+.ms-message-copy {
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.58rem 0.72rem 0.56rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 1rem 1rem 1rem 0.34rem;
+  background: var(--ms-color-surface);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.025);
+}
+
+.ms-message-row--own .ms-message-copy {
+  justify-self: end;
+  border-color: var(--ms-color-line-strong);
+  border-radius: 1rem 1rem 0.34rem 1rem;
+  background: var(--ms-color-canvas);
+  box-shadow: none;
+}
+
+.ms-message-copy:hover,
+.ms-message-copy:focus-within {
+  border-color: var(--ms-color-line-strong);
+}
+
+.ms-message-text {
+  min-width: 0;
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-md);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.ms-message-text.is-encryption-status {
+  color: var(--ms-color-ink-muted);
+  font-style: italic;
+}
+
+.ms-message-text.is-deleted {
+  color: var(--ms-color-ink-faint);
+  font-style: italic;
+}
+
+.ms-message-text mark {
+  padding: 0.0625rem 0.125rem;
+  border-radius: 0.1875rem;
+  background: #fff0a8;
+  color: inherit;
+}
+
+.ms-message-reply {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.38rem 0.52rem;
+  border: 0;
+  border-left: 2px solid var(--ms-color-ink);
+  border-radius: 0 0.45rem 0.45rem 0;
+  background: rgb(17 17 17 / 0.045);
+  color: inherit;
+  text-align: left;
+}
+
+button.ms-message-reply:hover {
+  background: rgb(17 17 17 / 0.075);
+}
+
+.ms-message-reply__label {
+  color: var(--ms-color-ink-muted);
+  font-size: 0.625rem;
+  font-weight: 780;
+}
+
+.ms-message-reply__text {
+  overflow: hidden;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-message-transcript {
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--ms-color-line-strong);
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-xs);
+  line-height: 1.45;
+}
+
+.ms-message-links {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.ms-message-links a {
+  overflow: hidden;
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-xs);
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Message actions stay quiet until hover, right-click, or long-press. */
+.ms-message-actions {
+  position: absolute;
+  top: 0;
+  z-index: 18;
+  display: flex;
+  gap: 0.15rem;
+  opacity: 0;
+  transform: translateY(-0.125rem);
+  transition: opacity var(--ms-transition-fast), transform var(--ms-transition-fast);
+}
+
+.ms-message-row--own .ms-message-actions {
+  right: calc(100% + 0.4rem);
+}
+
+.ms-message-row--incoming .ms-message-actions {
+  left: calc(100% + 0.4rem);
+}
+
+.ms-message-card:hover .ms-message-actions,
+.ms-message-card:focus-within .ms-message-actions,
+.ms-message-actions.is-open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ms-message-actions__button {
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.5rem;
+  background: rgb(255 255 255 / 0.96);
+  color: var(--ms-color-ink-muted);
+  box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-message-actions__button:hover {
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-message-actions__button svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-message-actions__menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 24;
+  width: 17rem;
+  padding: 0.45rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-md);
+  background: var(--ms-color-surface);
+  box-shadow: var(--ms-shadow-lg);
+}
+
+.ms-message-row--incoming .ms-message-actions__menu {
+  right: auto;
+  left: 0;
+}
+
+.ms-message-actions__reactions {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.2rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--ms-color-line);
+}
+
+.ms-message-actions__reactions button {
+  min-width: 0;
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.ms-message-actions__reactions button:hover,
+.ms-message-actions__reactions button:focus-visible {
+  background: var(--ms-color-surface-subtle);
+  transform: translateY(-0.08rem) scale(1.04);
+}
+
+.ms-message-actions__items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.2rem;
+  padding-top: 0.4rem;
+}
+
+.ms-message-actions__items button {
+  min-height: 2rem;
+  padding: 0 0.625rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-xs);
+  font-weight: 650;
+  text-align: left;
+}
+
+.ms-message-actions__items button:hover,
+.ms-message-actions__items button:focus-visible {
+  background: var(--ms-color-surface-subtle);
+}
+
+.ms-message-actions__items button.is-danger {
+  color: var(--ms-color-danger);
+}
+
+/* Borderless media */
+.ms-message-media {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
+  overflow: hidden;
+  border-radius: var(--ms-radius-md);
+  background: transparent;
+}
+
+.ms-message-media--count-2,
+.ms-message-media--count-3,
+.ms-message-media--count-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ms-message-media__item {
+  --ms-attachment-ratio: 4 / 3;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  aspect-ratio: var(--ms-attachment-ratio);
+  border-radius: 0.92rem;
+  background: var(--ms-color-surface-strong);
+}
+
+.ms-message-media--count-3 .ms-message-media__item:first-child {
+  grid-row: span 2;
+}
+
+.ms-message-media__preview {
+  width: 100%;
+  height: 100%;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.ms-message-media__item img,
+.ms-message-media__item video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  image-rendering: auto;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+.ms-message-media__item img {
+  filter: none;
+}
+
+.ms-message-media__item video {
+  background: #111;
+}
+
+.ms-message-media__actions {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity var(--ms-transition-fast);
+}
+
+.ms-message-media__item:hover .ms-message-media__actions,
+.ms-message-media__item:focus-within .ms-message-media__actions {
+  opacity: 1;
+}
+
+.ms-message-media__actions button {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.35);
+  border-radius: 0.625rem;
+  background: rgb(0 0 0 / 0.56);
+  color: #fff;
+  backdrop-filter: blur(8px);
+}
+
+.ms-message-media__actions svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Compact, recoverable media error state. */
+.ms-message-media__item:has(.ms-media-fallback) {
+  min-height: 4.75rem;
+  aspect-ratio: auto;
+  border: 1px solid var(--ms-color-line);
+  background: var(--ms-color-surface);
+}
+
+.ms-media-fallback {
+  width: 100%;
+  min-height: 100%;
+  min-height: 4.75rem;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  background: var(--ms-color-surface);
+  color: var(--ms-color-ink-muted);
+}
+
+.ms-media-fallback__icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.65rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+  font-size: 1rem;
+}
+
+.ms-media-fallback__copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.ms-media-fallback__copy strong,
+.ms-media-fallback__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-media-fallback__copy strong {
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-media-fallback__copy small {
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-2xs);
+}
+
+.ms-media-fallback button {
+  min-height: 2rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.6rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-2xs);
+  font-weight: 750;
+}
+
+.ms-media-fallback--loading {
+  animation: ms-media-pulse 1.1s ease-in-out infinite alternate;
+}
+
+.ms-media-fallback--audio {
+  min-height: 3.75rem;
+}
+
+@keyframes ms-media-pulse {
+  from { opacity: 0.62; }
+  to { opacity: 1; }
+}
+
+/* File attachments */
+.ms-file-message-list {
+  min-width: 0;
+  display: grid;
+  gap: 0.375rem;
+}
+
+.ms-file-message {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.25rem;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5625rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.9rem;
+  background: var(--ms-color-surface);
+}
+
+.ms-message-row--own .ms-file-message {
+  border-color: var(--ms-color-line-strong);
+  background: var(--ms-color-canvas);
+}
+
+.ms-file-message__type {
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.6875rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink-muted);
+  font-size: 0.625rem;
+  font-weight: 850;
+  letter-spacing: 0.025em;
+}
+
+.ms-file-message__copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.1875rem;
+}
+
+.ms-file-message__copy strong,
+.ms-file-message__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-file-message__copy strong {
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-sm);
+  font-weight: 740;
+}
+
+.ms-file-message__copy small {
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-2xs);
+}
+
+.ms-file-message__download {
+  width: 2.125rem;
+  height: 2.125rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0.625rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-file-message__download:hover {
+  background: var(--ms-color-surface-strong);
+}
+
+.ms-file-message__download svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Voice notes */
+.ms-voice-message {
+  width: 100%;
+  min-width: 17rem;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.6875rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.95rem;
+  background: var(--ms-color-surface);
+}
+
+.ms-message-row--own .ms-voice-message {
+  border-color: var(--ms-color-line-strong);
+  background: var(--ms-color-canvas);
+}
+
+.ms-voice-message__play,
+.ms-voice-message__speed {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--ms-color-ink);
+}
+
+.ms-voice-message__play {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
+}
+
+.ms-voice-message__play:disabled,
+.ms-voice-message__speed:disabled {
+  opacity: 0.45;
+}
+
+.ms-voice-message__play svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+}
+
+.ms-voice-message__play svg .fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+.ms-voice-message__content {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.ms-voice-message__label {
+  overflow: hidden;
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-voice-message__waveform {
+  width: 100%;
+  height: 1.85rem;
+  display: grid;
+  grid-template-columns: repeat(48, minmax(1px, 1fr));
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ms-voice-message__waveform:disabled {
+  cursor: default;
+}
+
+.ms-voice-message__waveform span {
+  width: 100%;
+  min-width: 1px;
+  max-width: 0.19rem;
+  justify-self: center;
+  border-radius: var(--ms-radius-pill);
+  background: #c7c7c7;
+  transition: background-color var(--ms-transition-fast);
+}
+
+.ms-voice-message__waveform span.is-active {
+  background: var(--ms-color-ink);
+}
+
+.ms-voice-message__timing {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ms-color-ink-faint);
+  font-size: 0.625rem;
+  line-height: 1;
+}
+
+.ms-voice-message__speed {
+  width: 2.5rem;
+  min-height: 1.75rem;
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-surface-subtle);
+  font-size: 0.625rem;
+  font-weight: 800;
+}
+
+.ms-voice-message__speed:hover {
+  background: var(--ms-color-surface-strong);
+}
+
+.ms-voice-message__audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ms-voice-message-fallback {
+  width: 100%;
+  display: grid;
+  gap: 0.125rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-sm);
+  background: var(--ms-color-surface);
+}
+
+.ms-voice-message-fallback strong {
+  font-size: var(--ms-font-size-sm);
+}
+
+.ms-voice-message-fallback span {
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-2xs);
+}
+
+/* Call events */
+.ms-call-message {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.95rem;
+  background: var(--ms-color-surface);
+}
+
+.ms-message-row--own .ms-call-message {
+  border-color: var(--ms-color-line-strong);
+  background: var(--ms-color-canvas);
+}
+
+.ms-call-message__icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-call-message--missed .ms-call-message__icon,
+.ms-call-message--declined .ms-call-message__icon {
+  background: var(--ms-color-danger-surface);
+  color: var(--ms-color-danger);
+}
+
+.ms-call-message__icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-call-message__copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.125rem;
+}
+
+.ms-call-message__copy strong,
+.ms-call-message__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-call-message__copy strong {
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-sm);
+}
+
+.ms-call-message__copy small {
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-2xs);
+}
+
+.ms-call-message__direction {
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-sm);
+  font-weight: 800;
+}
+
+.ms-call-message--missed .ms-call-message__direction,
+.ms-call-message--declined .ms-call-message__direction {
+  color: var(--ms-color-danger);
+}
+
+/* Metadata sits outside the content surface. */
+.ms-message-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.2rem;
+  padding-inline: 0.22rem;
+  color: var(--ms-color-ink-faint);
+  font-size: 0.625rem;
+  line-height: 1.2;
+}
+
+.ms-message-row--own .ms-message-meta {
+  justify-content: flex-end;
+}
+
+.ms-message-meta time {
+  flex: 0 0 auto;
+}
+
+.ms-message-receipt {
+  width: 1.125rem;
+  height: 1rem;
+  display: inline-grid;
+  place-items: center;
+}
+
+.ms-message-receipt svg {
+  width: 1.125rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-message-receipt--read {
+  color: var(--ms-color-ink);
+}
+
+.ms-message-meta__summary {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-message-meta__failure {
+  color: var(--ms-color-danger);
+}
+
+.ms-message-meta button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ms-color-danger);
+  font-size: inherit;
+  font-weight: 800;
+}
+
+/* Existing reactions stay compact; adding reactions happens from the context menu. */
+.ms-message-card:has(.ms-message-reactions__summary) {
+  margin-bottom: 0.85rem;
+}
+
+.ms-message-reactions {
+  position: absolute;
+  left: 0.45rem;
+  bottom: -1.05rem;
+  z-index: 4;
+}
+
+.ms-message-row--own .ms-message-reactions {
+  right: 0.45rem;
+  left: auto;
+}
+
+.ms-message-reactions__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1875rem;
+}
+
+.ms-message-reactions__summary button {
+  min-height: 1.625rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1875rem;
+  padding: 0 0.4375rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-surface);
+  color: var(--ms-color-ink-muted);
+  box-shadow: var(--ms-shadow-sm);
+}
+
+.ms-message-reactions__summary button.is-active {
+  border-color: var(--ms-color-ink);
+  color: var(--ms-color-ink);
+}
+
+.ms-message-reactions__summary small {
+  font-size: 0.625rem;
+  font-weight: 750;
+}
+
+@media (max-width: 1180px) {
+  .ms-message-row {
+    padding-inline: clamp(0.75rem, 3vw, 2rem);
+  }
+
+  .ms-message-stack,
+  .ms-message-stack.has-rich-content,
+  .ms-message-stack--rich-only {
+    max-width: min(31rem, 80%);
+  }
+}
+
+@media (max-width: 760px) {
+  .ms-message-row {
+    padding-inline: 0;
+  }
+
+  .ms-message-stack {
+    max-width: 88%;
+  }
+
+  .ms-message-stack.has-rich-content,
+  .ms-message-stack--rich-only {
+    width: min(28rem, 90%);
+    max-width: 90%;
+  }
+
+  .ms-message-actions {
+    top: 0.35rem;
+    right: 0.35rem;
+    left: auto;
+  }
+
+  .ms-message-row--own .ms-message-actions,
+  .ms-message-row--incoming .ms-message-actions {
+    right: 0.35rem;
+    left: auto;
+  }
+
+  .ms-message-actions__button:first-child {
+    display: none;
+  }
+
+  .ms-message-actions__button:last-of-type {
+    opacity: 0;
+  }
+
+  .ms-message-card:focus-within .ms-message-actions__button:last-of-type,
+  .ms-message-card:hover .ms-message-actions__button:last-of-type {
+    opacity: 1;
+  }
+
+  .ms-message-media__actions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 520px) {
+  .ms-message-row {
+    gap: 0.4rem;
+  }
+
+  .ms-message-avatar {
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-bottom: 1.15rem;
+    font-size: 0.5625rem;
+  }
+
+  .ms-message-stack {
+    max-width: 92%;
+  }
+
+  .ms-message-stack.has-rich-content,
+  .ms-message-stack--rich-only {
+    width: min(100%, 28rem);
+    max-width: 94%;
+  }
+
+  .ms-message-copy {
+    padding: 0.54rem 0.65rem 0.52rem;
+  }
+
+  .ms-message-text {
+    font-size: 0.875rem;
+  }
+
+  .ms-message-media__item {
+    border-radius: 0.78rem;
+  }
+
+  .ms-voice-message {
+    min-width: min(17rem, 100%);
+    grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+    gap: 0.5rem;
+    padding: 0.5625rem;
+  }
+
+  .ms-voice-message__play,
+  .ms-voice-message__speed {
+    width: 2.25rem;
+  }
+
+  .ms-voice-message__play {
+    height: 2.25rem;
+  }
+
+  .ms-voice-message__waveform {
+    gap: 0.0625rem;
+  }
+
+  .ms-file-message {
+    grid-template-columns: 2.5rem minmax(0, 1fr) 2.125rem;
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+
+  .ms-file-message__type {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .ms-message-meta__summary {
+    display: none;
+  }
+
+  .ms-media-fallback {
+    grid-template-columns: 2rem minmax(0, 1fr) auto;
+    gap: 0.5rem;
+    padding: 0.55rem;
+  }
+
+  .ms-media-fallback__icon {
+    width: 2rem;
+    height: 2rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .ms-message-actions {
+    position: static;
+    opacity: 1;
+    transform: none;
+  }
+
+  .ms-message-actions > .ms-message-actions__button {
+    display: none;
+  }
+
+  .ms-message-actions__menu,
+  .ms-message-row--incoming .ms-message-actions__menu,
+  .ms-message-row--own .ms-message-actions__menu {
+    position: fixed;
+    right: 0.75rem;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    left: 0.75rem;
+    top: auto;
+    width: auto;
+    max-width: 28rem;
+    margin-inline: auto;
+    border-radius: 1rem;
+    box-shadow: 0 1.25rem 4rem rgb(0 0 0 / 0.22);
+  }
+
+  .ms-message-actions__items {
+    grid-template-columns: 1fr;
+  }
+
+  .ms-message-actions__items button {
+    min-height: 2.5rem;
+    text-align: center;
+  }
+}
+
+.ms-message-meta__pending {
+  color: var(--ms-color-ink-faint);
+  font-weight: 700;
+}
+
+.ms-message-actions button:disabled,
+.ms-message-meta button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.ms-attachment-download-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ms-attachment-download-action__spinner {
+  width: 0.875rem;
+  height: 0.875rem;
+  display: block;
+  border: 0.125rem solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ms-attachment-download-spin 700ms linear infinite;
+}
+
+@keyframes ms-attachment-download-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-attachment-download-action__spinner {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.55;
+  }
+}

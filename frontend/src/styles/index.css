@@ -1,0 +1,26 @@
+/* Messenger design-system entry point. Import order is intentional. */
+@import "./foundation/tokens.css";
+@import "./foundation/reset.css";
+@import "./foundation/typography.css";
+@import "./foundation/primitives.css";
+@import "./foundation/layout.css";
+
+@import "./components/identity.css";
+@import "./components/navigation.css";
+@import "./components/page-shell.css";
+@import "./components/messages.css";
+@import "./components/composer.css";
+@import "./components/conversation-details.css";
+@import "./components/overlays.css";
+@import "./components/video-call.css";
+
+@import "./pages/auth.css";
+@import "./pages/conversations.css";
+@import "./pages/conversation.css";
+@import "./pages/calls.css";
+@import "./pages/call-room.css";
+@import "./pages/contacts.css";
+@import "./pages/groups.css";
+@import "./pages/settings.css";
+
+@import "./foundation/accessibility.css";

@@ -1,0 +1,25 @@
+services:
+  nginx:
+    ports:
+      - "${LOCAL_HTTP_PORT:-8080}:80"
+
+  lan-https:
+    image: caddy:2.8-alpine
+    profiles: ["lan-https"]
+    restart: unless-stopped
+    environment:
+      LAN_HOST: ${LAN_HOST:-192.168.0.165}
+    ports:
+      - "${LAN_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - ./Caddyfile.lan:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      nginx:
+        condition: service_healthy
+    networks: [messenger]
+
+volumes:
+  caddy_data:
+  caddy_config:

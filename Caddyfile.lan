@@ -1,0 +1,8 @@
+{
+  admin off
+}
+
+https://{$LAN_HOST:192.168.0.165}:8443 {
+  tls internal
+  reverse_proxy nginx:80
+}

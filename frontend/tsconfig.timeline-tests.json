@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "outDir": ".timeline-test-build",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/lib/messageTimeline.ts",
+    "src/types/chat.ts"
+  ]
+}

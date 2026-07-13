@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "outDir": ".navigation-test-build",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/components/conversations/conversationPresentation.ts",
+    "src/components/conversations/conversationFiltering.ts",
+    "src/components/conversations/types.ts",
+    "src/lib/userIdentity.ts",
+    "src/types/chat.ts"
+  ]
+}

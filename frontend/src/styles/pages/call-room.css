@@ -1,0 +1,321 @@
+/* Consumer audio-call screen. Video-call styles live in components/video-call.css. */
+.ms-call-remote-audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Calling upgrade 2: simple consumer voice-call screen. */
+.ms-audio-call {
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 30%, rgb(255 255 255 / 0.09), transparent 32%),
+    linear-gradient(180deg, #151515 0%, #090909 100%);
+  color: #ffffff;
+}
+
+.ms-audio-call__header {
+  min-height: 4.25rem;
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+  align-items: center;
+  gap: var(--ms-space-2);
+  padding: max(var(--ms-space-3), env(safe-area-inset-top, 0px)) var(--ms-space-4) var(--ms-space-3);
+  color: rgb(255 255 255 / 0.72);
+  font-size: var(--ms-font-size-xs);
+  font-weight: 700;
+  text-align: center;
+}
+
+.ms-audio-call__back {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ms-radius-pill);
+  background: rgb(255 255 255 / 0.07);
+  color: #ffffff;
+}
+
+.ms-audio-call__back:hover {
+  background: rgb(255 255 255 / 0.13);
+}
+
+.ms-audio-call__back svg,
+.ms-audio-call__control svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-audio-call__header-spacer {
+  width: 2.5rem;
+}
+
+.ms-audio-call__content {
+  min-width: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  align-content: center;
+  gap: var(--ms-space-2);
+  padding: var(--ms-space-6) var(--ms-space-4);
+  text-align: center;
+}
+
+.ms-audio-call__avatar {
+  width: clamp(7rem, 13vw, 9rem);
+  height: clamp(7rem, 13vw, 9rem);
+  display: grid;
+  place-items: center;
+  margin-bottom: var(--ms-space-3);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 50%;
+  background: #f3f3f3;
+  color: #111111;
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.3);
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 850;
+  letter-spacing: -0.04em;
+}
+
+.ms-audio-call__content h1 {
+  max-width: min(32rem, 88vw);
+  margin: 0;
+  overflow: hidden;
+  color: #ffffff;
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  font-weight: 780;
+  letter-spacing: -0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-audio-call__state,
+.ms-audio-call__detail,
+.ms-audio-call__timer,
+.ms-audio-call__countdown {
+  margin: 0;
+}
+
+.ms-audio-call__state {
+  color: rgb(255 255 255 / 0.82);
+  font-size: var(--ms-font-size-sm);
+  font-weight: 680;
+}
+
+.ms-audio-call__state.is-danger {
+  color: #ffb7bd;
+}
+
+.ms-audio-call__detail {
+  max-width: 28rem;
+  color: rgb(255 255 255 / 0.52);
+  font-size: var(--ms-font-size-xs);
+  line-height: 1.55;
+}
+
+.ms-audio-call__timer {
+  margin-top: var(--ms-space-2);
+  color: #ffffff;
+  font-size: var(--ms-font-size-lg);
+  font-variant-numeric: tabular-nums;
+  font-weight: 720;
+}
+
+.ms-audio-call__countdown {
+  color: rgb(255 255 255 / 0.55);
+  font-size: var(--ms-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ms-audio-call__people {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: var(--ms-space-3);
+}
+
+.ms-audio-call__people span {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  margin-left: -0.45rem;
+  border: 2px solid #111111;
+  border-radius: 50%;
+  background: #f3f3f3;
+  color: #111111;
+  font-size: 0.625rem;
+  font-weight: 800;
+}
+
+.ms-audio-call__people span:first-child {
+  margin-left: 0;
+}
+
+.ms-audio-call__notices {
+  width: min(31rem, 100%);
+  display: grid;
+  gap: var(--ms-space-2);
+  margin-top: var(--ms-space-4);
+}
+
+.ms-audio-call__notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ms-space-3);
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: var(--ms-radius-sm);
+  background: rgb(255 255 255 / 0.07);
+  color: rgb(255 255 255 / 0.72);
+  font-size: var(--ms-font-size-2xs);
+}
+
+.ms-audio-call__notice.is-danger {
+  border-color: rgb(255 150 160 / 0.35);
+  background: rgb(180 35 44 / 0.16);
+  color: #ffd7da;
+}
+
+.ms-audio-call__notice button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 760;
+  text-decoration: underline;
+}
+
+.ms-audio-call__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.75rem, 3vw, 1.5rem);
+  padding: var(--ms-space-5) var(--ms-space-4) max(var(--ms-space-6), env(safe-area-inset-bottom, 0px));
+}
+
+.ms-audio-call__control {
+  width: 4.75rem;
+  min-height: 4.75rem;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.3rem;
+  padding: 0.55rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.1);
+  color: #ffffff;
+}
+
+.ms-audio-call__control:hover {
+  background: rgb(255 255 255 / 0.16);
+}
+
+.ms-audio-call__control.is-active {
+  background: #ffffff;
+  color: #111111;
+}
+
+.ms-audio-call__control.is-end,
+.ms-audio-call__control.is-decline {
+  border-color: #c52a35;
+  background: #c52a35;
+  color: #ffffff;
+}
+
+.ms-audio-call__control.is-accept {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #111111;
+}
+
+.ms-audio-call__control span {
+  font-size: 0.625rem;
+  font-weight: 730;
+}
+
+.ms-audio-call__control:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+@media (max-width: 560px) {
+  .ms-audio-call__header {
+    min-height: 3.75rem;
+    padding-inline: var(--ms-space-3);
+  }
+
+  .ms-audio-call__content {
+    padding: var(--ms-space-4) var(--ms-space-3);
+  }
+
+  .ms-audio-call__avatar {
+    width: 7rem;
+    height: 7rem;
+  }
+
+  .ms-audio-call__detail {
+    max-width: 20rem;
+  }
+
+  .ms-audio-call__notice {
+    align-items: flex-start;
+    flex-direction: column;
+    text-align: left;
+  }
+
+  .ms-audio-call__controls {
+    gap: 0.7rem;
+    padding-inline: var(--ms-space-3);
+  }
+
+  .ms-audio-call__control {
+    width: 4.25rem;
+    min-height: 4.25rem;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .ms-audio-call {
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ms-audio-call__header {
+    grid-column: 1 / -1;
+  }
+
+  .ms-audio-call__content {
+    padding-block: var(--ms-space-3);
+  }
+
+  .ms-audio-call__avatar {
+    width: 5.5rem;
+    height: 5.5rem;
+    margin-bottom: var(--ms-space-1);
+  }
+
+  .ms-audio-call__controls {
+    flex-direction: column;
+    padding: var(--ms-space-3) max(var(--ms-space-4), env(safe-area-inset-right, 0px)) var(--ms-space-3) var(--ms-space-3);
+  }
+}

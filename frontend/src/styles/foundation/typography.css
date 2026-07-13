@@ -1,0 +1,18 @@
+/* New messenger components should inherit these tokens through a page root. */
+.ms-ui {
+  color: var(--ms-color-ink);
+  font-family: var(--ms-font-sans);
+  font-size: var(--ms-font-size-md);
+  line-height: var(--ms-line-height-body);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ms-ui :where(h1, h2, h3, p) {
+  margin-block: 0;
+}
+
+.ms-ui :where(h1, h2, h3) {
+  line-height: var(--ms-line-height-tight);
+  letter-spacing: -0.025em;
+}

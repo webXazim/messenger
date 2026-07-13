@@ -1,0 +1,217 @@
+/* Accessibility, zoom resilience, touch ergonomics, and motion preferences. */
+
+.ms-skip-link {
+  position: fixed;
+  inset: max(0.75rem, env(safe-area-inset-top, 0px)) auto auto max(0.75rem, env(safe-area-inset-left, 0px));
+  z-index: 1000;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.625rem 0.875rem;
+  border: 2px solid #ffffff;
+  border-radius: var(--ms-radius-sm);
+  background: #111111;
+  color: #ffffff;
+  box-shadow: 0 0 0 3px #111111, var(--ms-shadow-md);
+  font-size: var(--ms-font-size-sm);
+  font-weight: 800;
+  transform: translateY(calc(-100% - 2rem));
+  transition: transform var(--ms-transition-fast);
+}
+
+.ms-skip-link:focus,
+.ms-skip-link:focus-visible {
+  outline: none;
+  transform: translateY(0);
+}
+
+#main-content:focus,
+#auth-form:focus,
+[role="dialog"][tabindex="-1"]:focus {
+  outline: none;
+}
+
+:where(a, button, input, textarea, select, summary, [role="button"], [role="tab"], [tabindex]):focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+:where(input, textarea, select):focus-visible {
+  outline: none;
+  border-color: var(--ms-color-line-strong);
+  box-shadow: var(--ms-focus-ring);
+}
+
+:where([role="status"], [role="alert"], .ms-error-text, .error-text, .ms-muted, .muted) {
+  overflow-wrap: anywhere;
+}
+
+:where(section, article, div)[id] {
+  scroll-margin-top: 1rem;
+}
+
+[aria-busy="true"] {
+  cursor: progress;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .ms-icon-button,
+  .ms-button,
+  .ms-composer-icon-button,
+  .ms-message-composer__send,
+  .ms-mobile-nav__link,
+  .ms-chat-header__back,
+  .ms-chat-header__actions button,
+  .ms-contact-tabs button,
+  .ms-settings-page__nav a,
+  .ms-modal__list-item,
+  .ms-member-picker__row,
+  summary {
+    min-block-size: 2.75rem;
+  }
+
+  .ms-icon-button,
+  .ms-composer-icon-button,
+  .ms-message-composer__send,
+  .ms-chat-header__back,
+  .ms-chat-header__actions button {
+    min-inline-size: 2.75rem;
+  }
+
+  .ms-conversation-resizer {
+    display: none;
+  }
+}
+
+
+@media (max-width: 73.75rem) {
+  .ms-settings-card {
+    scroll-margin-top: 4.75rem;
+  }
+}
+
+@media (max-width: 48rem) {
+  .ms-conversation-row__copy strong,
+  .ms-conversation-row__preview,
+  .ms-page-row__copy strong,
+  .ms-page-row__copy span,
+  .ms-settings-row strong,
+  .ms-settings-row span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 48rem) {
+  .ms-page-actions,
+  .ms-button-row {
+    row-gap: 0.625rem;
+  }
+
+  .ms-settings-page__nav,
+  .ms-contact-tabs {
+    scroll-padding-inline: 0.75rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ms-modal,
+  .ms-confirm-dialog,
+  .ms-incoming-call,
+  .ms-call-participants__drawer,
+  .ms-conversation-details {
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px));
+  }
+}
+
+@media (max-width: 36rem) {
+  .ms-confirm-dialog__actions,
+  .ms-modal__actions {
+    gap: 0.5rem;
+  }
+
+  .ms-confirm-dialog__actions .ms-button,
+  .ms-modal__actions .ms-button {
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .ms-notice-banner,
+  .ms-incoming-call-banner,
+  .ms-settings-row,
+  .ms-section-header {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-height: 32rem) and (orientation: landscape) {
+  .ms-modal-backdrop,
+  .ms-overlay {
+    align-items: center;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px)) max(0.5rem, env(safe-area-inset-right, 0px)) max(0.5rem, env(safe-area-inset-bottom, 0px)) max(0.5rem, env(safe-area-inset-left, 0px));
+  }
+
+  .ms-modal,
+  .ms-confirm-dialog,
+  .ms-incoming-call {
+    width: min(42rem, 100%);
+    max-height: calc(100dvh - 1rem);
+    border: 1px solid var(--ms-color-line);
+    border-radius: var(--ms-radius-lg);
+    overflow: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    transition-delay: 0ms;
+  }
+}
+
+@media (forced-colors: active) {
+  .ms-button--primary,
+  .ms-button--danger,
+  .ms-status-pill--strong,
+  .ms-settings-badge,
+  .ms-page-badge--strong {
+    border: 1px solid ButtonText;
+  }
+
+  .ms-desktop-rail__connection--open,
+  .ms-presence-dot,
+  .ms-voice-recorder__live-dot {
+    forced-color-adjust: none;
+  }
+}
+
+/* Touch devices must not depend on hover, right-click, or swipe gestures. */
+@media (hover: none), (pointer: coarse) {
+  .ms-message-actions {
+    opacity: 1;
+    transform: none;
+  }
+
+  .ms-message-actions__button {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+
+  .ms-message-media__actions {
+    opacity: 1;
+  }
+
+  .ms-message-media__actions button,
+  .ms-upload-card__actions button {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+}

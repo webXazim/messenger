@@ -1,0 +1,513 @@
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "../contexts/AuthContext";
+import { useChatSocket } from "../hooks/useChatSocket";
+import { chatApi, normalizeCall, normalizeConversation, normalizeMessage } from "../api/chat";
+import type { Call, Conversation } from "../types/chat";
+import { IncomingCallBanner } from "./IncomingCallBanner";
+import { IncomingCallOverlay } from "./IncomingCallOverlay";
+import { UserAvatar } from "./UserAvatar";
+import { ensureBrowserWebPushRegistration, getLastWebPushPromptAt, getStoredWebPushToken, getWebPushPermissionMessage, getWebPushStatus, rememberWebPushPrompt, showChatActivityNotification } from "../lib/pushNotifications";
+import { isSameUserIdentity } from "../lib/userIdentity";
+import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
+import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
+import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
+import { getRealtimeSyncMarker, mergeChatSync, patchCallCaches, patchConversationCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
+
+
+function getCallActionError(error: unknown, fallback: string) {
+  if (error && typeof error === "object" && "response" in error) {
+    const data = (error as { response?: { data?: unknown } }).response?.data;
+    if (data && typeof data === "object") {
+      const detail = (data as Record<string, unknown>).detail;
+      const call = (data as Record<string, unknown>).call;
+      if (typeof detail === "string") return detail;
+      if (typeof call === "string") return call;
+      if (Array.isArray(call) && call.length) return String(call[0]);
+    }
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
+type MessageToast = {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  title: string;
+  body: string;
+  avatar?: string | null;
+};
+
+export function AppShell() {
+  const { user, logout } = useAuth();
+  const { socket, socketStatus } = useChatSocket();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [incomingCall, setIncomingCall] = useState<Call | null>(null);
+  const [messageToasts, setMessageToasts] = useState<MessageToast[]>([]);
+  const [showCallOverlay, setShowCallOverlay] = useState(false);
+  const [incomingCallAction, setIncomingCallAction] = useState<"accepting" | "declining" | null>(null);
+  const [incomingCallError, setIncomingCallError] = useState<string | null>(null);
+  const [webPushBanner, setWebPushBanner] = useState<{ tone: "warning" | "danger"; message: string; action?: "enable" | "settings" } | null>(null);
+  const previousSocketStatusRef = useRef(socketStatus);
+  const realtimeSyncInFlightRef = useRef(false);
+  const incomingActionInFlightRef = useRef(false);
+  const callActionOwnerRef = useRef("");
+  const callActionChannelRef = useRef<ReturnType<typeof createCallActionChannel> | null>(null);
+  if (!callActionOwnerRef.current) callActionOwnerRef.current = createCallActionOwnerId();
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations"],
+    queryFn: ({ signal }) => chatApi.listConversations(signal),
+    enabled: Boolean(user?.id),
+  });
+  const subscribedConversationIds = useMemo(
+    () => (conversationsQuery.data ?? []).map((conversation) => conversation.id).sort(),
+    [conversationsQuery.data],
+  );
+  const subscribedConversationKey = subscribedConversationIds.join("|");
+
+  useEffect(() => {
+    const channel = createCallActionChannel((event: CallCoordinationEvent) => {
+      if (event.ownerId === callActionOwnerRef.current) return;
+      setIncomingCall((current) => {
+        if (!current || current.id !== event.callId) return current;
+        if (["accepted", "declined", "cleared"].includes(event.action)) {
+          setShowCallOverlay(false);
+          setIncomingCallAction(null);
+          setIncomingCallError(null);
+          return null;
+        }
+        if (event.action === "released") {
+          setIncomingCallAction(null);
+          setIncomingCallError(null);
+          return current;
+        }
+        setIncomingCallAction(event.action === "accepting" ? "accepting" : "declining");
+        setIncomingCallError("This call is being handled in another browser tab.");
+        return current;
+      });
+    });
+    callActionChannelRef.current = channel;
+    return () => {
+      channel.close();
+      callActionChannelRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncBrowserPush(interactive = false) {
+      const status = await getWebPushStatus().catch(() => null);
+      if (!status || cancelled || !status.supported || !status.configured) return;
+
+      if (status.permission === "denied") {
+        if (!cancelled) {
+          setWebPushBanner({
+            tone: "danger",
+            message: getWebPushPermissionMessage("denied"),
+            action: "settings",
+          });
+        }
+        return;
+      }
+
+      const token = await ensureBrowserWebPushRegistration({ interactive }).catch((error) => {
+        if (!cancelled && interactive) {
+          const message = error instanceof Error ? error.message : "Unable to enable notifications in this browser.";
+          setWebPushBanner({
+            tone: message.toLowerCase().includes("blocked") || message.toLowerCase().includes("denied") ? "danger" : "warning",
+            message,
+            action: message.toLowerCase().includes("blocked") || message.toLowerCase().includes("denied") ? "settings" : "enable",
+          });
+        }
+        return "";
+      });
+
+      const resolvedToken = token || getStoredWebPushToken();
+      if (!resolvedToken) {
+        if (!cancelled && status.permission === "default") {
+          const lastPromptAt = getLastWebPushPromptAt();
+          const recentlyPrompted = lastPromptAt && Date.now() - lastPromptAt < 12 * 60 * 60 * 1000;
+          if (!recentlyPrompted) {
+            setWebPushBanner({
+              tone: "warning",
+              message: "Turn on notifications to receive every new message and incoming call alert on the web.",
+              action: "enable",
+            });
+          }
+        }
+        return;
+      }
+
+      await chatApi.registerDevice({ platform: "web", push_token: resolvedToken }).catch(() => undefined);
+      if (!cancelled) {
+        setWebPushBanner(null);
+      }
+    }
+
+    if (!user?.id) return;
+    void syncBrowserPush(false);
+
+    const refreshOnFocus = () => {
+      void syncBrowserPush(false);
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const conversationIds = subscribedConversationKey ? subscribedConversationKey.split("|") : [];
+    conversationIds.forEach((conversationId) => socket.subscribeToConversation(conversationId));
+    return () => { conversationIds.forEach((conversationId) => socket.unsubscribeFromConversation(conversationId)); };
+  }, [socket, subscribedConversationKey]);
+
+  useEffect(() => {
+    const userId = String(user?.id || "");
+    if (!userId) return;
+    let cancelled = false;
+
+    const reconcileMissedRealtimeChanges = async () => {
+      if (realtimeSyncInFlightRef.current) return;
+      realtimeSyncInFlightRef.current = true;
+      try {
+        const payload = await chatApi.sync({ since: getRealtimeSyncMarker(userId), limit: 200 });
+        if (cancelled) return;
+        mergeChatSync(queryClient, payload);
+        const pendingIncoming = payload.active_calls.find((call) => {
+          if (!call || isSameUserIdentity(call.initiated_by, user)) return false;
+          const participant = call.participants?.find((item) => isSameUserIdentity(item.user, user));
+          return ["initiated", "ringing", "ongoing"].includes(call.status) && participant?.state === "ringing";
+        });
+        if (pendingIncoming && !location.pathname.startsWith(`/calls/${pendingIncoming.id}`)) {
+          setIncomingCall(pendingIncoming);
+          setIncomingCallError(null);
+          setIncomingCallAction(null);
+          setShowCallOverlay(!/^\/calls\/[^/]+\/?$/.test(location.pathname));
+        }
+        setRealtimeSyncMarker(userId, payload.next_since || payload.server_time);
+        if (payload.has_more_conversations) {
+          await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        }
+        if (payload.has_more_messages) {
+          await queryClient.invalidateQueries({ queryKey: ["messages"] });
+        }
+        await queryClient.invalidateQueries({ queryKey: ["recent-calls"] });
+      } catch {
+        if (!cancelled) {
+          await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          await queryClient.invalidateQueries({ queryKey: ["recent-calls"] });
+        }
+      } finally {
+        realtimeSyncInFlightRef.current = false;
+      }
+    };
+
+    if (socketStatus === "open" && previousSocketStatusRef.current !== "open") {
+      void reconcileMissedRealtimeChanges();
+    }
+    previousSocketStatusRef.current = socketStatus;
+    return () => { cancelled = true; };
+  }, [location.pathname, queryClient, socketStatus, user]);
+
+  const dismissMessageToast = (toastId: string) => {
+    setMessageToasts((current) => current.filter((toast) => toast.id !== toastId));
+  };
+
+  const pushMessageToast = (toast: MessageToast) => {
+    setMessageToasts((current) => [toast, ...current.filter((item) => item.id !== toast.id)].slice(0, 4));
+    window.setTimeout(() => dismissMessageToast(toast.id), 6000);
+  };
+
+  useEffect(() => {
+    const seenNotificationKeys = new Set<string>();
+    const unsubscribe = socket.subscribe((payload) => {
+      if (payload.event === "presence.updated") {
+        const userId = String(payload.data?.user_id || "");
+        if (!userId) return;
+        const data = (payload.data || {}) as Record<string, unknown>;
+        patchUserPresenceAcrossCaches(queryClient, userId, data);
+        return;
+      }
+      if (payload.event === "e2ee.keys.updated") {
+        const conversationId = String(payload.data?.conversation_id || "");
+        if (conversationId) {
+          void queryClient.invalidateQueries({ queryKey: ["conversation-e2ee", conversationId] });
+          queryClient.setQueryData<Conversation>(["conversation", conversationId], (current) => current ? {
+            ...current,
+            e2ee_key_version: Number(payload.data?.key_version || current.e2ee_key_version || 1),
+            e2ee_rekey_required: Boolean(payload.data?.rekey_required),
+          } : current);
+        }
+        void queryClient.invalidateQueries({ queryKey: ["e2ee-devices"] });
+        if (String(payload.data?.user_id || "") === String(user?.id || "")) {
+          void queryClient.invalidateQueries({ queryKey: ["e2ee-identity", String(user?.id || "")] });
+        }
+        return;
+      }
+      const eventKey = payload.event_id || `${payload.event}:${String(payload.data?.conversation_id || "")}:${String(payload.data?.message_id || payload.data?.id || payload.data?.call_id || "")}:${String(payload.occurred_at || "")}`;
+      if (seenNotificationKeys.has(eventKey)) return;
+      seenNotificationKeys.add(eventKey);
+      if (seenNotificationKeys.size > 120) {
+        const [first] = seenNotificationKeys;
+        if (first) seenNotificationKeys.delete(first);
+      }
+
+      if (["call.started", "call.created", "call.accepted", "call.ended", "call.declined", "call.missed", "call.failed"].includes(payload.event)) {
+        const callPayload = normalizeCall(payload.data || {});
+        if (callPayload.id) patchCallCaches(queryClient, callPayload);
+      }
+      if (["call.ended", "call.declined", "call.missed", "call.failed"].includes(payload.event)) {
+        if (String(payload.data?.id || payload.data?.call_id || "") === incomingCall?.id) {
+          clearIncoming();
+        }
+        return;
+      }
+      if (payload.event === "call.accepted" && String(payload.data?.id || payload.data?.call_id || "") === incomingCall?.id) {
+        const answeredBy = payload.data?.answered_by && typeof payload.data.answered_by === "object"
+          ? payload.data.answered_by as Record<string, unknown>
+          : null;
+        if (answeredBy && isSameUserIdentity(answeredBy, user)) clearIncoming();
+        return;
+      }
+      if (payload.event === "conversation.updated") {
+        const conversation = normalizeConversation(payload.data || {});
+        if (conversation.id) patchConversationCaches(queryClient, conversation);
+        return;
+      }
+      if (payload.event === "message.created" || payload.event === "message.updated" || payload.event === "message.deleted") {
+        const message = normalizeMessage(payload.data || {});
+        const conversationId = String(message.conversation_id || payload.data?.conversation_id || payload.data?.conversation || "");
+        if (conversationId && message.id) patchMessageCache(queryClient, conversationId, message);
+      }
+      if (payload.event === "message.created") {
+        const sender = payload.data?.sender && typeof payload.data.sender === "object" ? (payload.data.sender as Record<string, unknown>) : null;
+        const senderName =
+          sender
+            ? String(sender.display_name || sender.username || "New message")
+            : "New message";
+        const conversationId = String(payload.data?.conversation_id || "");
+        const messageId = String(payload.data?.id || payload.data?.message_id || "");
+        const chatIsOpen = conversationId && location.pathname.startsWith(`/chat/${conversationId}`) && document.visibilityState === "visible";
+        if (sender && !isSameUserIdentity(sender, user)) {
+          if (chatIsOpen) return;
+          const body = String(payload.data?.text || (Array.isArray(payload.data?.attachments) && payload.data.attachments.length ? "Sent an attachment" : "New chat activity"));
+          pushMessageToast({
+            id: `message:${conversationId}:${messageId}`,
+            conversationId,
+            messageId,
+            title: senderName,
+            body,
+            avatar: typeof sender.avatar === "string" ? sender.avatar : null,
+          });
+          void showChatActivityNotification({
+            title: senderName,
+            body,
+            tag: `message:${conversationId}:${messageId}`,
+            data: {
+              conversation_id: conversationId,
+              message_id: messageId,
+            },
+          }).catch(() => undefined);
+        }
+      }
+      if (payload.event !== "call.started" && payload.event !== "call.created") return;
+      const callId = String(payload.data?.call_id || payload.data?.id || "");
+      if (!callId) return;
+      void chatApi.getCall(callId).then((call) => {
+        if (call.status === "ringing" && !isSameUserIdentity(call.initiated_by, user)) {
+          void showChatActivityNotification({
+            title: `${call.initiated_by?.display_name || call.initiated_by?.username || "Someone"} is calling`,
+            body: `${call.call_type === "video" ? "Video" : "Voice"} call incoming`,
+            tag: `call:${call.id}`,
+            data: { call_id: call.id, conversation_id: String(call.conversation || "") },
+          }).catch(() => undefined);
+          setIncomingCall(call);
+          setIncomingCallError(null);
+          setIncomingCallAction(null);
+          setShowCallOverlay(!/^\/calls\/[^/]+\/?$/.test(location.pathname));
+        }
+      }).catch(() => undefined);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [incomingCall?.id, location.pathname, queryClient, socket, user?.id]);
+
+  const clearIncoming = () => {
+    setIncomingCall(null);
+    setShowCallOverlay(false);
+    setIncomingCallAction(null);
+    setIncomingCallError(null);
+  };
+
+  const handleIncomingCallAction = async (action: "accept" | "decline") => {
+    const call = incomingCall;
+    if (!call || incomingActionInFlightRef.current) return;
+    const ownerId = callActionOwnerRef.current;
+    if (!claimCallAction(call.id, ownerId)) {
+      setIncomingCallError("This call is already being handled in another browser tab.");
+      return;
+    }
+
+    incomingActionInFlightRef.current = true;
+    const pendingAction = action === "accept" ? "accepting" : "declining";
+    setIncomingCallAction(pendingAction);
+    setIncomingCallError(null);
+    callActionChannelRef.current?.publish({ callId: call.id, action: pendingAction, ownerId, occurredAt: Date.now() });
+
+    let mediaReady = action !== "accept";
+    try {
+      if (action === "accept") {
+        await preflightCallMedia(call.call_type);
+        mediaReady = true;
+      }
+      const updatedCall = action === "accept"
+        ? await chatApi.acceptCall(call.id)
+        : await chatApi.declineCall(call.id, "declined_from_incoming_call");
+      patchCallCaches(queryClient, updatedCall);
+      callActionChannelRef.current?.publish({
+        callId: call.id,
+        action: action === "accept" ? "accepted" : "declined",
+        ownerId,
+        occurredAt: Date.now(),
+      });
+      clearIncoming();
+      if (action === "accept") navigate(`/calls/${call.id}`);
+    } catch (error) {
+      const message = action === "accept" && !mediaReady
+        ? await getCallMediaErrorMessage(error, call.call_type)
+        : getCallActionError(error, action === "accept" ? "The call could not be answered." : "The call could not be declined.");
+      setIncomingCallError(message);
+      setShowCallOverlay(true);
+      callActionChannelRef.current?.publish({ callId: call.id, action: "released", ownerId, occurredAt: Date.now() });
+    } finally {
+      releaseCallAction(call.id, ownerId);
+      incomingActionInFlightRef.current = false;
+      setIncomingCallAction(null);
+    }
+  };
+
+  const enableWebPushFromBanner = async () => {
+    rememberWebPushPrompt();
+    try {
+      const token = await ensureBrowserWebPushRegistration({ interactive: true });
+      const resolvedToken = token || getStoredWebPushToken();
+      if (!resolvedToken) throw new Error("This browser did not return a web push token.");
+      await chatApi.registerDevice({ platform: "web", push_token: resolvedToken });
+      setWebPushBanner(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to enable notifications in this browser.";
+      setWebPushBanner({
+        tone: message.toLowerCase().includes("blocked") || message.toLowerCase().includes("denied") ? "danger" : "warning",
+        message,
+        action: message.toLowerCase().includes("blocked") || message.toLowerCase().includes("denied") ? "settings" : "enable",
+      });
+    }
+  };
+
+  const userLabel = user?.profile?.display_name || user?.full_name || user?.username || "You";
+  const isFocusedChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
+  const isCallRoom = /^\/calls\/[^/]+\/?$/.test(location.pathname);
+  return (
+    <div
+      className={[
+        "ms-ui ms-app-shell",
+        isFocusedChat ? "ms-app-shell--focused-chat" : "",
+        isCallRoom ? "ms-app-shell--call-room" : "",
+      ].filter(Boolean).join(" ")}
+    >
+      <a className="ms-skip-link" href="#main-content">Skip to main content</a>
+      {!isCallRoom ? (
+        <DesktopNavigationRail userLabel={userLabel} userAvatar={user?.profile?.avatar} socketStatus={socketStatus} onLogout={logout} />
+      ) : null}
+      <main id="main-content" className="ms-app-main" tabIndex={-1}>
+        {webPushBanner ? (
+          <div className={`ms-notice-banner ms-notice-banner--${webPushBanner.tone === "danger" ? "danger" : "warning"}`} role="status">
+            <div className="ms-notice-banner__copy">
+              <strong>{webPushBanner.tone === "danger" ? "Notifications blocked" : "Enable notifications"}</strong>
+              <div className="ms-muted">{webPushBanner.message}</div>
+            </div>
+            <div className="ms-button-row">
+              {webPushBanner.action === "enable" ? (
+                <button type="button" className="ms-button ms-button--primary ms-button--compact" onClick={() => void enableWebPushFromBanner()}>
+                  Turn on notifications
+                </button>
+              ) : null}
+              <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => navigate("/settings")}>
+                Open settings
+              </button>
+              <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => setWebPushBanner(null)}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {incomingCall && !showCallOverlay ? (
+          <IncomingCallBanner
+            call={incomingCall}
+            action={incomingCallAction}
+            error={incomingCallError}
+            onOpen={() => setShowCallOverlay(true)}
+            onDecline={() => void handleIncomingCallAction("decline")}
+            onAccept={() => void handleIncomingCallAction("accept")}
+          />
+        ) : null}
+        <div className="ms-app-stage">
+          <div className="ms-app-stage__main">
+            <Outlet />
+          </div>
+        </div>
+      </main>
+      {!isFocusedChat && !isCallRoom ? <MobileBottomNavigation /> : null}
+      {incomingCall && showCallOverlay ? (
+        <IncomingCallOverlay
+          call={incomingCall}
+          action={incomingCallAction}
+          error={incomingCallError}
+          onMinimize={() => setShowCallOverlay(false)}
+          onDecline={() => void handleIncomingCallAction("decline")}
+          onAccept={() => void handleIncomingCallAction("accept")}
+        />
+      ) : null}
+      {messageToasts.length ? (
+        <div className="ms-toast-stack" role="status" aria-live="polite">
+          {messageToasts.map((toast) => (
+            <article key={toast.id} className="ms-toast">
+              <button
+                type="button"
+                className="ms-toast__open"
+                onClick={() => {
+                  dismissMessageToast(toast.id);
+                  if (toast.conversationId) navigate(`/chat/${toast.conversationId}`);
+                }}
+              >
+                <UserAvatar person={{ display_name: toast.title, avatar: toast.avatar }} size="sm" className="ms-toast__avatar" decorative />
+                <span className="ms-toast__copy">
+                  <strong>{toast.title}</strong>
+                  <span>{toast.body}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="ms-toast__close"
+                aria-label="Dismiss message notification"
+                onClick={() => dismissMessageToast(toast.id)}
+              >
+                ×
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}

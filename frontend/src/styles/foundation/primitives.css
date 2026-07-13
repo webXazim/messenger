@@ -1,0 +1,151 @@
+/* Reusable controls and utility classes shared across messenger surfaces. */
+.ms-icon-button {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--ms-radius-sm);
+  background: transparent;
+  color: var(--ms-color-ink-muted);
+  transition:
+    background-color var(--ms-transition-fast),
+    border-color var(--ms-transition-fast),
+    color var(--ms-transition-fast);
+}
+
+.ms-icon-button:hover {
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-icon-button:focus-visible,
+.ms-button:focus-visible,
+.ms-field:focus-visible,
+.ms-modal__list-item:focus-visible,
+.ms-member-picker__row:focus-visible,
+.ms-toast__open:focus-visible,
+.ms-toast__close:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+
+.ms-button {
+  min-block-size: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ms-space-2);
+  padding-inline: var(--ms-space-4);
+  border: 1px solid var(--ms-color-line-strong);
+  border-radius: var(--ms-radius-sm);
+  background: var(--ms-color-surface);
+  color: var(--ms-color-ink);
+  font-weight: 700;
+  transition:
+    background-color var(--ms-transition-fast),
+    border-color var(--ms-transition-fast),
+    color var(--ms-transition-fast),
+    opacity var(--ms-transition-fast);
+}
+
+.ms-button:hover:not(:disabled) {
+  background: var(--ms-color-surface-subtle);
+}
+
+.ms-button--primary {
+  border-color: var(--ms-color-ink);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
+}
+
+.ms-button--primary:hover:not(:disabled) {
+  background: #000000;
+}
+
+.ms-button--ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.ms-button--compact {
+  min-block-size: 2.125rem;
+  padding-inline: var(--ms-space-3);
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-button--inverse {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #111111;
+}
+
+.ms-button--inverse-ghost {
+  border-color: rgb(255 255 255 / 0.2);
+  background: transparent;
+  color: #ffffff;
+}
+
+.ms-button--inverse-ghost:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.1);
+}
+
+.ms-button-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--ms-space-2);
+}
+
+.ms-button-row--center {
+  justify-content: center;
+}
+
+.ms-button:disabled,
+.ms-icon-button:disabled {
+  opacity: 0.48;
+}
+
+.ms-field {
+  inline-size: 100%;
+  min-block-size: 2.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--ms-radius-sm);
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-surface {
+  min-width: 0;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-lg);
+  background: var(--ms-color-surface);
+}
+
+.ms-muted,
+.muted {
+  color: var(--ms-color-ink-muted);
+}
+
+.ms-error-text,
+.error-text {
+  color: var(--ms-color-danger);
+  font-size: var(--ms-font-size-xs);
+  line-height: 1.5;
+}
+
+.ms-text-center {
+  text-align: center;
+}
+
+.ms-page-loading {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--ms-space-6);
+  background: var(--ms-color-canvas);
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-sm);
+}

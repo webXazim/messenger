@@ -1,0 +1,51 @@
+{
+  "name": "crescentsphere-messenger-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc -b --pretty false",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test:call": "tsc -p tsconfig.call-tests.json && node scripts/patch-call-test-imports.mjs && node scripts/test-call-ui.mjs && node scripts/check-call-source.mjs && node scripts/check-call-integration-source.mjs",
+    "check:call": "npm run typecheck && npm run test:call",
+    "test:auth": "node scripts/check-auth-source.mjs",
+    "check:auth": "npm run typecheck && npm run test:auth",
+    "test:e2ee": "node scripts/check-e2ee-source.mjs",
+    "check:e2ee": "npm run typecheck && npm run test:e2ee",
+    "test:realtime": "node scripts/check-realtime-source.mjs",
+    "check:realtime": "npm run typecheck && npm run test:realtime",
+    "test:pagination": "tsc -p tsconfig.pagination-tests.json && node scripts/test-pagination.mjs && node scripts/check-pagination-source.mjs",
+    "check:pagination": "npm run typecheck && npm run test:pagination",
+    "test:timeline": "tsc -p tsconfig.timeline-tests.json && node scripts/test-message-timeline.mjs && node scripts/check-message-lifecycle-source.mjs",
+    "check:timeline": "npm run typecheck && npm run test:timeline",
+    "test:composer-media": "tsc -p tsconfig.upload-tests.json && node scripts/test-upload-policy.mjs && node scripts/check-composer-media-source.mjs",
+    "check:composer-media": "npm run typecheck && npm run test:composer-media",
+    "test:navigation": "tsc -p tsconfig.navigation-tests.json && node scripts/patch-navigation-test-imports.mjs && node scripts/test-conversation-navigation.mjs && node scripts/check-navigation-source.mjs",
+    "check:navigation": "npm run typecheck && npm run test:navigation",
+    "test:contacts-groups": "tsc -p tsconfig.contacts-groups-tests.json && node scripts/test-contacts-groups.mjs && node scripts/check-contacts-groups-source.mjs",
+    "check:contacts-groups": "npm run typecheck && npm run test:contacts-groups",
+    "test:settings": "node scripts/check-settings-source.mjs",
+    "check:settings": "npm run typecheck && npm run test:settings",
+    "test:accessibility": "node scripts/check-accessibility-source.mjs",
+    "check:accessibility": "npm run typecheck && npm run test:accessibility",
+    "test:product": "npm run test:auth && npm run test:e2ee && npm run test:realtime && npm run test:pagination && npm run test:timeline && npm run test:composer-media && npm run test:navigation && npm run test:contacts-groups && npm run test:settings && npm run test:accessibility && npm run test:call",
+    "check:product": "npm run typecheck && npm run test:product && npm run build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.59.0",
+    "axios": "^1.7.7",
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^5.6.2",
+    "vite": "^8.1.4"
+  }
+}

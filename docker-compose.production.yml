@@ -1,0 +1,53 @@
+services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./secrets/tls:/etc/nginx/tls:ro
+      - ./nginx/cloudflare-real-ip.conf:/etc/nginx/snippets/cloudflare-real-ip.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets/app:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget --no-check-certificate --header='Host: ${APP_DOMAIN}' -q -O /dev/null
+          https://127.0.0.1/api/v1/health/live/ || exit 1
+      interval: 20s
+      timeout: 8s
+      retries: 10
+      start_period: 20s
+
+  turn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    command:
+      - --log-file=stdout
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SHARED_SECRET}
+      - --realm=${TURN_REALM}
+      - --external-ip=${TURN_EXTERNAL_IP}
+      - --listening-ip=0.0.0.0
+      - --relay-ip=0.0.0.0
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --listening-port=3478
+      - --min-port=${TURN_RELAY_MIN_PORT:-49160}
+      - --max-port=${TURN_RELAY_MAX_PORT:-49200}
+      - --total-quota=${TURN_TOTAL_QUOTA:-1200}
+      - --user-quota=${TURN_USER_QUOTA:-12}
+      - --stale-nonce=600
+      - --no-multicast-peers
+      - --no-loopback-peers
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "${TURN_RELAY_MIN_PORT:-49160}-${TURN_RELAY_MAX_PORT:-49200}:${TURN_RELAY_MIN_PORT:-49160}-${TURN_RELAY_MAX_PORT:-49200}/udp"
+    networks: [messenger]
