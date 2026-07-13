@@ -83,9 +83,51 @@ and do not attach a public custom domain to chat media.
 
 ```bash
 cp .env.production.example .env
+chmod 600 .env
 ```
 
-Replace every placeholder. At minimum, configure:
+The production template is configured for this deployment:
+
+- application URL: `https://crescentsphere.com`
+- Droplet: `159.203.29.80`
+- standalone local authentication with HS256 JWTs
+- no central authentication, payments, or admin service
+- private Cloudflare R2 bucket: `mepia`
+- Resend SMTP on `smtp.resend.com:587`
+- DNS-only TURN endpoint: `turn.crescentsphere.com:3478`
+
+Before editing `.env`, verify `crescentsphere.com` in Resend and create a
+Resend API key with sending access. In Cloudflare R2, create an API token with
+Object Read & Write access limited to the `mepia` bucket. Never use the global
+Cloudflare API key.
+
+Replace each `REQUIRED_*` value. Generate a different value for every local
+secret with:
+
+```bash
+openssl rand -base64 72
+```
+
+Use independent generated values for `SECRET_KEY`, `DB_PASSWORD`,
+`TURN_SHARED_SECRET`, and `AUTH_PAYMENT_JWT_SIGNING_KEY`. Set the external
+credentials from the provider dashboards:
+
+```env
+CLOUDFLARE_R2_ACCOUNT_ID=<Cloudflare account ID>
+CLOUDFLARE_R2_ACCESS_KEY_ID=<R2 token access key ID>
+CLOUDFLARE_R2_SECRET_ACCESS_KEY=<R2 token secret access key>
+EMAIL_HOST_PASSWORD=<Resend API key beginning with re_>
+```
+
+Confirm no placeholders remain:
+
+```bash
+grep -n 'REQUIRED_' .env
+```
+
+That command must produce no output.
+
+Also confirm or configure:
 
 - application domain, HTTPS origins, and Droplet public IP
 - independent Django, database, JWT, TURN, and admin secrets

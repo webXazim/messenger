@@ -33,8 +33,8 @@ warnings=()
 require_value() {
   local name="$1" value
   value="$(read_env "$name")"
-  if [[ -z "$value" || "$value" == *replace-me* || "$value" == *example.com* || "$value" == "203.0.113.10" ]]; then
-    failures+=("$name is missing or still contains an example value")
+  if [[ -z "$value" || "$value" == REQUIRED_* || "$value" == *replace-me* || "$value" == *replace-with* || "$value" == *example.com* || "$value" == "203.0.113.10" ]]; then
+    failures+=("$name is missing or still contains a placeholder value")
   fi
 }
 
