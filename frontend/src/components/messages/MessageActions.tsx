@@ -161,6 +161,7 @@ export function MessageActions({
           ) : null}
           <div className="ms-message-actions__items">
             {canInteract ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onReply(message))}>Reply</button> : null}
+            {canInteract && message.text ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => { void navigator.clipboard.writeText(message.text); })}>Copy</button> : null}
             {canForward ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onForward(message))}>Forward</button> : null}
             {own && canInteract ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onEdit(message))}>Edit</button> : null}
             {own ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onDelete(message))}>Delete</button> : null}

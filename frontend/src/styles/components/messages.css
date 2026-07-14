@@ -24,6 +24,11 @@
   margin-top: -0.15rem;
 }
 
+.ms-message-row.is-selected {
+  background: rgb(17 17 17 / 0.055);
+  box-shadow: inset 0.1875rem 0 0 var(--ms-color-ink);
+}
+
 .ms-message-avatar {
   width: 1.75rem;
   height: 1.75rem;
@@ -1168,13 +1173,19 @@ button.ms-message-reply:hover {
   }
 
   .ms-message-actions__menu.is-mobile .ms-message-actions__items {
-    width: min(14rem, calc(100vw - 2rem));
-    margin: 0.5rem auto 0;
-    padding: 0.35rem;
+    position: fixed;
+    right: 0.5rem;
+    bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+    left: 0.5rem;
+    width: auto;
+    margin: 0;
+    padding: 0.25rem;
     border: 1px solid var(--ms-color-line);
-    border-radius: 0.875rem;
+    border-radius: 0.75rem;
     background: var(--ms-color-surface);
-    box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.16);
+    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.14);
+    grid-template-columns: repeat(auto-fit, minmax(3.25rem, 1fr));
+    z-index: 1001;
   }
 
   .ms-message-actions__items {
@@ -1182,7 +1193,9 @@ button.ms-message-reply:hover {
   }
 
   .ms-message-actions__items button {
-    min-height: 2.75rem;
+    min-height: 2.5rem;
+    padding-inline: 0.25rem;
+    font-size: 0.6875rem;
     text-align: center;
   }
 

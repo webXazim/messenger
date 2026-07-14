@@ -99,6 +99,10 @@ export function MessageComposer({
   const resizeTextarea = () => {
     const textarea = textareaRef.current;
     if (!textarea) return;
+    if (window.matchMedia("(max-width: 720px)").matches) {
+      textarea.style.height = "";
+      return;
+    }
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
   };

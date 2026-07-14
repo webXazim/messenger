@@ -157,7 +157,7 @@ export function MessageBubble({
   };
 
   return (
-    <div className={`ms-message-row ${own ? "ms-message-row--own" : "ms-message-row--incoming"} ${grouped ? "is-grouped" : ""}`}>
+    <div className={`ms-message-row ${own ? "ms-message-row--own" : "ms-message-row--incoming"} ${grouped ? "is-grouped" : ""} ${showContextMenu ? "is-selected" : ""}`}>
       <span className={`ms-message-gesture ${Math.abs(swipeOffset) > 36 ? "is-visible" : ""}`} aria-hidden="true">↩</span>
       {showAvatar ? <UserAvatar person={message.sender} size="xs" className={`ms-message-avatar ${grouped ? "is-hidden" : ""}`} decorative /> : null}
       <div className={`ms-message-stack ${richOnly ? "ms-message-stack--rich-only" : ""} ${hasRichContent ? "has-rich-content" : ""}`} style={{ transform: `translateX(${swipeOffset}px)` }}>
