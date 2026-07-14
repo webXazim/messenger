@@ -19,7 +19,7 @@ function PlayIcon() {
 function LazyVideo({ attachment, src, posterSrc, currentUserId }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string }) {
   const [playbackRequested, setPlaybackRequested] = useState(false);
   if (playbackRequested) {
-    return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} />;
+    return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} autoPlay />;
   }
   return (
     <button type="button" className="ms-message-media__video-poster" onClick={() => setPlaybackRequested(true)} aria-label={`Play ${attachment.original_name}`}>

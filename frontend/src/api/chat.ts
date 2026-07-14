@@ -953,7 +953,15 @@ export const chatApi = {
     });
     const payload = unwrapData<unknown>(response.data);
     const item = asRecord(payload);
-    return { id: firstString(item.id, item.upload_id), localThumbnail };
+    return {
+      id: firstString(item.id, item.upload_id),
+      localThumbnail,
+      mediaKind: extracted.media_kind,
+      width: extracted.width,
+      height: extracted.height,
+      rotation: extracted.rotation,
+      durationSeconds: extracted.duration_seconds ? Number(extracted.duration_seconds) : undefined,
+    };
   },
   async listCalls(status?: string, signal?: AbortSignal) {
     const items = await collectChatPages("/chat/calls/recent/", normalizeCall, {

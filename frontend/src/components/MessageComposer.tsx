@@ -4,7 +4,7 @@ import { readConversationDraft, removeConversationDraft, writeConversationDraft 
 import type { Message } from "../types/chat";
 import { ComposerContext } from "./composer/ComposerContext";
 import { UploadQueue } from "./composer/UploadQueue";
-import type { ComposerUploadRequestOptions, PendingComposerUpload } from "./composer/types";
+import type { ComposerUploadRequestOptions, ComposerUploadResult, PendingComposerUpload } from "./composer/types";
 import { uploadPolicyFromCapabilities, validateComposerUpload, type ComposerUploadPolicy } from "./composer/uploadPolicy";
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
 import type { VoiceNotePayload } from "./VoiceNoteRecorder";
@@ -64,7 +64,7 @@ export function MessageComposer({
   onSendVoiceNote,
   disabledReason,
 }: {
-  onUpload: (file: File, options: ComposerUploadRequestOptions) => Promise<string>;
+  onUpload: (file: File, options: ComposerUploadRequestOptions) => Promise<ComposerUploadResult>;
   onDiscardUpload?: (uploadId: string) => void;
   onSend: (payload: Record<string, unknown>) => Promise<void>;
   onSendVoiceNote: (payload: VoiceNotePayload) => Promise<void>;
@@ -180,7 +180,7 @@ export function MessageComposer({
       : item));
 
     try {
-      const uploadId = await onUpload(target.file, {
+      const upload = await onUpload(target.file, {
         signal: controller.signal,
         onProgress: (progress) => {
           setPendingUploads((current) => current.map((item) => item.localId === localId
@@ -190,7 +190,17 @@ export function MessageComposer({
       });
       if (controller.signal.aborted) return;
       setPendingUploads((current) => current.map((item) => item.localId === localId
-        ? { ...item, status: "uploaded", uploadId, progress: 100 }
+        ? {
+            ...item,
+            status: "uploaded",
+            uploadId: upload.uploadId,
+            mediaKind: upload.mediaKind,
+            width: upload.width,
+            height: upload.height,
+            rotation: upload.rotation,
+            durationSeconds: upload.durationSeconds,
+            progress: 100,
+          }
         : item));
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -290,6 +300,10 @@ export function MessageComposer({
           mime_type: item.file.type || "application/octet-stream",
           media_kind: item.file.type.startsWith("video/") ? "video" : item.file.type.startsWith("image/") ? "image" : item.file.type.startsWith("audio/") ? "audio" : "file",
           size: item.file.size,
+          width: item.width,
+          height: item.height,
+          rotation: item.rotation,
+          duration_seconds: item.durationSeconds,
           file_url: item.previewUrl,
           preview_url: item.previewUrl,
           thumbnail_url: item.file.type.startsWith("image/") ? item.previewUrl : null,

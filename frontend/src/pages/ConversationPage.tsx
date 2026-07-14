@@ -1721,7 +1721,14 @@ export function ConversationPage() {
             uploadPolicy={composerUploadPolicy}
             onUpload={async (file, options) => {
               const upload = await uploadConversationAttachment(file, undefined, options);
-              return upload.id;
+              return {
+                uploadId: upload.id,
+                mediaKind: upload.mediaKind,
+                width: upload.width,
+                height: upload.height,
+                rotation: upload.rotation,
+                durationSeconds: upload.durationSeconds,
+              };
             }}
             onDiscardUpload={(uploadId) => {
               delete encryptedAttachmentUploadsRef.current[uploadId];

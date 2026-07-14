@@ -36,6 +36,7 @@ assert.ok(conversation.includes("previewBlob: encryptedPreview"), "Encrypted att
 assert.ok(conversation.includes("_optimistic_attachments"), "Optimistic messages discard attachment media metadata.");
 assert.match(composer, /setPendingUploads\(\[\]\);[\s\S]*setText\(""\);[\s\S]*await onSend/, "The composer attachment preview is not cleared at the optimistic send handoff.");
 assert.ok(composer.includes("_optimistic_attachments: optimisticAttachments"), "The composer does not hand its visual attachment metadata to the inline optimistic message.");
+assert.ok(composer.includes("width: item.width") && composer.includes("height: item.height"), "Optimistic media does not preserve the final attachment aspect ratio.");
 assert.ok(conversation.includes("await sendMutation.mutateAsync(nextPayload)"), "Composer send failures are still swallowed.");
 assert.ok(voice.includes("clientTempId"), "Voice-note retry cannot reuse its optimistic message identity.");
 assert.match(voice, /shouldDiscard \|\| chunks\.length === 0[\s\S]*setSending\(false\)/, "Empty or discarded voice recordings can leave the composer stuck in a sending state.");
@@ -44,6 +45,7 @@ assert.ok(media.includes('preload="metadata"'), "Video/audio still preload the c
 assert.ok(media.includes("decryptAttachmentPreview"), "Encrypted attachment previews are not decrypted independently of full media.");
 assert.ok(mediaMessage.includes("useState(false)"), "Video playback is still requested before the user presses play.");
 assert.ok(mediaMessage.includes("AuthenticatedAttachmentPreview"), "Video poster rendering does not use the encrypted preview payload.");
+assert.ok(mediaMessage.includes("currentUserId={currentUserId} autoPlay"), "The poster play action does not start video playback directly.");
 assert.ok(views.includes("StreamingHttpResponse"), "Media byte-range responses are missing.");
 assert.ok(views.includes('status=206'), "Media byte-range requests do not return partial content.");
 assert.ok(views.includes('status=416'), "Invalid media ranges are not rejected correctly.");

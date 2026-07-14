@@ -395,7 +395,7 @@ export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; cl
   },
 );
 
-export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string }) {
+export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId, autoPlay = false }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string; autoPlay?: boolean }) {
   const { resolvedSrc, failed, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
   const posterMedia = useAuthenticatedMediaUrl(posterSrc || "", undefined, currentUserId);
   const localPosterSrc = useLocalMediaPreview(attachment, currentUserId);
@@ -413,10 +413,14 @@ export function AuthenticatedVideo({ src, posterSrc, className, attachment, curr
       src={resolvedSrc || undefined}
       poster={posterMedia.resolvedSrc || localPosterSrc || undefined}
       controls
+      autoPlay={autoPlay}
       playsInline
       preload={resolvedSrc ? "metadata" : "none"}
       onLoadedData={() => setFrameReady(true)}
-      onCanPlay={() => setFrameReady(true)}
+      onCanPlay={(event) => {
+        setFrameReady(true);
+        if (autoPlay) void event.currentTarget.play().catch(() => undefined);
+      }}
       onError={() => setFailed(true)}
     />
   );
