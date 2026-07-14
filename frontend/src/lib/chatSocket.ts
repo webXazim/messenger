@@ -184,6 +184,7 @@ export class ChatSocket {
 
   private startHeartbeat() {
     this.stopHeartbeat();
+    this.send({ event: "presence.ping", data: {} });
     this.heartbeatTimer = window.setInterval(() => {
       if (this.socket?.readyState === WebSocket.OPEN) {
         this.socket.send(JSON.stringify({ event: "presence.ping", data: {} }));

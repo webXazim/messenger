@@ -886,7 +886,8 @@ export const chatApi = {
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async removeReaction(messageId: string, emoji: string) {
-    await http.delete(`/chat/messages/${messageId}/reactions/`, { data: { emoji } });
+    const response = await http.delete(`/chat/messages/${messageId}/reactions/`, { data: { emoji } });
+    return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async forwardMessage(messageId: string, conversationId: string) {
     const response = await http.post(`/chat/messages/${messageId}/forward/`, { conversation_id: conversationId });

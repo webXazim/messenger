@@ -908,7 +908,7 @@ export function ConversationPage() {
 
     try {
       const updated = reacted
-        ? await chatApi.removeReaction(message.id, emoji).then(() => chatApi.getMessage(message.id))
+        ? await chatApi.removeReaction(message.id, emoji)
         : await chatApi.reactToMessage(message.id, emoji);
       queryClient.setQueryData<InfiniteData<MessagePage>>(
         ["messages", conversationId],

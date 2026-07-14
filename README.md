@@ -229,3 +229,12 @@ must be expanded for greater concurrent-call capacity.
 - `docs/API_CONTRACT.md`
 - `docs/API_FRONTEND_GUIDE.md`
 - `docs/MESSENGER_UI_ARCHITECTURE.md`
+
+
+cd ~/csm/messenger
+
+docker compose \
+  --env-file .env \
+  -f docker-compose.yml \
+  -f docker-compose.production.yml \
+  up -d --no-build --remove-orphans

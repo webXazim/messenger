@@ -48,6 +48,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         self.user = None
         self.auth_token = ""
         self.device_id = "ws-default"
+        self.presence_device_id = "ws-default"
         self.joined_groups = set()
         self.typing_conversations = set()
 
@@ -58,6 +59,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
         query_string = self.scope.get("query_string", b"").decode()
         self.device_id = parse_qs(query_string).get("device_id", ["ws-default"])[0]
+        # A browser device can briefly have overlapping sockets during token
+        # refresh or reconnect. Track each connection separately so the old
+        # socket cannot clear presence for the replacement socket.
+        self.presence_device_id = f"{self.device_id}:{self.channel_name}"
         await self.accept()
         user_group = f"user_{self.user.id}"
         await self.channel_layer.group_add(user_group, self.channel_name)
@@ -595,7 +600,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _set_presence(self):
-        return set_presence(self.user, device_id=self.device_id)
+        return set_presence(self.user, device_id=self.presence_device_id)
 
     @database_sync_to_async
     def _presence_recipient_ids(self):
@@ -630,7 +635,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _clear_presence(self):
-        return clear_presence(self.user, device_id=self.device_id)
+        return clear_presence(self.user, device_id=self.presence_device_id)
 
     async def _broadcast_call_timeline(self, call_payload):
         timeline = call_payload.get("_timeline_message")

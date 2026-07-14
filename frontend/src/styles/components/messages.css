@@ -1108,13 +1108,31 @@ button.ms-message-reply:hover {
 
 @media (max-width: 720px) {
   .ms-message-actions {
-    position: static;
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    left: auto;
     opacity: 1;
     transform: none;
   }
 
   .ms-message-actions > .ms-message-actions__button {
     display: none;
+  }
+
+  .ms-message-actions > .ms-message-actions__button:last-of-type {
+    width: 2.25rem;
+    height: 2.25rem;
+    display: grid;
+    opacity: 0.72;
+    border: 0;
+    border-radius: 999px;
+    box-shadow: none;
+  }
+
+  .ms-message-actions.is-open > .ms-message-actions__button:last-of-type,
+  .ms-message-actions > .ms-message-actions__button:last-of-type:focus-visible {
+    opacity: 1;
   }
 
   .ms-message-actions__menu,
@@ -1137,8 +1155,19 @@ button.ms-message-reply:hover {
   }
 
   .ms-message-actions__items button {
-    min-height: 2.5rem;
+    min-height: 2.75rem;
     text-align: center;
+  }
+
+  .ms-message-actions__reactions {
+    gap: 0.25rem;
+  }
+
+  .ms-message-actions__reactions button {
+    min-width: 2.75rem;
+    height: 2.75rem;
+    font-size: 1.35rem;
+    touch-action: manipulation;
   }
 }
 
