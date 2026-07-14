@@ -1,11 +1,62 @@
 import re
 
 from django.core import mail
+from django.db import IntegrityError, transaction
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
+
+
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
+class UsernameUniquenessTests(APITestCase):
+    availability_url = "/api/v1/auth/username-availability/"
+    register_url = "/api/v1/auth/register/"
+    login_url = "/api/v1/auth/token/"
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="Azim",
+            email="azim-existing@example.com",
+            password="Strong-password-8472!",
+            email_verified=True,
+        )
+
+    def test_availability_is_case_insensitive(self):
+        unavailable = self.client.get(self.availability_url, {"username": "azim"})
+        self.assertEqual(unavailable.status_code, status.HTTP_200_OK)
+        self.assertFalse(unavailable.data["available"])
+
+        available = self.client.get(self.availability_url, {"username": "azim-new"})
+        self.assertEqual(available.status_code, status.HTTP_200_OK)
+        self.assertTrue(available.data["available"])
+
+    def test_registration_rejects_case_variant(self):
+        response = self.client.post(
+            self.register_url,
+            {"username": "aZiM", "email": "azim-new@example.com", "password": "Strong-password-8472!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", response.data.get("errors", {}))
+
+    def test_login_accepts_case_variant(self):
+        response = self.client.post(
+            self.login_url,
+            {"username": "azIM", "password": "Strong-password-8472!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_database_constraint_rejects_case_variant_race(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                User.objects.create_user(
+                    username="AZIM",
+                    email="azim-race@example.com",
+                    password="Strong-password-8472!",
+                )
 
 
 @override_settings(

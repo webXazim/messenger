@@ -21,10 +21,12 @@ from .views import (
     SessionRevokeView,
     SocialLoginView,
     UserSearchView,
+    UsernameAvailabilityView,
 )
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
+    path("username/availability/", UsernameAvailabilityView.as_view(), name="username-availability"),
     path("login/", LoginView.as_view(), name="login"),
     path("social/login/", SocialLoginView.as_view(), name="social-login"),
     path("refresh/", RefreshView.as_view(), name="refresh"),

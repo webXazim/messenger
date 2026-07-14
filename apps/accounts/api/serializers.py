@@ -2,6 +2,9 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.validators import UnicodeUsernameValidator
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 import re
 from io import BytesIO
 from uuid import uuid4
@@ -18,6 +21,7 @@ User = get_user_model()
 
 
 CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+USERNAME_VALIDATOR = UnicodeUsernameValidator()
 
 
 def _clean_text(value, *, max_length=None, multiline=False):
@@ -45,7 +49,16 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def validate_username(self, value):
-        return _clean_text(value, max_length=150)
+        username = _clean_text(value, max_length=150)
+        if not username:
+            raise serializers.ValidationError("Enter a username.")
+        try:
+            USERNAME_VALIDATOR(username)
+        except DjangoValidationError:
+            raise serializers.ValidationError("Use only letters, numbers, and @/./+/-/_ characters.")
+        if User.objects.filter(username__iexact=username).exists():
+            raise serializers.ValidationError("This username is already taken.")
+        return username
 
     def validate_email(self, value):
         return User.objects.normalize_email(_clean_text(value, max_length=254)).lower()
@@ -60,7 +73,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         password = validated_data.pop("password")
         user = User(**validated_data)
         user.set_password(password)
-        user.save()
+        try:
+            user.save()
+        except IntegrityError as exc:
+            raise serializers.ValidationError({"username": "This username is already taken."}) from exc
         return user
 
 

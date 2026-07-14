@@ -393,6 +393,31 @@
   line-height: 1.45;
 }
 
+.auth-username-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 1.25rem;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-xs);
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.auth-username-status.is-available {
+  color: #167447;
+}
+
+.auth-username-status.is-unavailable {
+  color: var(--ms-color-danger);
+}
+
+.auth-username-status .auth-spinner {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 0.12rem;
+}
+
 .auth-production-card input[aria-invalid="true"] {
   border-color: var(--ms-color-danger);
 }

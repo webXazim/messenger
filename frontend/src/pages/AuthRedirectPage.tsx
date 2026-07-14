@@ -4,6 +4,7 @@ import type { CentralAuthMode } from "../lib/centralAuth";
 import { useAuth } from "../contexts/AuthContext";
 import { APP_NAME } from "../lib/config";
 import { parseApiError, type ApiFieldErrors } from "../lib/apiErrors";
+import { authApi } from "../api/auth";
 
 type AuthPageMode = CentralAuthMode | "reset-password";
 
@@ -75,6 +76,11 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
   const [fieldErrors, setFieldErrors] = useState<ApiFieldErrors>({});
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [usernameAvailability, setUsernameAvailability] = useState<{
+    status: "idle" | "checking" | "available" | "unavailable" | "error";
+    username: string;
+    message: string;
+  }>({ status: "idle", username: "", message: "" });
   const verificationStarted = useRef(false);
   const isSignup = mode === "signup";
   const token = searchParams.get("token")?.trim() || "";
@@ -84,6 +90,36 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
     /\d/.test(password),
     /[^A-Za-z0-9]/.test(password),
   ].filter(Boolean).length, [password]);
+  const normalizedUsername = username.trim();
+  const usernameCheckIsCurrent = usernameAvailability.username.toLowerCase() === normalizedUsername.toLowerCase();
+
+  useEffect(() => {
+    if (!isSignup || !normalizedUsername) {
+      setUsernameAvailability({ status: "idle", username: "", message: "" });
+      return;
+    }
+    const controller = new AbortController();
+    setUsernameAvailability({ status: "checking", username: normalizedUsername, message: "Checking availability…" });
+    const timer = window.setTimeout(() => {
+      void authApi.checkUsernameAvailability(normalizedUsername, controller.signal)
+        .then((result) => {
+          setUsernameAvailability({
+            status: result.available ? "available" : "unavailable",
+            username: normalizedUsername,
+            message: result.detail || (result.available ? "Username is available." : "This username is unavailable."),
+          });
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setUsernameAvailability({ status: "error", username: normalizedUsername, message: "Availability could not be checked. It will be verified when you submit." });
+          }
+        });
+    }, 400);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isSignup, normalizedUsername]);
 
   useEffect(() => {
     if (mode !== "verify-email" || verificationStarted.current) return;
@@ -112,6 +148,10 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
     setBusy(true);
     try {
       if (isSignup) {
+        if (usernameCheckIsCurrent && usernameAvailability.status === "unavailable") {
+          setFieldErrors({ username: usernameAvailability.message });
+          return;
+        }
         if (password !== confirmPassword) {
           setFieldErrors({ password_confirm: "Passwords do not match." });
           return;
@@ -337,8 +377,12 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
           {isSignup ? <>
             <label>
               <span>Username</span>
-              <input autoComplete="username" placeholder="Choose a username" value={username} onChange={(event) => setUsername(event.target.value)} aria-invalid={Boolean(fieldErrors.username)} aria-describedby={fieldErrors.username ? "signup-username-error" : undefined} required />
+              <input autoComplete="username" placeholder="Choose a username" value={username} onChange={(event) => setUsername(event.target.value)} aria-invalid={Boolean(fieldErrors.username) || (usernameCheckIsCurrent && usernameAvailability.status === "unavailable")} aria-describedby={[fieldErrors.username ? "signup-username-error" : "", normalizedUsername ? "signup-username-status" : ""].filter(Boolean).join(" ") || undefined} required />
               <FieldError id="signup-username-error" message={fieldErrors.username} />
+              {normalizedUsername ? <span id="signup-username-status" className={`auth-username-status is-${usernameCheckIsCurrent ? usernameAvailability.status : "checking"}`} role="status" aria-live="polite">
+                {(usernameCheckIsCurrent ? usernameAvailability.status : "checking") === "checking" ? <span className="auth-spinner auth-spinner--dark" aria-hidden="true" /> : null}
+                {usernameCheckIsCurrent ? usernameAvailability.message : "Checking availability…"}
+              </span> : null}
             </label>
             <label>
               <span>Email address</span>
@@ -371,7 +415,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
         </div>
 
         {!isSignup ? <div className="auth-form-meta"><span>Protected session</span><Link to="/forgot-password">Forgot password?</Link></div> : null}
-        <button className="auth-submit" type="submit" disabled={busy || (isSignup ? !username.trim() || !email.trim() : !identifier.trim()) || !password}>{busy ? <><span className="auth-spinner" />Please wait…</> : isSignup ? "Create account" : "Sign in"}</button>
+        <button className="auth-submit" type="submit" disabled={busy || (isSignup ? !username.trim() || !email.trim() || (usernameCheckIsCurrent && ["checking", "unavailable"].includes(usernameAvailability.status)) : !identifier.trim()) || !password}>{busy ? <><span className="auth-spinner" />Please wait…</> : isSignup ? "Create account" : "Sign in"}</button>
         <p className="auth-switch">{isSignup ? "Already have an account?" : "New to Messenger?"} <Link to={isSignup ? "/login" : "/register"}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
         <p className="auth-legal">By continuing, you agree to responsible use and acknowledge our privacy practices.</p>
       </form>

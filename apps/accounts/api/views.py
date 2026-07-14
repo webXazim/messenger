@@ -68,6 +68,11 @@ class RegisterThrottle(FixedRateScopedThrottle):
     rate = "10/hour"
 
 
+class UsernameAvailabilityThrottle(FixedRateScopedThrottle):
+    scope = "username_availability"
+    rate = "60/minute"
+
+
 class LoginThrottle(FixedRateScopedThrottle):
     scope = "auth_login"
     rate = "30/hour"
@@ -596,6 +601,11 @@ class LoginSerializer(TokenObtainPairSerializer):
             if matched_user:
                 attrs[self.username_field] = matched_user.get_username()
                 username = attrs[self.username_field]
+        elif username:
+            matched_user = User.objects.filter(username__iexact=username.strip()).first()
+            if matched_user:
+                attrs[self.username_field] = matched_user.get_username()
+                username = attrs[self.username_field]
         lockout_key = _login_lockout_key(username, request) if request is not None else None
         attempts = int(cache.get(lockout_key) or 0) if lockout_key else 0
         if attempts >= LOGIN_LOCKOUT_THRESHOLD:
@@ -726,6 +736,23 @@ class RegisterView(generics.CreateAPIView):
             _send_email_verification_otp(user)
         response.data["email_verification_required"] = bool(getattr(settings, "AUTH_REQUIRE_EMAIL_VERIFICATION", False))
         return response
+
+
+class UsernameAvailabilityView(APIView):
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [UsernameAvailabilityThrottle]
+
+    def get(self, request):
+        username = str(request.query_params.get("username") or "").strip()
+        serializer = RegisterSerializer()
+        try:
+            normalized = serializer.validate_username(username)
+        except serializers.ValidationError as exc:
+            detail = exc.detail
+            if isinstance(detail, (list, tuple)):
+                detail = detail[0] if detail else "This username is unavailable."
+            return Response({"username": username, "available": False, "detail": str(detail)})
+        return Response({"username": normalized, "available": True, "detail": "Username is available."})
 
 
 class MeView(APIView):

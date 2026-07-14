@@ -5,6 +5,7 @@ from django.contrib.auth.models import AbstractUser, UserManager
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 
 from apps.common.models import BaseUUIDModel
 
@@ -52,6 +53,11 @@ class User(AbstractUser):
 
     REQUIRED_FIELDS = ["email"]
     objects = MessengerUserManager()
+
+    class Meta(AbstractUser.Meta):
+        constraints = [
+            models.UniqueConstraint(Lower("username"), name="uniq_user_username_ci"),
+        ]
 
 
 class Profile(BaseUUIDModel):

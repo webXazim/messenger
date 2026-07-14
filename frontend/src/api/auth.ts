@@ -213,6 +213,13 @@ export const authApi = {
     });
     return unwrapData<Record<string, unknown> | null>(response.data);
   },
+  async checkUsernameAvailability(username: string, signal?: AbortSignal) {
+    const response = await http.get(centralPath("/auth/username-availability/"), {
+      params: { username },
+      signal,
+    });
+    return unwrapData<{ username: string; available: boolean; detail: string }>(response.data);
+  },
   async me() {
     const response = await http.get(centralPath("/users/me/"));
     return normalizeCurrentUser(unwrapData<unknown>(response.data));

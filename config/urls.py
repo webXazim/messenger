@@ -8,7 +8,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 from apps.chat.api import urls as chat_api_urls
 from apps.accounts.api import urls as accounts_api_urls
-from apps.accounts.api.views import AvatarView, LoginView, MeView, RefreshView, RegisterView
+from apps.accounts.api.views import AvatarView, LoginView, MeView, RefreshView, RegisterView, UsernameAvailabilityView
 from config.centralization_views import admin_action_catalog, admin_action_execute, centralization_control_snapshot, centralization_readiness, internal_admin_monitoring
 from config.admin_gate import project_admin_entry
 from config.frontend import firebase_messaging_service_worker
@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/v1/auth/token/", LoginView.as_view(), name="local-auth-token"),
     path("api/v1/auth/token/refresh/", RefreshView.as_view(), name="local-auth-token-refresh"),
     path("api/v1/auth/register/", RegisterView.as_view(), name="local-auth-register"),
+    path("api/v1/auth/username-availability/", UsernameAvailabilityView.as_view(), name="local-auth-username-availability"),
     path("api/v1/users/me/", MeView.as_view(), name="local-auth-me"),
     path("api/v1/users/me/avatar/", AvatarView.as_view(), name="local-auth-me-avatar"),
     path("api/v1/accounts/", include(accounts_api_urls.urlpatterns)),
