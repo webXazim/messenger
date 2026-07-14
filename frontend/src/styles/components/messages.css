@@ -1121,13 +1121,7 @@ button.ms-message-reply:hover {
   }
 
   .ms-message-actions > .ms-message-actions__button:last-of-type {
-    width: 2.25rem;
-    height: 2.25rem;
-    display: grid;
-    opacity: 0.72;
-    border: 0;
-    border-radius: 999px;
-    box-shadow: none;
+    display: none;
   }
 
   .ms-message-actions.is-open > .ms-message-actions__button:last-of-type,
@@ -1149,6 +1143,38 @@ button.ms-message-reply:hover {
     z-index: 1000;
     border-radius: 1rem;
     box-shadow: 0 1.25rem 4rem rgb(0 0 0 / 0.22);
+  }
+
+  .ms-message-actions__menu.is-mobile {
+    right: auto;
+    bottom: auto;
+    left: 50%;
+    width: max-content;
+    max-width: calc(100vw - 1rem);
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: translateX(-50%);
+  }
+
+  .ms-message-actions__menu.is-mobile .ms-message-actions__reactions {
+    padding: 0.35rem;
+    border: 1px solid var(--ms-color-line);
+    border-radius: 999px;
+    background: var(--ms-color-surface);
+    box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.18);
+  }
+
+  .ms-message-actions__menu.is-mobile .ms-message-actions__items {
+    width: min(14rem, calc(100vw - 2rem));
+    margin: 0.5rem auto 0;
+    padding: 0.35rem;
+    border: 1px solid var(--ms-color-line);
+    border-radius: 0.875rem;
+    background: var(--ms-color-surface);
+    box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 0.16);
   }
 
   .ms-message-actions__items {

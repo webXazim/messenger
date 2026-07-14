@@ -643,7 +643,7 @@
 }
 
 .ms-message-composer__surface {
-    grid-template-columns: 2.75rem 2.75rem minmax(0, 1fr) 2.75rem;
+    grid-template-columns: 2.75rem minmax(0, 1fr) 2.875rem;
     align-items: center;
     gap: 0;
     min-height: 3.25rem;
@@ -651,6 +651,27 @@
     border-color: #d6d6d6;
     border-radius: 1.75rem;
     box-shadow: none;
+  }
+
+  .ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__attach {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__input {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .ms-message-composer__surface:not(.is-voice-active) .ms-voice-recorder,
+  .ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__send {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .ms-message-composer__surface.has-draft:not(.is-voice-active) .ms-voice-recorder,
+  .ms-message-composer__surface:not(.has-draft):not(.is-voice-active) .ms-message-composer__send {
+    display: none;
   }
 
   .ms-message-composer__surface:focus-within {
@@ -737,7 +758,7 @@
 }
 
 .ms-message-composer__surface {
-    grid-template-columns: 2.625rem 2.625rem minmax(0, 1fr) 2.625rem;
+    grid-template-columns: 2.625rem minmax(0, 1fr) 2.75rem;
   }
 
   .ms-composer-icon-button {

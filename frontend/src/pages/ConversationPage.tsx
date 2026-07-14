@@ -258,6 +258,7 @@ export function ConversationPage() {
   const [pageVisible, setPageVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible");
   const [messageActionErrors, setMessageActionErrors] = useState<Record<string, string>>({});
   const [messageActionPending, setMessageActionPending] = useState<Record<string, boolean>>({});
+  const reactionPendingRef = useRef(new Set<string>());
   const [confirmation, setConfirmation] = useState<TimelineConfirmation | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string | null>(null);
@@ -876,14 +877,14 @@ export function ConversationPage() {
   };
 
   const toggleReaction = async (message: Message, emoji: string) => {
-    if (messageActionPending[message.id]) return;
+    if (reactionPendingRef.current.has(message.id)) return;
     const previousData = queryClient.getQueryData<InfiniteData<MessagePage>>(["messages", conversationId]);
     const previousMessage = findMessageInPages(previousData, message.id);
     const currentUserId = String(user?.id || "");
     const reacted = (message.reactions ?? []).some((reaction) => reaction.emoji === emoji && String(reaction.user.id) === currentUserId);
 
     setMessageActionError(message.id, null);
-    setMessagePending(message.id, true);
+    reactionPendingRef.current.add(message.id);
     queryClient.setQueryData<InfiniteData<MessagePage>>(
       ["messages", conversationId],
       (current) => mapMessagePages(current, (item) => item.id === message.id, (item) => {
@@ -932,7 +933,7 @@ export function ConversationPage() {
       }
       setMessageActionError(message.id, getErrorMessage(error, "Could not update this reaction."));
     } finally {
-      setMessagePending(message.id, false);
+      reactionPendingRef.current.delete(message.id);
     }
   };
 

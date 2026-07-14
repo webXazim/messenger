@@ -50,6 +50,7 @@ export function MessageActions({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuId = useId();
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [mobileMenuTop, setMobileMenuTop] = useState(72);
   const failed = String(message.delivery_status || "").toLowerCase() === "failed";
   const localUnsent = message.id.startsWith("temp-");
   const canInteract = !message.is_deleted && !failed && !localUnsent;
@@ -65,6 +66,14 @@ export function MessageActions({
   useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
+      if (mobileMenu) {
+        const card = rootRef.current?.closest(".ms-message-card") as HTMLElement | null;
+        const rect = (card ?? rootRef.current)?.getBoundingClientRect();
+        if (rect) {
+          const preferred = rect.top > 150 ? rect.top - 64 : rect.bottom + 8;
+          setMobileMenuTop(Math.max(72, Math.min(preferred, window.innerHeight - 240)));
+        }
+      }
       menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
     });
     const handlePointerDown = (event: PointerEvent) => {
@@ -81,7 +90,7 @@ export function MessageActions({
       document.removeEventListener("pointerdown", handlePointerDown, true);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [onClose, open]);
+  }, [mobileMenu, onClose, open]);
 
   const run = (action: () => void) => {
     onClose();
@@ -114,7 +123,8 @@ export function MessageActions({
           <div
           ref={menuRef}
           id={menuId}
-          className="ms-message-actions__menu"
+          className={`ms-message-actions__menu ${mobileMenu ? "is-mobile" : ""}`}
+          style={mobileMenu ? { top: mobileMenuTop } : undefined}
           role="menu"
           aria-label="Message actions"
           onKeyDown={(event) => {

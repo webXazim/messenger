@@ -886,11 +886,11 @@ export const chatApi = {
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async reactToMessage(messageId: string, emoji: string) {
-    const response = await http.post(`/chat/messages/${messageId}/reactions/`, { emoji });
+    const response = await http.post(`/chat/messages/${messageId}/reactions/`, { emoji }, { timeout: 12000 });
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async removeReaction(messageId: string, emoji: string) {
-    const response = await http.delete(`/chat/messages/${messageId}/reactions/`, { data: { emoji } });
+    const response = await http.delete(`/chat/messages/${messageId}/reactions/`, { data: { emoji }, timeout: 12000 });
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async forwardMessage(messageId: string, conversationId: string) {

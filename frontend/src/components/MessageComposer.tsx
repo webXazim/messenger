@@ -347,7 +347,7 @@ export function MessageComposer({
         </div>
       ) : null}
 
-      <div className={`ms-message-composer__surface ${voiceActive ? "is-voice-active" : ""}`}>
+      <div className={`ms-message-composer__surface ${voiceActive ? "is-voice-active" : ""} ${text.trim() || pendingUploads.length || editingMessage ? "has-draft" : ""}`}>
         <VoiceNoteRecorder
           onSendVoiceNote={onSendVoiceNote}
           variant="inline"
