@@ -3,7 +3,7 @@ import type { MessageAttachment } from "../types/chat";
 const DB_NAME = "crescentsphere-private-media";
 const STORE_NAME = "previews";
 const DB_VERSION = 1;
-const PREVIEW_CACHE_VERSION = "v2";
+const PREVIEW_CACHE_VERSION = "v3";
 const MAX_PREVIEW_ENTRIES = 180;
 const MAX_SESSION_MEDIA_BYTES = 64 * 1024 * 1024;
 const PREVIEW_MAX_EDGE = 960;
@@ -20,6 +20,7 @@ type SessionMediaRecord = {
 };
 
 const sessionMedia = new Map<string, SessionMediaRecord>();
+const sessionPreviews = new Map<string, Blob>();
 
 function attachmentCacheIdentity(attachment: MessageAttachment | string) {
   if (typeof attachment === "string") return `id:${attachment}`;
@@ -67,12 +68,19 @@ export function rememberSessionMedia(userId: string, attachment: MessageAttachme
 }
 
 export async function readLocalPreview(userId: string, attachment: MessageAttachment | string) {
+  const key = cacheKey(userId, attachment);
+  const memoryPreview = sessionPreviews.get(key);
+  if (memoryPreview) return memoryPreview;
   const database = await openDatabase();
   if (!database) return null;
   return new Promise<Blob | null>((resolve) => {
     const transaction = database.transaction(STORE_NAME, "readonly");
-    const request = transaction.objectStore(STORE_NAME).get(cacheKey(userId, attachment));
-    request.onsuccess = () => resolve((request.result as PreviewRecord | undefined)?.blob || null);
+    const request = transaction.objectStore(STORE_NAME).get(key);
+    request.onsuccess = () => {
+      const blob = (request.result as PreviewRecord | undefined)?.blob || null;
+      if (blob) sessionPreviews.set(key, blob);
+      resolve(blob);
+    };
     request.onerror = () => resolve(null);
     transaction.oncomplete = () => database.close();
   });
@@ -81,6 +89,9 @@ export async function readLocalPreview(userId: string, attachment: MessageAttach
 export async function clearPrivateMediaCache(userId: string) {
   for (const key of [...sessionMedia.keys()]) {
     if (key.startsWith(`${userId}:`)) sessionMedia.delete(key);
+  }
+  for (const key of [...sessionPreviews.keys()]) {
+    if (key.startsWith(`${userId}:`)) sessionPreviews.delete(key);
   }
   const database = await openDatabase();
   if (!database) return;
@@ -130,8 +141,16 @@ async function writeLocalPreview(userId: string, attachment: MessageAttachment, 
 
 export async function storeLocalPreview(userId: string, attachment: MessageAttachment, preview: Blob) {
   if (!userId || !attachment.id || !preview.size) return;
-  await writeLocalPreview(userId, attachment, preview);
+  sessionPreviews.set(cacheKey(userId, attachment), preview);
   window.dispatchEvent(new CustomEvent("ms-local-media-preview", { detail: { userId, attachmentId: attachment.id, cacheIdentity: attachmentCacheIdentity(attachment) } }));
+  await writeLocalPreview(userId, attachment, preview);
+}
+
+export async function transferLocalPreview(userId: string, source: MessageAttachment, target: MessageAttachment) {
+  const preview = await readLocalPreview(userId, source);
+  if (!preview) return false;
+  await storeLocalPreview(userId, target, preview);
+  return true;
 }
 
 function canvasBlob(canvas: HTMLCanvasElement) {

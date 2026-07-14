@@ -43,7 +43,7 @@ import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermis
 import { patchCallCaches } from "../lib/realtimeCache";
 import { conversationPath, isUsernameConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
-import { generateAndStoreLocalPreview, storeLocalPreview } from "../lib/mediaPreviewCache";
+import { generateAndStoreLocalPreview, storeLocalPreview, transferLocalPreview } from "../lib/mediaPreviewCache";
 import type { UserSearchResult } from "../types/auth";
 import type { AttachmentEncryptionEnvelope, Conversation, Message } from "../types/chat";
 
@@ -566,6 +566,22 @@ export function ConversationPage() {
         });
       }
       const sentAttachmentIds = Array.isArray(payload.attachment_ids) ? payload.attachment_ids.map((value) => String(value)) : [];
+      if (user?.id && sentAttachmentIds.length && message.attachments?.length) {
+        await Promise.allSettled(sentAttachmentIds.map((uploadId, index) => {
+          const target = message.attachments[index];
+          const envelope = encryptedAttachmentUploadsRef.current[uploadId];
+          if (!target || !envelope) return Promise.resolve(false);
+          return transferLocalPreview(String(user.id), {
+            id: uploadId,
+            original_name: target.original_name,
+            mime_type: target.mime_type,
+            media_kind: target.media_kind,
+            size: target.size,
+            is_encrypted: true,
+            encryption: envelope,
+          }, target);
+        }));
+      }
       sentAttachmentIds.forEach((attachmentId) => { delete encryptedAttachmentUploadsRef.current[attachmentId]; });
       if (!payload._is_retry) setReplyTo(null);
       queryClient.setQueryData<InfiniteData<MessagePage>>(
