@@ -648,9 +648,14 @@
     gap: 0;
     min-height: 3.25rem;
     padding: 0.1875rem;
-    border-color: var(--ms-color-line-strong);
+    border-color: #d6d6d6;
     border-radius: 1.75rem;
     box-shadow: none;
+  }
+
+  .ms-message-composer__surface:focus-within {
+    border-color: #9a9a9a;
+    box-shadow: 0 0 0 0.125rem rgb(17 17 17 / 0.08);
   }
 
   .ms-composer-icon-button,

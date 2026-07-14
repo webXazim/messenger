@@ -365,7 +365,9 @@ ALLOWED_UPLOAD_MIME_TYPES = [
     ).split(",")
     if item.strip()
 ]
-PRESENCE_TTL_SECONDS = env_int("PRESENCE_TTL_SECONDS", 180)
+# Mobile browsers may throttle timers for several minutes. Clean WebSocket
+# disconnects still clear presence immediately; this floor protects live tabs.
+PRESENCE_TTL_SECONDS = max(env_int("PRESENCE_TTL_SECONDS", 300), 300)
 UPLOAD_SCAN_ASYNC = False if USE_LOCAL_TEST_SERVICES else env_bool("UPLOAD_SCAN_ASYNC", True)
 
 CHAT_ATTACHMENT_FORCE_DOWNLOAD = env_bool("CHAT_ATTACHMENT_FORCE_DOWNLOAD", True)

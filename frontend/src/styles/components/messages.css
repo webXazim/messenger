@@ -1146,6 +1146,7 @@ button.ms-message-reply:hover {
     width: auto;
     max-width: 28rem;
     margin-inline: auto;
+    z-index: 1000;
     border-radius: 1rem;
     box-shadow: 0 1.25rem 4rem rgb(0 0 0 / 0.22);
   }

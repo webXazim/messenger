@@ -1,7 +1,12 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import type { Message } from "../../types/chat";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+
+function ActionMenuLayer({ mobile, children }: { mobile: boolean; children: ReactElement }) {
+  return mobile ? createPortal(children, document.body) : children;
+}
 
 function ReplyIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 8-5 4 5 4v-3h4.5c3.2 0 5.5 1.5 6.5 4.5-.2-5.2-2.8-8.5-7.5-8.5H9V8Z" /></svg>;
@@ -44,9 +49,18 @@ export function MessageActions({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuId = useId();
+  const [mobileMenu, setMobileMenu] = useState(false);
   const failed = String(message.delivery_status || "").toLowerCase() === "failed";
   const localUnsent = message.id.startsWith("temp-");
   const canInteract = !message.is_deleted && !failed && !localUnsent;
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 720px)");
+    const sync = () => setMobileMenu(media.matches);
+    sync();
+    media.addEventListener?.("change", sync);
+    return () => media.removeEventListener?.("change", sync);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -54,7 +68,8 @@ export function MessageActions({
       menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
     });
     const handlePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) onClose();
+      const target = event.target as Node;
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) onClose();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -95,7 +110,8 @@ export function MessageActions({
       </button>
 
       {open ? (
-        <div
+        <ActionMenuLayer mobile={mobileMenu}>
+          <div
           ref={menuRef}
           id={menuId}
           className="ms-message-actions__menu"
@@ -140,7 +156,8 @@ export function MessageActions({
             {own ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onDelete(message))}>Delete</button> : null}
             {!own && onReport ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onReport(message))}>Report</button> : null}
           </div>
-        </div>
+          </div>
+        </ActionMenuLayer>
       ) : null}
     </div>
   );

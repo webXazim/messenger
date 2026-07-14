@@ -572,7 +572,11 @@ export function ConversationPage() {
 
       if (payload.event === "message.reaction_updated") {
         const normalized = normalizeMessage(data);
-        queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => upsertMessagePages(current, normalized));
+        queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => mapMessagePages(
+          current,
+          (message) => message.id === normalized.id,
+          (message) => ({ ...message, reactions: normalized.reactions, reaction_summary: normalized.reaction_summary }),
+        ));
         return;
       }
 
@@ -913,7 +917,11 @@ export function ConversationPage() {
         : await chatApi.reactToMessage(message.id, emoji);
       queryClient.setQueryData<InfiniteData<MessagePage>>(
         ["messages", conversationId],
-        (current) => upsertMessagePages(current, updated, { insertWhenMissing: false }),
+        (current) => mapMessagePages(
+          current,
+          (item) => item.id === updated.id,
+          (item) => ({ ...item, reactions: updated.reactions, reaction_summary: updated.reaction_summary }),
+        ),
       );
     } catch (error) {
       if (previousMessage) {
