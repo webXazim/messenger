@@ -82,7 +82,7 @@ export async function fetchAttachmentBlobForUser(
   signal?: AbortSignal,
   disposition: MediaDisposition = "inline",
 ) {
-  if (attachment?.is_encrypted && currentUserId) {
+  if (attachment?.id && currentUserId) {
     const cached = getSessionMedia(currentUserId, attachment);
     if (cached) return cached;
   }
@@ -107,6 +107,8 @@ export async function fetchAttachmentBlobForUser(
   if (attachment?.is_encrypted && currentUserId) {
     const decrypted = await decryptAttachment(currentUserId, attachment, blob);
     blob = decrypted.blob;
+  }
+  if (attachment?.id && currentUserId) {
     rememberSessionMedia(currentUserId, attachment, blob);
     void generateAndStoreLocalPreview(currentUserId, attachment, blob).catch(() => undefined);
   }

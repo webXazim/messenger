@@ -153,26 +153,40 @@ async function videoPreview(source: Blob) {
       video.playsInline = true;
       video.preload = "metadata";
       let settled = false;
+      const timeout = window.setTimeout(() => finish(null), 12_000);
       const finish = (value: Blob | null) => {
         if (settled) return;
         settled = true;
+        window.clearTimeout(timeout);
         video.removeAttribute("src");
         video.load();
         resolve(value);
       };
-      video.onerror = () => finish(null);
-      video.onloadedmetadata = () => {
-        video.currentTime = video.duration > 0.4 ? Math.min(1, video.duration * 0.1) : 0;
-      };
-      video.onseeked = async () => {
+      const capture = async () => {
+        if (!video.videoWidth || !video.videoHeight) return;
         const size = fittedSize(video.videoWidth, video.videoHeight);
         const canvas = document.createElement("canvas");
         canvas.width = size.width;
         canvas.height = size.height;
-        canvas.getContext("2d")?.drawImage(video, 0, 0, size.width, size.height);
+        const context = canvas.getContext("2d");
+        if (!context) {
+          finish(null);
+          return;
+        }
+        context.drawImage(video, 0, 0, size.width, size.height);
         finish(await canvasBlob(canvas));
       };
+      video.onerror = () => finish(null);
+      video.onloadedmetadata = () => {
+        const target = video.duration > 0.4 ? Math.min(1, video.duration * 0.1) : 0;
+        if (target > 0) video.currentTime = target;
+      };
+      video.onloadeddata = () => {
+        if (!video.duration || video.duration <= 0.4) void capture();
+      };
+      video.onseeked = () => void capture();
       video.src = url;
+      video.load();
     });
   } finally {
     URL.revokeObjectURL(url);
@@ -183,7 +197,12 @@ export async function generateAndStoreLocalPreview(userId: string, attachment: M
   if (!userId || !attachment.id || typeof document === "undefined") return;
   if (await readLocalPreview(userId, attachment.id)) return;
   const mime = (attachment.mime_type || source.type || "").toLowerCase();
-  const preview = mime.startsWith("video/") ? await videoPreview(source) : mime.startsWith("image/") ? await imagePreview(source) : null;
+  const mediaKind = (attachment.media_kind || "").toLowerCase();
+  const preview = mediaKind === "video" || mime.startsWith("video/")
+    ? await videoPreview(source)
+    : mediaKind === "image" || mime.startsWith("image/")
+      ? await imagePreview(source)
+      : null;
   if (!preview) return;
   await writeLocalPreview(userId, attachment.id, preview);
   window.dispatchEvent(new CustomEvent("ms-local-media-preview", { detail: { userId, attachmentId: attachment.id } }));
