@@ -9,6 +9,7 @@ import { chatSocket } from "../lib/chatSocket";
 import { clearStoredWebPushToken, getStoredWebPushToken } from "../lib/pushNotifications";
 import { AUTH_CLEARED_EVENT, clearTokens, getAccessToken, getRefreshToken, getSessionId, setAccessToken, setRefreshToken, setSessionId } from "../lib/tokenStore";
 import { clearConversationDraftsForUser } from "../lib/conversationDrafts";
+import { clearPrivateMediaCache } from "../lib/mediaPreviewCache";
 import type { CurrentUser, LoginPayload, RegisterPayload } from "../types/auth";
 
 type AuthContextValue = {
@@ -154,7 +155,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // slow network can never trap the user on the settings screen.
     chatSocket.disconnect();
     queryClient.clear();
-    if (user?.id) clearConversationDraftsForUser(String(user.id));
+    if (user?.id) {
+      const userId = String(user.id);
+      clearConversationDraftsForUser(userId);
+      void clearPrivateMediaCache(userId);
+    }
     setUser(null);
     clearStoredWebPushToken();
     clearTokens();

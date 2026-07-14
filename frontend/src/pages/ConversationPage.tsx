@@ -329,8 +329,21 @@ export function ConversationPage() {
     return () => document.removeEventListener("visibilitychange", updateVisibility);
   }, []);
 
-  const conversationQuery = useQuery({ queryKey: ["conversation", conversationId], queryFn: () => chatApi.getConversation(conversationId), enabled: !!conversationId });
-  const conversationsQuery = useQuery({ queryKey: ["conversations"], queryFn: ({ signal }) => chatApi.listConversations(signal) });
+  const conversationQuery = useQuery({
+    queryKey: ["conversation", conversationId],
+    queryFn: () => chatApi.getConversation(conversationId),
+    enabled: !!conversationId,
+    staleTime: 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations"],
+    queryFn: ({ signal }) => chatApi.listConversations(signal),
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+  });
   const friendsQuery = useQuery({
     queryKey: ["friend-requests", "friends"],
     queryFn: ({ signal }) => authApi.listFriendRequests("friends", signal),
@@ -350,6 +363,9 @@ export function ConversationPage() {
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next || undefined,
     enabled: !!conversationId,
+    staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
   });
   const e2eeIdentityQuery = useQuery({
     queryKey: ["e2ee-identity", String(user?.id || "")],

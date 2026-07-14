@@ -5,6 +5,7 @@ import { getAccessToken } from "../lib/tokenStore";
 import { http } from "../lib/http";
 import { unwrapData } from "../lib/apiResponse";
 import type { MessageAttachment } from "../types/chat";
+import { generateAndStoreLocalPreview, getSessionMedia, readLocalPreview, rememberSessionMedia } from "../lib/mediaPreviewCache";
 
 type MediaDisposition = "inline" | "attachment";
 type MediaKind = "image" | "video" | "audio";
@@ -81,6 +82,10 @@ export async function fetchAttachmentBlobForUser(
   signal?: AbortSignal,
   disposition: MediaDisposition = "inline",
 ) {
+  if (attachment?.is_encrypted && currentUserId) {
+    const cached = getSessionMedia(currentUserId, attachment);
+    if (cached) return cached;
+  }
   let requestSrc = src;
   let response = await fetchMediaBlob(requestSrc, signal);
 
@@ -102,8 +107,41 @@ export async function fetchAttachmentBlobForUser(
   if (attachment?.is_encrypted && currentUserId) {
     const decrypted = await decryptAttachment(currentUserId, attachment, blob);
     blob = decrypted.blob;
+    rememberSessionMedia(currentUserId, attachment, blob);
+    void generateAndStoreLocalPreview(currentUserId, attachment, blob).catch(() => undefined);
   }
   return blob;
+}
+
+function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: string) {
+  const [previewSrc, setPreviewSrc] = useState("");
+  useEffect(() => {
+    if (!attachment?.id || !currentUserId) {
+      setPreviewSrc("");
+      return;
+    }
+    let objectUrl = "";
+    let cancelled = false;
+    const load = async () => {
+      const blob = await readLocalPreview(currentUserId, attachment.id);
+      if (!blob || cancelled) return;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(blob);
+      setPreviewSrc(objectUrl);
+    };
+    const handlePreview = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string; attachmentId?: string }>).detail;
+      if (detail?.userId === currentUserId && detail.attachmentId === attachment.id) void load();
+    };
+    void load();
+    window.addEventListener("ms-local-media-preview", handlePreview);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("ms-local-media-preview", handlePreview);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment?.id, currentUserId]);
+  return previewSrc;
 }
 
 function useAuthenticatedMediaUrl(src: string, attachment?: MessageAttachment, currentUserId?: string): ResolvedMedia {
@@ -307,9 +345,12 @@ export async function downloadAttachmentForUser(attachment: MessageAttachment, c
 
 export function AuthenticatedImage({ src, alt, className, attachment, currentUserId }: { src: string; alt: string; className?: string; attachment?: MessageAttachment; currentUserId?: string }) {
   const { resolvedSrc, failed, loading, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
+  const localPreviewSrc = useLocalMediaPreview(attachment, currentUserId);
   const ready = useMediaReady(resolvedSrc, "image");
   if (failed) return <MediaFallback kind="image" name={attachment?.original_name || alt} message={errorMessage} onRetry={retry} />;
-  if ((loading && !resolvedSrc) || !ready) return <div className="ms-auth-media-shell ms-auth-media-shell--image" role="img" aria-label={alt} />;
+  if ((loading && !resolvedSrc) || !ready) return localPreviewSrc
+    ? <img className={className} src={localPreviewSrc} alt={alt} />
+    : <div className="ms-auth-media-shell ms-auth-media-shell--image" role="img" aria-label={alt} />;
   return <img className={className} src={resolvedSrc} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(true)} />;
 }
 
@@ -325,6 +366,7 @@ export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; cl
 export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string }) {
   const { resolvedSrc, failed, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
   const posterMedia = useAuthenticatedMediaUrl(posterSrc || "", undefined, currentUserId);
+  const localPosterSrc = useLocalMediaPreview(attachment, currentUserId);
   const stableName = useMemo(() => attachment?.original_name || "Video", [attachment?.original_name]);
   const [frameReady, setFrameReady] = useState(false);
 
@@ -337,7 +379,7 @@ export function AuthenticatedVideo({ src, posterSrc, className, attachment, curr
     <video
       className={`${className || ""} ms-auth-media-shell ${frameReady ? "is-frame-ready" : "is-frame-loading"}`.trim()}
       src={resolvedSrc || undefined}
-      poster={!frameReady ? posterMedia.resolvedSrc || undefined : undefined}
+      poster={!frameReady ? posterMedia.resolvedSrc || localPosterSrc || undefined : undefined}
       controls
       playsInline
       preload={resolvedSrc ? "metadata" : "none"}
