@@ -21,6 +21,7 @@ export function ConversationProfileSection({
   onStartVideoCall,
   onToggleState,
   onLeave,
+  onDeleteConversation,
   leaveDisabled,
   leaveHint,
   onBlock,
@@ -35,6 +36,7 @@ export function ConversationProfileSection({
   onStartVideoCall: () => void;
   onToggleState: (state: "mute" | "archive" | "pin") => void;
   onLeave: () => void;
+  onDeleteConversation?: () => void;
   leaveDisabled?: boolean;
   leaveHint?: string;
   onBlock?: () => void;
@@ -93,6 +95,7 @@ export function ConversationProfileSection({
         ) : onBlock ? (
           <button type="button" onClick={onBlock}>Block contact</button>
         ) : null}
+        {onDeleteConversation ? <button type="button" onClick={onDeleteConversation}>Delete chat</button> : null}
       </div>
     </section>
   );

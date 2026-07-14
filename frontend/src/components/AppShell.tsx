@@ -283,6 +283,15 @@ export function AppShell() {
         if (conversation.id) patchConversationCaches(queryClient, conversation);
         return;
       }
+      if (payload.event === "conversation.deleted") {
+        const conversationId = String(payload.data?.conversation_id || payload.data?.id || "");
+        if (!conversationId) return;
+        queryClient.removeQueries({ queryKey: ["conversation", conversationId] });
+        queryClient.removeQueries({ queryKey: ["messages", conversationId] });
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        if (location.pathname.startsWith(`/chat/${conversationId}`)) navigate("/chat", { replace: true });
+        return;
+      }
       if (payload.event === "message.created" || payload.event === "message.updated" || payload.event === "message.deleted") {
         const message = normalizeMessage(payload.data || {});
         const conversationId = String(message.conversation_id || payload.data?.conversation_id || payload.data?.conversation || "");

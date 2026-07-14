@@ -191,6 +191,7 @@ function getActiveCallIdFromError(error: unknown) {
 type TimelineConfirmation =
   | { kind: "delete-message"; message: Message }
   | { kind: "report-message"; message: Message }
+  | { kind: "delete-conversation"; title: string; isGroup: boolean }
   | { kind: "leave-conversation" }
   | { kind: "block-contact"; userId: string; displayName: string };
 
@@ -1180,6 +1181,15 @@ export function ConversationPage() {
         confirmLabel: "Report message",
       };
     }
+    if (confirmation.kind === "delete-conversation") {
+      return {
+        title: `Delete ${confirmation.isGroup ? "group" : "chat"}?`,
+        description: confirmation.isGroup
+          ? `This permanently deletes ${confirmation.title} and all of its messages for every member. This action cannot be undone.`
+          : `This permanently deletes the conversation with ${confirmation.title}, including its messages and shared media, for both people. This action cannot be undone.`,
+        confirmLabel: "Delete chat",
+      };
+    }
     if (confirmation.kind === "leave-conversation") {
       return {
         title: "Leave this group?",
@@ -1249,6 +1259,12 @@ export function ConversationPage() {
         await chatApi.leaveConversation(conversationId);
         await queryClient.invalidateQueries({ queryKey: ["conversations"] });
         navigate("/chat");
+      } else if (action.kind === "delete-conversation") {
+        await chatApi.deleteConversation(conversationId);
+        queryClient.removeQueries({ queryKey: ["conversation", conversationId] });
+        queryClient.removeQueries({ queryKey: ["messages", conversationId] });
+        await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        navigate("/chat", { replace: true });
       } else {
         await chatApi.blockUser(action.userId);
         await Promise.all([
@@ -1709,6 +1725,14 @@ export function ConversationPage() {
               onLeaveConversation={() => {
                 setConfirmationError(null);
                 setConfirmation({ kind: "leave-conversation" });
+              }}
+              onDeleteConversation={() => {
+                setConfirmationError(null);
+                setConfirmation({
+                  kind: "delete-conversation",
+                  title: conversationDisplayName(conversationQuery.data!, String(user?.id || ""), user),
+                  isGroup: conversationQuery.data?.type === "group",
+                });
               }}
               onBlockContact={(participantUserId) => {
                 const participant = (conversationQuery.data?.participants ?? []).find((item) => String(item.user.id) === String(participantUserId));

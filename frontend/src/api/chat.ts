@@ -761,6 +761,9 @@ export const chatApi = {
     const response = await http.get(`/chat/conversations/${id}/`);
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
+  async deleteConversation(conversationId: string) {
+    await http.delete(`/chat/conversations/${conversationId}/`);
+  },
   async searchConversations(query: string, signal?: AbortSignal) {
     const items = await collectChatPages("/chat/conversations/search/", normalizeConversation, {
       params: { q: query },
@@ -846,7 +849,8 @@ export const chatApi = {
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async deleteMessage(messageId: string) {
-    await http.delete(`/chat/messages/${messageId}/manage/`);
+    const response = await http.delete(`/chat/messages/${messageId}/manage/`);
+    return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async getMessage(messageId: string) {
     const response = await http.get(`/chat/messages/${messageId}/`);

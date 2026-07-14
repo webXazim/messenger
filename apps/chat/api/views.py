@@ -441,7 +441,12 @@ class ConversationDetailView(generics.RetrieveDestroyAPIView):
         return user_conversations_qs(self.request.user)
 
     def perform_destroy(self, instance):
+        conversation_id = str(instance.id)
+        participant_ids = list(instance.participants.values_list("user_id", flat=True))
         delete_conversation(self.request.user, instance)
+        payload = {"conversation_id": conversation_id}
+        for participant_id in participant_ids:
+            _broadcast_to_user(str(participant_id), "conversation.deleted", payload)
 
 
 class ConversationDraftView(views.APIView):

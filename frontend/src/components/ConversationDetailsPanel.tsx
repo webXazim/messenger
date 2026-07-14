@@ -32,6 +32,7 @@ export function ConversationDetailsPanel({
   onToggleConversationState,
   conversationStatePending,
   onLeaveConversation,
+  onDeleteConversation,
   onBlockContact,
 }: {
   open: boolean;
@@ -51,6 +52,7 @@ export function ConversationDetailsPanel({
   onToggleConversationState: (state: "mute" | "archive" | "pin") => void;
   conversationStatePending?: "mute" | "archive" | "pin" | null;
   onLeaveConversation: () => void;
+  onDeleteConversation: () => void;
   onBlockContact?: (participantUserId: string) => void;
 }) {
   const { user } = useAuth();
@@ -138,6 +140,7 @@ export function ConversationDetailsPanel({
           onStartVideoCall={onStartVideoCall}
           onToggleState={onToggleConversationState}
           onLeave={onLeaveConversation}
+          onDeleteConversation={!isGroup || viewerParticipant?.role === "owner" ? onDeleteConversation : undefined}
           leaveDisabled={Boolean(isGroup && viewerParticipant?.role === "owner" && activeParticipants.length > 1)}
           leaveHint={isGroup && viewerParticipant?.role === "owner" && activeParticipants.length > 1 ? "Transfer ownership before leaving." : undefined}
           onBlock={otherParticipant && onBlockContact ? () => onBlockContact(String(otherParticipant.user.id)) : undefined}
