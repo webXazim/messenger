@@ -43,9 +43,9 @@ import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermis
 import { patchCallCaches } from "../lib/realtimeCache";
 import { conversationPath, isUsernameConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
-import { generateAndStoreLocalPreview, storeLocalPreview, transferLocalPreview } from "../lib/mediaPreviewCache";
+import { createLocalAttachmentPreview, generateAndStoreLocalPreview, storeLocalPreview, transferLocalPreview } from "../lib/mediaPreviewCache";
 import type { UserSearchResult } from "../types/auth";
-import type { AttachmentEncryptionEnvelope, Conversation, Message } from "../types/chat";
+import type { AttachmentEncryptionEnvelope, Conversation, Message, MessageAttachment } from "../types/chat";
 
 function isSameDay(a: string, b: string) {
   return new Date(a).toDateString() === new Date(b).toDateString();
@@ -65,6 +65,7 @@ function buildOptimisticMessage(
   attachmentIds: string[],
   replyTo: Message | null,
   clientTempId: string,
+  optimisticAttachments: MessageAttachment[] = [],
   options: { isEncrypted?: boolean; type?: string; isVoiceNote?: boolean; durationSeconds?: number | string | null } = {},
 ) {
   const now = new Date().toISOString();
@@ -75,7 +76,7 @@ function buildOptimisticMessage(
     text,
     sender: { id: userId, username, display_name: username },
     created_at: now,
-    attachments: attachmentIds.map((id) => ({ id, original_name: "Attachment", mime_type: "", size: 0 })),
+    attachments: attachmentIds.map((id) => optimisticAttachments.find((attachment) => attachment.id === id) || { id, original_name: "Attachment", mime_type: "", size: 0 }),
     reactions: [],
     reaction_summary: {},
     links: Array.from(text.matchAll(/https?:\/\/\S+/g)).map((match) => match[0]),
@@ -506,6 +507,9 @@ export function ConversationPage() {
         const optimisticText = String((payload._optimistic_text as string | undefined) ?? payload.text ?? "");
         const replyToId = String(payload.reply_to_id || "");
         const optimisticReply = replyToId ? findMessageInPages(currentData, replyToId) ?? null : null;
+        const optimisticAttachments = Array.isArray(payload._optimistic_attachments)
+          ? payload._optimistic_attachments as MessageAttachment[]
+          : [];
         const optimistic = buildOptimisticMessage(
           String(user.id),
           user.username || "You",
@@ -513,6 +517,7 @@ export function ConversationPage() {
           (payload.attachment_ids as string[] | undefined) ?? [],
           optimisticReply,
           clientTempId,
+          optimisticAttachments,
           {
             isEncrypted: Boolean(payload.is_encrypted),
             type: String(payload.type || (Array.isArray(payload.attachment_ids) && payload.attachment_ids.length ? "file" : "text")),
@@ -1117,6 +1122,19 @@ export function ConversationPage() {
     const nextPayload: Record<string, unknown> = {
       ...payload,
       attachment_encryption: attachmentEncryption.length ? attachmentEncryption : undefined,
+      _optimistic_attachments: attachmentIds.map((attachmentId, index) => {
+        const source = (Array.isArray(payload._optimistic_attachments) ? payload._optimistic_attachments : [])
+          .find((item) => item && typeof item === "object" && String((item as Record<string, unknown>).id || "") === attachmentId) as MessageAttachment | undefined;
+        return {
+          ...(source || { id: attachmentId, original_name: "Attachment", mime_type: "application/octet-stream", size: 0 }),
+          id: attachmentId,
+          // The optimistic URL is the sender's local plaintext Blob URL. The
+          // authoritative server response replaces this with the encrypted
+          // attachment before it can be persisted or shared.
+          is_encrypted: false,
+          encryption: encryptedAttachmentUploadsRef.current[attachmentId] || attachmentEncryption[index],
+        } satisfies MessageAttachment;
+      }),
     };
     if (plaintext.trim()) {
       nextPayload.text = "";
@@ -1142,11 +1160,14 @@ export function ConversationPage() {
     const validation = validateComposerUpload(file, composerUploadPolicy);
     if (!validation.valid) throw new Error(validation.message || "This file cannot be uploaded.");
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
+    const sourceMediaKind = file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "";
+    const encryptedPreview = await createLocalAttachmentPreview(file, sourceMediaKind).catch(() => null);
     const encrypted = await encryptAttachmentForConversation({
       userId: String(user.id),
       conversationId,
       file,
       participantUserIds: conversationParticipantIds,
+      previewBlob: encryptedPreview,
     });
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
     const upload = await chatApi.uploadFile(encrypted.uploadFile, {
@@ -1163,12 +1184,14 @@ export function ConversationPage() {
       id: upload.id,
       original_name: metadata?.original_name || file.name,
       mime_type: metadata?.mime_type || file.type || "application/octet-stream",
-      media_kind: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : null,
+      media_kind: sourceMediaKind || null,
       size: file.size,
       is_encrypted: true,
       encryption: encrypted.envelope,
     };
-    const previewTask = upload.localThumbnail
+    const previewTask = encryptedPreview
+      ? storeLocalPreview(String(user.id), localAttachment, encryptedPreview)
+      : upload.localThumbnail
       ? storeLocalPreview(String(user.id), localAttachment, upload.localThumbnail)
       : generateAndStoreLocalPreview(String(user.id), localAttachment, file);
     void previewTask.catch(() => undefined);

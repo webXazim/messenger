@@ -1,11 +1,11 @@
 import { forwardRef, useEffect, useMemo, useState } from "react";
-import { decryptAttachment } from "../lib/e2ee";
+import { decryptAttachment, decryptAttachmentPreview } from "../lib/e2ee";
 import { API_BASE_URL } from "../lib/config";
 import { getAccessToken } from "../lib/tokenStore";
 import { http } from "../lib/http";
 import { unwrapData } from "../lib/apiResponse";
 import type { MessageAttachment } from "../types/chat";
-import { generateAndStoreLocalPreview, getSessionMedia, readLocalPreview, rememberSessionMedia } from "../lib/mediaPreviewCache";
+import { generateAndStoreLocalPreview, getSessionMedia, readLocalPreview, rememberSessionMedia, storeLocalPreview } from "../lib/mediaPreviewCache";
 
 type MediaDisposition = "inline" | "attachment";
 type MediaKind = "image" | "video" | "audio";
@@ -125,7 +125,11 @@ function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: st
     let objectUrl = "";
     let cancelled = false;
     const load = async () => {
-      const blob = await readLocalPreview(currentUserId, attachment);
+      let blob = await readLocalPreview(currentUserId, attachment);
+      if (!blob && attachment.is_encrypted && attachment.encryption?.preview_ciphertext) {
+        blob = await decryptAttachmentPreview(currentUserId, attachment).catch(() => null);
+        if (blob) await storeLocalPreview(currentUserId, attachment, blob);
+      }
       if (!blob || cancelled) return;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(blob);
@@ -143,7 +147,13 @@ function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: st
       window.removeEventListener("ms-local-media-preview", handlePreview);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [attachment?.encryption?.original_sha256, attachment?.id, currentUserId]);
+  }, [
+    attachment?.encryption?.original_sha256,
+    attachment?.encryption?.preview_ciphertext,
+    attachment?.encryption?.preview_nonce,
+    attachment?.id,
+    currentUserId,
+  ]);
   return previewSrc;
 }
 
@@ -355,6 +365,25 @@ export function AuthenticatedImage({ src, alt, className, attachment, currentUse
     ? <img className={className} src={localPreviewSrc} alt={alt} />
     : <div className="ms-auth-media-shell ms-auth-media-shell--image" role="img" aria-label={alt} />;
   return <img className={className} src={resolvedSrc} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(true)} />;
+}
+
+export function AuthenticatedAttachmentPreview({
+  attachment,
+  currentUserId,
+  fallbackSrc = "",
+  alt = "",
+  className,
+}: {
+  attachment: MessageAttachment;
+  currentUserId?: string;
+  fallbackSrc?: string;
+  alt?: string;
+  className?: string;
+}) {
+  const previewSrc = useLocalMediaPreview(attachment, currentUserId);
+  if (previewSrc) return <img className={className} src={previewSrc} alt={alt} decoding="async" />;
+  if (fallbackSrc) return <AuthenticatedImage className={className} src={fallbackSrc} alt={alt} />;
+  return <div className={`ms-auth-media-shell ms-auth-media-shell--image ${className || ""}`.trim()} role="img" aria-label={alt || "Video preview"} />;
 }
 
 export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; className?: string; onLoadedMetadata?: () => void; attachment?: MessageAttachment; currentUserId?: string }>(

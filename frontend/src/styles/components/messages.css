@@ -20,6 +20,15 @@
   justify-content: flex-start;
 }
 
+.ms-message-row.is-optimistic {
+  animation: ms-message-arrive 180ms ease-out both;
+}
+
+@keyframes ms-message-arrive {
+  from { opacity: 0; transform: translateY(0.35rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .ms-message-row.is-grouped {
   margin-top: -0.15rem;
 }

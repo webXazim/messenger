@@ -613,6 +613,9 @@ class AttachmentEncryptionEnvelopeSerializer(serializers.Serializer):
     metadata_ciphertext = serializers.CharField(max_length=getattr(settings, "MESSAGE_MAX_CIPHERTEXT_BYTES", 256 * 1024))
     metadata_nonce = serializers.CharField(max_length=256)
     original_sha256 = serializers.CharField(required=False, allow_blank=True, max_length=128)
+    preview_ciphertext = serializers.CharField(required=False, allow_blank=True, max_length=getattr(settings, "MESSAGE_MAX_CIPHERTEXT_BYTES", 256 * 1024))
+    preview_nonce = serializers.CharField(required=False, allow_blank=True, max_length=256)
+    preview_mime_type = serializers.CharField(required=False, allow_blank=True, max_length=120)
     aad = serializers.JSONField(required=False)
 
     def validate(self, attrs):
@@ -622,6 +625,12 @@ class AttachmentEncryptionEnvelopeSerializer(serializers.Serializer):
             raise serializers.ValidationError("At least one recipient key entry is required.")
         if encrypted_keys and not recipient_key_ids:
             attrs["recipient_key_ids"] = [item["key_id"] for item in encrypted_keys if item.get("key_id")]
+        preview_ciphertext = str(attrs.get("preview_ciphertext") or "").strip()
+        preview_nonce = str(attrs.get("preview_nonce") or "").strip()
+        if bool(preview_ciphertext) != bool(preview_nonce):
+            raise serializers.ValidationError("Encrypted attachment previews require both ciphertext and nonce.")
+        if preview_ciphertext and not str(attrs.get("preview_mime_type") or "").lower().startswith("image/"):
+            raise serializers.ValidationError("Encrypted attachment previews must use an image MIME type.")
         return attrs
 
 

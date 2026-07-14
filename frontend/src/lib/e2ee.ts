@@ -661,11 +661,13 @@ export async function encryptAttachmentForConversation({
   conversationId,
   file,
   participantUserIds = [],
+  previewBlob,
 }: {
   userId: string;
   conversationId: string;
   file: File;
   participantUserIds?: string[];
+  previewBlob?: Blob | null;
 }) {
   const resolved = await resolveConversationRecipients(userId, conversationId, participantUserIds);
   const { identity, recipientKeys, material } = resolved;
@@ -674,6 +676,7 @@ export async function encryptAttachmentForConversation({
   const rawFileKey = new Uint8Array(await window.crypto.subtle.exportKey("raw", fileKey));
   const fileNonce = window.crypto.getRandomValues(new Uint8Array(12));
   const metadataNonce = window.crypto.getRandomValues(new Uint8Array(12));
+  const previewNonce = previewBlob?.size ? window.crypto.getRandomValues(new Uint8Array(12)) : null;
   const aad = { conversation_id: conversationId, version: ENVELOPE_VERSION, kind: "attachment" };
   const encryptedFile = await window.crypto.subtle.encrypt(
     { name: "AES-GCM", iv: fileNonce, additionalData: encodeUtf8(stableJson(aad)) },
@@ -685,6 +688,13 @@ export async function encryptAttachmentForConversation({
     fileKey,
     new TextEncoder().encode(JSON.stringify({ name: file.name, mime_type: file.type || "application/octet-stream", size: file.size })),
   );
+  const previewCiphertext = previewBlob?.size && previewNonce
+    ? await window.crypto.subtle.encrypt(
+        { name: "AES-GCM", iv: previewNonce, additionalData: encodeUtf8(stableJson(aad)) },
+        fileKey,
+        await previewBlob.arrayBuffer(),
+      )
+    : null;
   const digest = await window.crypto.subtle.digest("SHA-256", rawBytes);
   const encryptedKeys = await buildWrappedKeys(rawFileKey, recipientKeys);
   const extension = file.name.includes(".") ? file.name.split(".").pop() : "bin";
@@ -705,9 +715,31 @@ export async function encryptAttachmentForConversation({
       metadata_ciphertext: bytesToBase64(new Uint8Array(metadataCiphertext)),
       metadata_nonce: bytesToBase64(metadataNonce),
       original_sha256: bytesToBase64(new Uint8Array(digest)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""),
+      preview_ciphertext: previewCiphertext ? bytesToBase64(new Uint8Array(previewCiphertext)) : undefined,
+      preview_nonce: previewNonce ? bytesToBase64(previewNonce) : undefined,
+      preview_mime_type: previewBlob?.type || undefined,
       aad,
     } satisfies AttachmentEncryptionEnvelope,
   };
+}
+
+export async function decryptAttachmentPreview(userId: string, attachment: MessageAttachment) {
+  const envelope = attachment.encryption;
+  if (!attachment.is_encrypted || !envelope?.preview_ciphertext || !envelope.preview_nonce) return null;
+  if (!hasWebCrypto()) return null;
+  const identity = await ensureE2EEIdentity(userId);
+  if (!identity) return null;
+  const rawKey = await decryptWrappedKey(identity, envelope.encrypted_keys ?? []);
+  if (!rawKey) return null;
+  const fileKey = await window.crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const bytes = await decryptWithAadCandidates({
+    key: fileKey,
+    nonce: base64ToBytes(envelope.preview_nonce),
+    ciphertext: base64ToBytes(envelope.preview_ciphertext),
+    aad: envelope.aad ?? {},
+    kind: "attachment",
+  });
+  return new Blob([bytes], { type: envelope.preview_mime_type || "image/jpeg" });
 }
 
 export async function rewrapAttachmentEncryptionForConversation({

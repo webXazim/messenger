@@ -159,16 +159,6 @@ export function MessageComposer({
     if (upload?.previewUrl) URL.revokeObjectURL(upload.previewUrl);
   };
 
-  const clearPendingUploads = useCallback(() => {
-    Object.values(uploadControllersRef.current).forEach((controller) => controller.abort());
-    uploadControllersRef.current = {};
-    activeUploadIdsRef.current.clear();
-    setPendingUploads((current) => {
-      current.forEach(revokeUploadPreview);
-      return [];
-    });
-  }, []);
-
   const buildPreviewUrl = (file: File) => {
     const mime = file.type.toLowerCase();
     if (mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/")) {
@@ -292,24 +282,42 @@ export function MessageComposer({
         if (composerDisabled || !canSend || hasBlockingUpload || isSubmitting) return;
         const clientTempId = pendingClientTempIdRef.current || safeId("message");
         pendingClientTempIdRef.current = clientTempId;
+        const submittedText = text;
+        const submittedUploads = pendingUploads.filter((item) => item.status === "uploaded" && item.uploadId);
+        const optimisticAttachments = submittedUploads.map((item) => ({
+          id: String(item.uploadId),
+          original_name: item.fileName,
+          mime_type: item.file.type || "application/octet-stream",
+          media_kind: item.file.type.startsWith("video/") ? "video" : item.file.type.startsWith("image/") ? "image" : item.file.type.startsWith("audio/") ? "audio" : "file",
+          size: item.file.size,
+          file_url: item.previewUrl,
+          preview_url: item.previewUrl,
+          thumbnail_url: item.file.type.startsWith("image/") ? item.previewUrl : null,
+        }));
+        pendingUploadsRef.current = [];
+        setPendingUploads([]);
+        setText("");
         try {
           setSubmitError(null);
           setIsSubmitting(true);
           await onSend({
             type: "text",
-            text,
+            text: submittedText,
             attachment_ids: uploadedAttachmentIds,
+            _optimistic_attachments: optimisticAttachments,
             client_temp_id: clientTempId,
             reply_to_id: editingMessage ? null : (replyTo?.id ?? null),
-            entities: extractEntities(text),
+            entities: extractEntities(submittedText),
           });
           pendingClientTempIdRef.current = null;
-          setText("");
+          submittedUploads.forEach(revokeUploadPreview);
           removeConversationDraft(draftKey);
-          clearPendingUploads();
           onClearReply();
           onCancelEdit();
         } catch (error) {
+          pendingUploadsRef.current = submittedUploads;
+          setPendingUploads(submittedUploads);
+          setText(submittedText);
           setSubmitError(error instanceof Error ? error.message : "Could not send this message. Your draft and attachments are still here.");
         } finally {
           setIsSubmitting(false);

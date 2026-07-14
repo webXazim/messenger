@@ -22,6 +22,8 @@ for (const required of [
   "current_device_missing",
   "decryptMessageTextResult",
   "rewrapAttachmentEncryptionForConversation",
+  "decryptAttachmentPreview",
+  "preview_ciphertext",
   "Promise<MessageEncryptionEnvelope>",
 ]) {
   assert.ok(e2ee.includes(required), `Missing E2EE client invariant: ${required}`);
@@ -49,6 +51,7 @@ for (const required of [
 }
 
 assert.ok(serializers.includes("Encryption envelope is required for an encrypted edit"), "Encrypted edits are not validated by the API serializer.");
+assert.ok(serializers.includes("Encrypted attachment previews require both ciphertext and nonce"), "Encrypted attachment preview envelopes are not validated atomically.");
 assert.ok(consumers.includes('data.get("encryption")'), "WebSocket message operations do not preserve encryption envelopes.");
 assert.ok(views.includes('output["security_changed"] = security_changed'), "Device registration does not report whether key material changed.");
 assert.ok(authContext.includes("identity.registrationChanged"), "Login/focus reconciliation still refreshes every conversation when no device changed.");

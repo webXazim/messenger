@@ -294,6 +294,9 @@ function normalizeAttachment(value: unknown): import("../types/chat").MessageAtt
       metadata_ciphertext: firstString(encryption.metadata_ciphertext),
       metadata_nonce: firstString(encryption.metadata_nonce),
       original_sha256: firstString(encryption.original_sha256) || undefined,
+      preview_ciphertext: firstString(encryption.preview_ciphertext) || undefined,
+      preview_nonce: firstString(encryption.preview_nonce) || undefined,
+      preview_mime_type: firstString(encryption.preview_mime_type) || undefined,
       aad: asRecord(encryption.aad),
     } : null,
   };

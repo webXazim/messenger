@@ -1112,6 +1112,9 @@ def _sanitize_attachment_encryption_payloads(payloads):
             "metadata_ciphertext": str(item.get("metadata_ciphertext") or ""),
             "metadata_nonce": str(item.get("metadata_nonce") or "").strip()[:256],
             "original_sha256": str(item.get("original_sha256") or "").strip()[:128],
+            "preview_ciphertext": str(item.get("preview_ciphertext") or ""),
+            "preview_nonce": str(item.get("preview_nonce") or "").strip()[:256],
+            "preview_mime_type": str(item.get("preview_mime_type") or "").strip()[:120],
             "aad": item.get("aad") if item.get("aad") is not None else None,
         }
         if item.get("key_version") is not None:
@@ -1120,6 +1123,10 @@ def _sanitize_attachment_encryption_payloads(payloads):
             raise ValidationError({"attachment_encryption": "Attachment encryption payload is incomplete."})
         if not payload["recipient_key_ids"]:
             raise ValidationError({"attachment_encryption": "Attachment encryption payload must include recipient keys."})
+        if bool(payload["preview_ciphertext"]) != bool(payload["preview_nonce"]):
+            raise ValidationError({"attachment_encryption": "Encrypted attachment previews require both ciphertext and nonce."})
+        if payload["preview_ciphertext"] and not payload["preview_mime_type"].lower().startswith("image/"):
+            raise ValidationError({"attachment_encryption": "Encrypted attachment previews must use an image MIME type."})
         if _json_payload_size(payload) > MESSAGE_MAX_ENCRYPTION_ENVELOPE_BYTES:
             raise ValidationError({"attachment_encryption": "Attachment encryption payload is too large."})
         sanitized[upload_id] = payload

@@ -71,6 +71,9 @@ export type AttachmentEncryptionEnvelope = {
   metadata_ciphertext: string;
   metadata_nonce: string;
   original_sha256?: string;
+  preview_ciphertext?: string;
+  preview_nonce?: string;
+  preview_mime_type?: string;
   aad?: Record<string, unknown>;
 };
 

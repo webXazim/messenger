@@ -38,6 +38,7 @@ export function UploadQueue({
     <div className="ms-upload-queue" aria-label="Pending attachments">
       {uploads.map((upload) => {
         const mime = upload.file.type.toLowerCase();
+        const isVisualMedia = mime.startsWith("image/") || mime.startsWith("video/");
         const kind = attachmentKindLabel(upload.file);
         const progress = Math.max(0, Math.min(100, upload.progress ?? 0));
         const statusLabel = upload.status === "queued"
@@ -52,10 +53,23 @@ export function UploadQueue({
           : `Remove ${upload.fileName}`;
 
         return (
-          <article className={`ms-upload-card is-${upload.status}`} key={upload.localId}>
-            <div className="ms-upload-card__preview" aria-hidden="true">
+          <article className={`ms-upload-card ${isVisualMedia ? "is-visual-media" : ""} is-${upload.status}`} key={upload.localId}>
+            <div className={`ms-upload-card__preview ${isVisualMedia ? "is-visual-media" : ""}`}>
               {upload.previewUrl && mime.startsWith("image/") ? <img src={upload.previewUrl} alt="" /> : null}
-              {upload.previewUrl && mime.startsWith("video/") ? <video src={upload.previewUrl} muted playsInline /> : null}
+              {upload.previewUrl && mime.startsWith("video/") ? (
+                <video
+                  src={upload.previewUrl}
+                  muted
+                  playsInline
+                  controls
+                  preload="metadata"
+                  aria-label={`Preview ${upload.fileName}`}
+                  onLoadedMetadata={(event) => {
+                    const video = event.currentTarget;
+                    if (video.duration > 0.2 && video.currentTime === 0) video.currentTime = Math.min(0.35, video.duration * 0.08);
+                  }}
+                />
+              ) : null}
               {!upload.previewUrl || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
             </div>
             <div className="ms-upload-card__copy">

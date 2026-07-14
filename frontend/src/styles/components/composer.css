@@ -299,6 +299,14 @@
   background: var(--ms-color-danger-surface);
 }
 
+.ms-upload-card.is-visual-media {
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: min(100%, 28rem);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0.92rem;
+}
+
 .ms-upload-card__preview {
   width: 3.25rem;
   height: 3.25rem;
@@ -319,6 +327,34 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.ms-upload-card__preview.is-visual-media {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: auto;
+  max-height: 15rem;
+  border: 0;
+  border-radius: 0;
+  background: #111;
+}
+
+.ms-upload-card__preview.is-visual-media img,
+.ms-upload-card__preview.is-visual-media video {
+  width: 100%;
+  height: auto;
+  max-height: 15rem;
+  display: block;
+  object-fit: contain;
+  background: #111;
+}
+
+.ms-upload-card.is-visual-media .ms-upload-card__copy {
+  padding: 0.5rem 0 0.5rem 0.625rem;
+}
+
+.ms-upload-card.is-visual-media .ms-upload-card__actions {
+  padding: 0.5rem 0.5rem 0.5rem 0;
 }
 
 .ms-upload-card__copy {

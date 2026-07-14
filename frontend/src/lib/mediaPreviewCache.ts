@@ -7,6 +7,9 @@ const PREVIEW_CACHE_VERSION = "v3";
 const MAX_PREVIEW_ENTRIES = 180;
 const MAX_SESSION_MEDIA_BYTES = 64 * 1024 * 1024;
 const PREVIEW_MAX_EDGE = 960;
+const EMBEDDED_PREVIEW_MAX_EDGE = 480;
+const EMBEDDED_PREVIEW_QUALITY = 0.66;
+const EMBEDDED_PREVIEW_MAX_BYTES = 96 * 1024;
 
 type PreviewRecord = {
   key: string;
@@ -153,30 +156,30 @@ export async function transferLocalPreview(userId: string, source: MessageAttach
   return true;
 }
 
-function canvasBlob(canvas: HTMLCanvasElement) {
-  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
+function canvasBlob(canvas: HTMLCanvasElement, quality = 0.78) {
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
 }
 
-function fittedSize(width: number, height: number) {
-  const scale = Math.min(1, PREVIEW_MAX_EDGE / Math.max(width, height));
+function fittedSize(width: number, height: number, maxEdge = PREVIEW_MAX_EDGE) {
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
-async function imagePreview(source: Blob) {
+async function imagePreview(source: Blob, maxEdge = PREVIEW_MAX_EDGE, quality = 0.78) {
   const bitmap = await createImageBitmap(source);
   try {
-    const size = fittedSize(bitmap.width, bitmap.height);
+    const size = fittedSize(bitmap.width, bitmap.height, maxEdge);
     const canvas = document.createElement("canvas");
     canvas.width = size.width;
     canvas.height = size.height;
     canvas.getContext("2d")?.drawImage(bitmap, 0, 0, size.width, size.height);
-    return await canvasBlob(canvas);
+    return await canvasBlob(canvas, quality);
   } finally {
     bitmap.close();
   }
 }
 
-async function videoPreview(source: Blob) {
+async function videoPreview(source: Blob, maxEdge = PREVIEW_MAX_EDGE, quality = 0.78) {
   const url = URL.createObjectURL(source);
   try {
     return await new Promise<Blob | null>((resolve) => {
@@ -197,7 +200,7 @@ async function videoPreview(source: Blob) {
       };
       const drawDecodedFrame = async () => {
         if (!video.videoWidth || !video.videoHeight) return;
-        const size = fittedSize(video.videoWidth, video.videoHeight);
+        const size = fittedSize(video.videoWidth, video.videoHeight, maxEdge);
         const canvas = document.createElement("canvas");
         canvas.width = size.width;
         canvas.height = size.height;
@@ -207,7 +210,7 @@ async function videoPreview(source: Blob) {
           return;
         }
         context.drawImage(video, 0, 0, size.width, size.height);
-        finish(await canvasBlob(canvas));
+        finish(await canvasBlob(canvas, quality));
       };
       const capture = () => {
         if (capturePending || settled) return;
@@ -235,16 +238,24 @@ async function videoPreview(source: Blob) {
   }
 }
 
+export async function createLocalAttachmentPreview(source: Blob, mediaKind = "", embedded = true) {
+  const kind = mediaKind.toLowerCase();
+  const mime = (source.type || "").toLowerCase();
+  const maxEdge = embedded ? EMBEDDED_PREVIEW_MAX_EDGE : PREVIEW_MAX_EDGE;
+  const quality = embedded ? EMBEDDED_PREVIEW_QUALITY : 0.78;
+  let preview: Blob | null = null;
+  if (kind === "video" || mime.startsWith("video/")) preview = await videoPreview(source, maxEdge, quality);
+  else if (kind === "image" || mime.startsWith("image/")) preview = await imagePreview(source, maxEdge, quality);
+  if (!preview || !embedded || preview.size <= EMBEDDED_PREVIEW_MAX_BYTES) return preview;
+  return imagePreview(preview, 320, 0.56);
+}
+
 export async function generateAndStoreLocalPreview(userId: string, attachment: MessageAttachment, source: Blob) {
   if (!userId || !attachment.id || typeof document === "undefined") return;
   if (await readLocalPreview(userId, attachment)) return;
   const mime = (attachment.mime_type || source.type || "").toLowerCase();
   const mediaKind = (attachment.media_kind || "").toLowerCase();
-  const preview = mediaKind === "video" || mime.startsWith("video/")
-    ? await videoPreview(source)
-    : mediaKind === "image" || mime.startsWith("image/")
-      ? await imagePreview(source)
-      : null;
+  const preview = await createLocalAttachmentPreview(source, mediaKind || mime, false);
   if (!preview) return;
   await storeLocalPreview(userId, attachment, preview);
 }

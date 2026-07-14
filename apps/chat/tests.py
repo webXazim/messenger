@@ -776,6 +776,9 @@ class ChatApiTests(TestCase):
                         ],
                         "metadata_ciphertext": "encrypted-manifest",
                         "metadata_nonce": "manifest-nonce",
+                        "preview_ciphertext": "encrypted-thumbnail",
+                        "preview_nonce": "thumbnail-nonce",
+                        "preview_mime_type": "image/jpeg",
                         "aad": {"conversation_id": conversation["id"], "kind": "attachment"},
                     }
                 ],
@@ -785,10 +788,14 @@ class ChatApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertTrue(response.data["attachments"][0]["is_encrypted"])
         self.assertEqual(response.data["attachments"][0]["encryption"]["metadata_ciphertext"], "encrypted-manifest")
+        self.assertEqual(response.data["attachments"][0]["encryption"]["preview_ciphertext"], "encrypted-thumbnail")
+        self.assertEqual(response.data["attachments"][0]["encryption"]["preview_nonce"], "thumbnail-nonce")
+        self.assertEqual(response.data["attachments"][0]["encryption"]["preview_mime_type"], "image/jpeg")
 
         attachment = MessageAttachment.objects.get(id=response.data["attachments"][0]["id"])
         self.assertTrue(attachment.metadata["encrypted_attachment"])
         self.assertEqual(attachment.metadata["encryption"]["metadata_nonce"], "manifest-nonce")
+        self.assertEqual(attachment.metadata["encryption"]["preview_ciphertext"], "encrypted-thumbnail")
 
     def test_message_text_is_sanitized(self):
         conversation = self.create_direct_conversation()

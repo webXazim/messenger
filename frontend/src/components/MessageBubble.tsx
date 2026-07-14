@@ -121,7 +121,10 @@ export function MessageBubble({
     const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
     if (connection?.saveData || ["slow-2g", "2g"].includes(connection?.effectiveType || "")) return;
     const eligible = message.attachments
-      .filter((attachment) => attachment.size > 0 && attachment.size <= 8 * 1024 * 1024)
+      .filter((attachment) => {
+        const kind = (attachment.media_kind || attachment.mime_type || "").toLowerCase();
+        return !kind.startsWith("video") && !kind.startsWith("audio") && attachment.size > 0 && attachment.size <= 8 * 1024 * 1024;
+      })
       .reduce<{ attachment: typeof message.attachments[number]; total: number }[]>((items, attachment) => {
         const total = (items.length ? items[items.length - 1]!.total : 0) + attachment.size;
         if (total <= 12 * 1024 * 1024) items.push({ attachment, total });
@@ -185,7 +188,7 @@ export function MessageBubble({
   };
 
   return (
-    <div className={`ms-message-row ${own ? "ms-message-row--own" : "ms-message-row--incoming"} ${grouped ? "is-grouped" : ""} ${showContextMenu ? "is-selected" : ""}`}>
+    <div className={`ms-message-row ${own ? "ms-message-row--own" : "ms-message-row--incoming"} ${grouped ? "is-grouped" : ""} ${showContextMenu ? "is-selected" : ""} ${isLocalUnsent ? "is-optimistic" : ""}`}>
       <span className={`ms-message-gesture ${Math.abs(swipeOffset) > 36 ? "is-visible" : ""}`} aria-hidden="true">↩</span>
       {showAvatar ? <UserAvatar person={message.sender} size="xs" className={`ms-message-avatar ${grouped ? "is-hidden" : ""}`} decorative /> : null}
       <div className={`ms-message-stack ${richOnly ? "ms-message-stack--rich-only" : ""} ${hasRichContent ? "has-rich-content" : ""}`} style={{ transform: `translateX(${swipeOffset}px)` }}>

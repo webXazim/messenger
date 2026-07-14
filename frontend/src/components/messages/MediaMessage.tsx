@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { MessageAttachment } from "../../types/chat";
-import { AuthenticatedImage, AuthenticatedVideo } from "../AuthenticatedMedia";
+import { AuthenticatedAttachmentPreview, AuthenticatedImage, AuthenticatedVideo } from "../AuthenticatedMedia";
 import { AttachmentDownloadButton } from "../AttachmentDownloadButton";
 import { getAttachmentPosterUrl, getAttachmentPreviewUrl, getAttachmentPlaybackUrl, getAttachmentRatioStyle } from "./messagePresentation";
 
@@ -16,17 +16,14 @@ function PlayIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 10 6-10 6V6Z" /></svg>;
 }
 
-function LazyVideo({ attachment, src, posterSrc, currentUserId, warmMedia }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string; warmMedia?: boolean }) {
-  const [playbackRequested, setPlaybackRequested] = useState(Boolean(warmMedia));
-  useEffect(() => {
-    if (warmMedia) setPlaybackRequested(true);
-  }, [warmMedia]);
+function LazyVideo({ attachment, src, posterSrc, currentUserId }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string }) {
+  const [playbackRequested, setPlaybackRequested] = useState(false);
   if (playbackRequested) {
     return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} />;
   }
   return (
     <button type="button" className="ms-message-media__video-poster" onClick={() => setPlaybackRequested(true)} aria-label={`Play ${attachment.original_name}`}>
-      {posterSrc ? <AuthenticatedImage src={posterSrc} alt="" /> : <span className="ms-message-media__video-placeholder" aria-hidden="true">VID</span>}
+      <AuthenticatedAttachmentPreview attachment={attachment} currentUserId={currentUserId} fallbackSrc={posterSrc} alt={`Preview of ${attachment.original_name}`} />
       <span className="ms-message-media__play"><PlayIcon /></span>
     </button>
   );
@@ -70,7 +67,7 @@ export function MediaMessage({
         return (
           <div className={`ms-message-media__item ${isVideo ? "is-video" : "is-image"}`} style={getAttachmentRatioStyle(attachment)} key={attachment.id}>
             {isVideo ? (
-              <LazyVideo attachment={attachment} src={mediaUrl} posterSrc={posterUrl} currentUserId={currentUserId} warmMedia={warmMedia} />
+              <LazyVideo attachment={attachment} src={mediaUrl} posterSrc={posterUrl} currentUserId={currentUserId} />
             ) : (
               <LazyImage attachment={attachment} thumbnailSrc={mediaUrl} fullSrc={getAttachmentPlaybackUrl(attachment)} currentUserId={currentUserId} warmMedia={warmMedia} onOpen={() => onPreviewAttachment?.(attachment.id)} />
             )}
