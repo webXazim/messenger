@@ -50,9 +50,9 @@ export function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function attachmentTone(mime: string): AttachmentTone {
+export function attachmentTone(mime: string, fileName = ""): AttachmentTone {
   const value = mime.toLowerCase();
-  if (value.includes("pdf")) return "pdf";
+  if (value.includes("pdf") || fileName.toLowerCase().endsWith(".pdf")) return "pdf";
   if (value.startsWith("video/")) return "video";
   if (value.startsWith("audio/")) return "audio";
   if (value.includes("sheet") || value.includes("excel") || value.includes("csv")) return "sheet";
@@ -60,7 +60,7 @@ export function attachmentTone(mime: string): AttachmentTone {
 }
 
 export function attachmentLabel(attachment: MessageAttachment) {
-  const tone = attachmentTone(attachment.mime_type || "");
+  const tone = attachmentTone(attachment.mime_type || "", attachment.original_name);
   if (tone === "pdf") return "PDF";
   if (tone === "sheet") return "XLS";
   if (tone === "audio") return "AUD";

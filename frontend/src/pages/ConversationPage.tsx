@@ -870,7 +870,7 @@ export function ConversationPage() {
     return `${missingNames.slice(0, 2).join(" and ")} need to finish secure-device setup before messages can be sent.`;
   }, [conversationQuery.data?.participants, encryptionReadiness]);
   const composerDisabledReason = encryptionReadiness.canEncrypt ? null : encryptionReadinessMessage;
-  const previewAttachments = useMemo(() => messages.flatMap((message) => message.attachments || []), [messages]);
+  const previewAttachments = useMemo(() => messages.flatMap((message) => message.attachments || []).filter((attachment) => !attachment.view_once), [messages]);
   const previewAttachmentIndex = useMemo(() => previewAttachments.findIndex((attachment) => attachment.id === previewAttachmentId), [previewAttachments, previewAttachmentId]);
   const previewAttachment = previewAttachmentIndex >= 0 ? previewAttachments[previewAttachmentIndex] : null;
   const previewMessage = useMemo(
@@ -1157,43 +1157,50 @@ export function ConversationPage() {
   ) => {
     if (!user?.id) throw new Error("Sign in again before uploading a file.");
     if (!encryptionReadiness.canEncrypt) throw new Error(encryptionReadinessMessage);
-    const validation = validateComposerUpload(file, composerUploadPolicy);
+    const originalName = metadata?.original_name || file.name;
+    const effectiveMimeType = metadata?.mime_type
+      || file.type
+      || (originalName.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream");
+    const sourceFile = file.type === effectiveMimeType
+      ? file
+      : new File([file], file.name, { type: effectiveMimeType, lastModified: file.lastModified });
+    const validation = validateComposerUpload(sourceFile, composerUploadPolicy);
     if (!validation.valid) throw new Error(validation.message || "This file cannot be uploaded.");
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
-    const sourceMediaKind = file.type.startsWith("video/")
+    const sourceMediaKind = effectiveMimeType.startsWith("video/")
       ? "video"
-      : file.type.startsWith("image/")
+      : effectiveMimeType.startsWith("image/")
         ? "image"
-        : file.type === "application/pdf"
+        : effectiveMimeType === "application/pdf" || originalName.toLowerCase().endsWith(".pdf")
           ? "pdf"
-          : file.type.startsWith("audio/")
+          : effectiveMimeType.startsWith("audio/")
             ? "audio"
             : "";
-    const encryptedPreview = await createLocalAttachmentPreview(file, sourceMediaKind).catch(() => null);
+    const encryptedPreview = await createLocalAttachmentPreview(sourceFile, sourceMediaKind).catch(() => null);
     const encrypted = await encryptAttachmentForConversation({
       userId: String(user.id),
       conversationId,
-      file,
+      file: sourceFile,
       participantUserIds: conversationParticipantIds,
       previewBlob: encryptedPreview,
     });
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
     const upload = await chatApi.uploadFile(encrypted.uploadFile, {
-      original_name: metadata?.original_name || file.name,
-      mime_type: metadata?.mime_type || file.type || "application/octet-stream",
+      original_name: originalName,
+      mime_type: effectiveMimeType,
       signal: options?.signal,
       onProgress: options?.onProgress,
-      metadata_source_file: file,
+      metadata_source_file: sourceFile,
       include_thumbnail: false,
     });
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
     encryptedAttachmentUploadsRef.current[upload.id] = encrypted.envelope;
     const localAttachment = {
       id: upload.id,
-      original_name: metadata?.original_name || file.name,
-      mime_type: metadata?.mime_type || file.type || "application/octet-stream",
+      original_name: originalName,
+      mime_type: effectiveMimeType,
       media_kind: sourceMediaKind || null,
-      size: file.size,
+      size: sourceFile.size,
       is_encrypted: true,
       encryption: encrypted.envelope,
     };
@@ -1201,7 +1208,7 @@ export function ConversationPage() {
       ? storeLocalPreview(String(user.id), localAttachment, encryptedPreview)
       : upload.localThumbnail
       ? storeLocalPreview(String(user.id), localAttachment, upload.localThumbnail)
-      : generateAndStoreLocalPreview(String(user.id), localAttachment, file);
+      : generateAndStoreLocalPreview(String(user.id), localAttachment, sourceFile);
     void previewTask.catch(() => undefined);
     return { ...upload, encryptedPreview };
   };

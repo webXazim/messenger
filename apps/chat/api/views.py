@@ -54,6 +54,7 @@ from apps.chat.services import (
     create_direct_conversation,
     create_group_conversation,
     create_media_access_payload,
+    consume_view_once_attachment,
     decline_call,
     delete_conversation,
     end_call,
@@ -667,6 +668,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
             client_temp_id=serializer.validated_data.get("client_temp_id", ""),
             attachment_ids=serializer.validated_data.get("attachment_ids", []),
             attachment_encryption=serializer.validated_data.get("attachment_encryption", []),
+            view_once_attachment_ids=serializer.validated_data.get("view_once_attachment_ids", []),
             entities=serializer.validated_data.get("entities", []),
             transcript_payload=transcript_payload,
             encryption=serializer.validated_data.get("encryption"),
@@ -1247,20 +1249,24 @@ class AttachmentDownloadView(views.APIView):
     def get_object(self, request, attachment_id):
         token = request.query_params.get("token")
         if token:
-            validate_media_access_token(
+            token_payload = validate_media_access_token(
                 token,
                 resource_type="attachment",
                 resource_id=attachment_id,
                 user=request.user if getattr(request.user, "is_authenticated", False) else None,
             )
             from apps.chat.models import MessageAttachment
-            return get_object_or_404(MessageAttachment, id=attachment_id, scan_status=MessageAttachment.ScanStatus.CLEAN)
+            attachment = get_object_or_404(MessageAttachment, id=attachment_id, scan_status=MessageAttachment.ScanStatus.CLEAN)
+            attachment._media_token_payload = token_payload
+            return attachment
         if not request.user.is_authenticated:
             raise PermissionDenied("Authentication or media token is required.")
         return get_object_or_404(secure_attachment_queryset_for_user(request.user), id=attachment_id)
 
     def get(self, request, attachment_id):
         attachment = self.get_object(request, attachment_id)
+        if attachment.view_once:
+            raise PermissionDenied("View-once media cannot be downloaded.")
         response = _build_media_file_response(
             attachment.file,
             filename=attachment.original_name,
@@ -1283,6 +1289,8 @@ class AttachmentPreviewView(AttachmentDownloadView):
 
     def get(self, request, attachment_id):
         attachment = self.get_object(request, attachment_id)
+        if attachment.view_once and getattr(attachment, "_media_token_payload", {}).get("purpose") != "view_once":
+            raise PermissionDenied("A one-time viewing session is required.")
         if not _can_preview_inline_mime(attachment.mime_type):
             raise PermissionDenied("This attachment type cannot be previewed inline.")
         response = _build_media_file_response(
@@ -1292,6 +1300,9 @@ class AttachmentPreviewView(AttachmentDownloadView):
             as_attachment=False,
             request=request,
         )
+        if attachment.view_once:
+            response["Cache-Control"] = "no-store, private"
+            response["Pragma"] = "no-cache"
         log_chat_event(
             ChatAuditLog.EventType.MEDIA_ACCESSED,
             actor=request.user if request.user.is_authenticated else None,
@@ -1307,6 +1318,8 @@ class AttachmentThumbnailView(AttachmentDownloadView):
 
     def get(self, request, attachment_id):
         attachment = self.get_object(request, attachment_id)
+        if attachment.view_once:
+            raise PermissionDenied("View-once media does not expose thumbnails.")
         if not attachment.thumbnail:
             raise Http404("Thumbnail is not available for this attachment.")
         response = _build_thumbnail_file_response(attachment.thumbnail, filename=Path(attachment.thumbnail.name).name, request=request)
@@ -1329,10 +1342,20 @@ class MediaTokenCreateView(views.APIView):
         serializer = MediaTokenSerializer(data={"resource_type": resource_type})
         serializer.is_valid(raise_exception=True)
         if resource_type == "attachment":
-            get_object_or_404(secure_attachment_queryset_for_user(request.user), id=resource_id)
+            attachment = get_object_or_404(secure_attachment_queryset_for_user(request.user), id=resource_id)
+            if attachment.view_once:
+                raise PermissionDenied("Use the one-time open action for this attachment.")
         else:
             get_object_or_404(secure_pending_upload_queryset_for_user(request.user), id=resource_id)
         payload = create_media_access_payload(actor=request.user, resource_type=resource_type, resource_id=resource_id, request=request)
+        return Response(payload)
+
+
+class ViewOnceAttachmentOpenView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, attachment_id):
+        payload = consume_view_once_attachment(actor=request.user, attachment_id=attachment_id, request=request)
         return Response(payload)
 
 

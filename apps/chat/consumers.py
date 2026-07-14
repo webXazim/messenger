@@ -202,6 +202,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             data.get("entities", []) or [],
             data.get("encryption"),
             data.get("attachment_encryption", []) or [],
+            data.get("view_once_attachment_ids", []) or [],
         )
         await self.channel_layer.group_send(f"conversation_{conversation_id}", self._event_payload("message.created", payload))
         await self._broadcast_conversation_update(conversation_id)
@@ -411,6 +412,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         entities=None,
         encryption=None,
         attachment_encryption=None,
+        view_once_attachment_ids=None,
     ):
         from apps.chat.api.serializers import MessageSerializer
         conversation = Conversation.objects.get(id=conversation_id)
@@ -425,6 +427,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             entities=entities or [],
             encryption=encryption,
             attachment_encryption=attachment_encryption or [],
+            view_once_attachment_ids=view_once_attachment_ids or [],
         )
         if is_voice_note:
             metadata = dict(message.metadata or {})

@@ -13,6 +13,7 @@ export type PendingComposerUpload = {
   durationSeconds?: number;
   progress?: number;
   error?: string;
+  viewOnce?: boolean;
 };
 
 export type ComposerUploadResult = {

@@ -85,7 +85,8 @@ export function MessageBubble({
   const receiptStatus = isFailed ? "failed" : resolvedDeliveryStatus;
   const isEncrypted = Boolean(message.is_encrypted);
   const hasEncryptedAttachments = (message.attachments ?? []).some((attachment) => Boolean(attachment.is_encrypted));
-  const canForward = !message.is_deleted && !isFailed && !isLocalUnsent && !isEncrypted && !hasEncryptedAttachments;
+  const hasViewOnceAttachments = (message.attachments ?? []).some((attachment) => Boolean(attachment.view_once));
+  const canForward = !message.is_deleted && !isFailed && !isLocalUnsent && !isEncrypted && !hasEncryptedAttachments && !hasViewOnceAttachments;
   const { media, audio, files } = useMemo(() => splitAttachments(message), [message]);
   const callEvent = useMemo(() => getCallEventPresentation(message), [message]);
   const readLabel = readByNames.length
@@ -122,6 +123,7 @@ export function MessageBubble({
     if (connection?.saveData || ["slow-2g", "2g"].includes(connection?.effectiveType || "")) return;
     const eligible = message.attachments
       .filter((attachment) => {
+        if (attachment.view_once) return false;
         const kind = (attachment.media_kind || attachment.mime_type || "").toLowerCase();
         return !kind.startsWith("video") && !kind.startsWith("audio") && attachment.size > 0 && attachment.size <= 8 * 1024 * 1024;
       })
@@ -233,7 +235,7 @@ export function MessageBubble({
             disabled={actionPending}
           />
           {callEvent ? <CallEventMessage event={callEvent} /> : null}
-          <MediaMessage attachments={media} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} warmMedia={warmMedia} />
+          <MediaMessage attachments={media} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} warmMedia={warmMedia} own={own} />
 
           {hasCopySurface ? (
             <div className="ms-message-copy">

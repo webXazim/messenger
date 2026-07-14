@@ -82,7 +82,7 @@ export async function fetchAttachmentBlobForUser(
   signal?: AbortSignal,
   disposition: MediaDisposition = "inline",
 ) {
-  if (attachment?.id && currentUserId) {
+  if (attachment?.id && currentUserId && !attachment.view_once) {
     const cached = getSessionMedia(currentUserId, attachment);
     if (cached) return cached;
   }
@@ -108,7 +108,7 @@ export async function fetchAttachmentBlobForUser(
     const decrypted = await decryptAttachment(currentUserId, attachment, blob);
     blob = decrypted.blob;
   }
-  if (attachment?.id && currentUserId) {
+  if (attachment?.id && currentUserId && !attachment.view_once) {
     rememberSessionMedia(currentUserId, attachment, blob);
     void generateAndStoreLocalPreview(currentUserId, attachment, blob).catch(() => undefined);
   }
@@ -118,7 +118,7 @@ export async function fetchAttachmentBlobForUser(
 function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: string) {
   const [previewSrc, setPreviewSrc] = useState("");
   useEffect(() => {
-    if (!attachment?.id || !currentUserId) {
+    if (!attachment?.id || !currentUserId || attachment.view_once) {
       setPreviewSrc("");
       return;
     }
@@ -152,6 +152,7 @@ function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: st
     attachment?.encryption?.preview_ciphertext,
     attachment?.encryption?.preview_nonce,
     attachment?.id,
+    attachment?.view_once,
     currentUserId,
   ]);
   return previewSrc;
@@ -402,7 +403,7 @@ export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; cl
   },
 );
 
-export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId, autoPlay = false }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string; autoPlay?: boolean }) {
+export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId, autoPlay = false, restricted = false }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string; autoPlay?: boolean; restricted?: boolean }) {
   const { resolvedSrc, failed, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
   const posterMedia = useAuthenticatedMediaUrl(posterSrc || "", undefined, currentUserId);
   const localPosterSrc = useLocalMediaPreview(attachment, currentUserId);
@@ -420,6 +421,8 @@ export function AuthenticatedVideo({ src, posterSrc, className, attachment, curr
       src={resolvedSrc || undefined}
       poster={posterMedia.resolvedSrc || localPosterSrc || undefined}
       controls
+      controlsList={restricted ? "nodownload noremoteplayback" : undefined}
+      disablePictureInPicture={restricted}
       autoPlay={autoPlay}
       playsInline
       preload={resolvedSrc ? "metadata" : "none"}

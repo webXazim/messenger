@@ -41,6 +41,7 @@ from .models import (
     ConversationParticipant,
     Message,
     MessageAttachment,
+    MessageAttachmentViewReceipt,
     MessageDelivery,
     MessageEditHistory,
     MessageReaction,
@@ -2020,12 +2021,13 @@ def make_realtime_safe(value):
         return [make_realtime_safe(v) for v in value]
     return value
 
-def build_media_access_token(*, resource_type, resource_id, user_id=None):
+def build_media_access_token(*, resource_type, resource_id, user_id=None, purpose="standard"):
     payload = {
         "resource_type": resource_type,
         "resource_id": str(resource_id),
         "user_id": str(user_id) if user_id else None,
         "issued_at": timezone.now().isoformat(),
+        "purpose": purpose,
     }
     token = signing.dumps(payload, salt=MEDIA_TOKEN_SALT)
     return token
@@ -2050,7 +2052,7 @@ def validate_media_access_token(token, *, resource_type, resource_id, user=None)
     return payload
 
 
-def create_media_access_payload(*, actor, resource_type, resource_id, request=None, disposition="attachment"):
+def create_media_access_payload(*, actor, resource_type, resource_id, request=None, disposition="attachment", purpose="standard"):
     """Build signed media access metadata for preview/download use cases.
 
     Supported resource types: attachment, pending_upload.
@@ -2063,6 +2065,7 @@ def create_media_access_payload(*, actor, resource_type, resource_id, request=No
         resource_type=normalized_resource_type,
         resource_id=resource_id,
         user_id=actor.id if actor else None,
+        purpose=purpose,
     )
 
     if normalized_resource_type == "attachment":
@@ -2100,6 +2103,38 @@ def create_media_access_payload(*, actor, resource_type, resource_id, request=No
         },
     )
     return payload
+
+
+@transaction.atomic
+def consume_view_once_attachment(*, actor, attachment_id, request=None):
+    attachment = (
+        MessageAttachment.objects.select_for_update()
+        .select_related("message", "message__conversation", "message__sender")
+        .filter(
+            id=attachment_id,
+            message__conversation__participants__user=actor,
+            message__conversation__participants__left_at__isnull=True,
+            scan_status=MessageAttachment.ScanStatus.CLEAN,
+        )
+        .first()
+    )
+    if not attachment or not attachment.view_once:
+        raise ValidationError({"attachment": "View-once attachment was not found."})
+    if attachment.message.sender_id == actor.id:
+        raise PermissionDenied("Sent view-once media cannot be reopened by the sender.")
+    if attachment.media_kind not in {MessageAttachment.MediaKind.IMAGE, MessageAttachment.MediaKind.VIDEO}:
+        raise ValidationError({"attachment": "Only images and videos can be viewed once."})
+    if MessageAttachmentViewReceipt.objects.filter(attachment=attachment, user=actor).exists():
+        raise PermissionDenied("This view-once attachment has already been opened.")
+    MessageAttachmentViewReceipt.objects.create(attachment=attachment, user=actor)
+    return create_media_access_payload(
+        actor=actor,
+        resource_type="attachment",
+        resource_id=attachment.id,
+        request=request,
+        disposition="inline",
+        purpose="view_once",
+    )
 
 
 @transaction.atomic
@@ -2376,8 +2411,10 @@ def send_message(
     transcript_payload=None,
     encryption=None,
     attachment_encryption=None,
+    view_once_attachment_ids=None,
 ):
     attachment_ids = attachment_ids or []
+    view_once_attachment_ids = {str(value) for value in (view_once_attachment_ids or [])}
     text = sanitize_chat_text(text, max_length=20000, multiline=True)
     client_temp_id = (client_temp_id or "").strip()[:100]
     conversation = _lock_conversation_for_send(conversation)
@@ -2411,6 +2448,16 @@ def send_message(
     uploads = []
     if attachment_ids:
         uploads = _validate_uploads_for_message(actor, attachment_ids)
+        upload_ids = {str(upload.id) for upload in uploads}
+        if not view_once_attachment_ids.issubset(upload_ids):
+            raise ValidationError({"view_once_attachment_ids": "View-once uploads must belong to this message."})
+        invalid_view_once = [
+            upload for upload in uploads
+            if str(upload.id) in view_once_attachment_ids
+            and (upload.media_kind or media_kind_from_mime(upload.mime_type)) not in {PendingUpload.MediaKind.IMAGE, PendingUpload.MediaKind.VIDEO}
+        ]
+        if invalid_view_once:
+            raise ValidationError({"view_once_attachment_ids": "Only images and videos can be sent as view once."})
         requires_encrypted_attachments = bool(encryption_payload or attachment_encryption_payloads)
         missing_encrypted_uploads = [
             str(upload.id) for upload in uploads
@@ -2491,6 +2538,7 @@ def send_message(
                         else {}
                     ),
                 },
+                view_once=str(upload.id) in view_once_attachment_ids,
             )
             with upload.file.open("rb") as source:
                 attachment.file.save(Path(upload.file.name).name, File(source), save=False)
@@ -2548,6 +2596,8 @@ def forward_message(actor, source_message, target_conversation, client_temp_id="
         raise ValidationError({"message": "Encrypted messages must be decrypted and re-encrypted client-side before forwarding."})
     if source_message.attachments.filter(metadata__encrypted_attachment=True).exists():
         raise ValidationError({"message": "Messages with encrypted attachments must be re-encrypted client-side before forwarding."})
+    if source_message.attachments.filter(view_once=True).exists():
+        raise ValidationError({"message": "View-once media cannot be forwarded."})
     forwarded = Message.objects.create(
         conversation=target_conversation,
         sender=actor,

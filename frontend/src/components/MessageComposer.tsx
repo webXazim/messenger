@@ -264,6 +264,10 @@ export function MessageComposer({
     return current.filter((item) => item.localId !== localId);
   });
 
+  const toggleViewOnce = (localId: string) => {
+    setPendingUploads((current) => current.map((item) => item.localId === localId ? { ...item, viewOnce: !item.viewOnce } : item));
+  };
+
   useEffect(() => () => {
     Object.values(uploadControllersRef.current).forEach((controller) => controller.abort());
     pendingUploadsRef.current.forEach(revokeUploadPreview);
@@ -300,8 +304,8 @@ export function MessageComposer({
         const optimisticAttachments = submittedUploads.map((item) => ({
           id: String(item.uploadId),
           original_name: item.fileName,
-          mime_type: item.file.type || "application/octet-stream",
-          media_kind: item.file.type.startsWith("video/") ? "video" : item.file.type.startsWith("image/") ? "image" : item.file.type.startsWith("audio/") ? "audio" : "file",
+          mime_type: item.file.type || (item.fileName.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream"),
+          media_kind: item.mediaKind || (item.file.type.startsWith("video/") ? "video" : item.file.type.startsWith("image/") ? "image" : item.file.type.startsWith("audio/") ? "audio" : item.fileName.toLowerCase().endsWith(".pdf") ? "pdf" : "file"),
           size: item.file.size,
           width: item.width,
           height: item.height,
@@ -310,6 +314,9 @@ export function MessageComposer({
           file_url: item.previewUrl,
           preview_url: item.previewUrl,
           thumbnail_url: item.thumbnailUrl || (item.file.type.startsWith("image/") ? item.previewUrl : null),
+          view_once: Boolean(item.viewOnce),
+          view_once_opened: false,
+          can_open_view_once: false,
         }));
         pendingUploadsRef.current = [];
         setPendingUploads([]);
@@ -321,6 +328,7 @@ export function MessageComposer({
             type: "text",
             text: submittedText,
             attachment_ids: uploadedAttachmentIds,
+            view_once_attachment_ids: submittedUploads.filter((item) => item.viewOnce && item.uploadId).map((item) => item.uploadId as string),
             _optimistic_attachments: optimisticAttachments,
             client_temp_id: clientTempId,
             reply_to_id: editingMessage ? null : (replyTo?.id ?? null),
@@ -363,7 +371,7 @@ export function MessageComposer({
         />
       ) : null}
 
-      <UploadQueue uploads={pendingUploads} onRetry={retryUpload} onRemove={removeUpload} />
+      <UploadQueue uploads={pendingUploads} onRetry={retryUpload} onRemove={removeUpload} onToggleViewOnce={toggleViewOnce} />
 
       {disabledReason ? (
         <div className="ms-message-composer__disabled-note" role="status" aria-live="polite">

@@ -360,6 +360,16 @@
   padding: 0.5rem 0.5rem 0.5rem 0;
 }
 
+.ms-upload-card__pdf-pending {
+  min-height: 10rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(110deg, #f1f1f1 25%, #fafafa 40%, #f1f1f1 55%);
+  background-size: 220% 100%;
+  color: var(--ms-color-ink-muted);
+  animation: ms-media-shell-shimmer 1.2s ease-in-out infinite;
+}
+
 .ms-upload-card__copy {
   min-width: 0;
   display: grid;
@@ -433,6 +443,12 @@
 .ms-upload-card__actions button:hover {
   background: var(--ms-color-surface-strong);
   color: var(--ms-color-ink);
+}
+
+.ms-upload-card__actions button.is-active {
+  border-color: var(--ms-color-ink);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
 }
 
 .ms-upload-card__actions svg {

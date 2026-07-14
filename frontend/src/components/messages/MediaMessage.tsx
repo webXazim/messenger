@@ -1,10 +1,78 @@
 import { useEffect, useState } from "react";
 import type { MessageAttachment } from "../../types/chat";
 import { AuthenticatedAttachmentPreview, AuthenticatedImage, AuthenticatedVideo } from "../AuthenticatedMedia";
+import { chatApi } from "../../api/chat";
 import { getAttachmentPosterUrl, getAttachmentPreviewUrl, getAttachmentPlaybackUrl, getAttachmentRatioStyle } from "./messagePresentation";
 
 function PlayIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 10 6-10 6V6Z" /></svg>;
+}
+
+function ViewOnceIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v8M10 10l2-2 2 2" /></svg>;
+}
+
+function CloseIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" /></svg>;
+}
+
+function ViewOnceMedia({ attachment, currentUserId, own }: { attachment: MessageAttachment; currentUserId?: string; own: boolean }) {
+  const [opened, setOpened] = useState(Boolean(attachment.view_once_opened));
+  const [opening, setOpening] = useState(false);
+  const [sessionUrl, setSessionUrl] = useState("");
+  const [error, setError] = useState("");
+  const isVideo = (attachment.mime_type || "").toLowerCase().startsWith("video/") || attachment.media_kind === "video";
+  const available = !own && !opened && attachment.can_open_view_once !== false;
+
+  useEffect(() => {
+    if (!sessionUrl) return;
+    const hide = () => {
+      if (document.hidden) setSessionUrl("");
+    };
+    document.addEventListener("visibilitychange", hide);
+    return () => document.removeEventListener("visibilitychange", hide);
+  }, [sessionUrl]);
+
+  const open = async () => {
+    if (!available || opening) return;
+    setOpening(true);
+    setError("");
+    try {
+      const url = await chatApi.openViewOnceAttachment(attachment.id);
+      setOpened(true);
+      setSessionUrl(url);
+    } catch (reason) {
+      const status = (reason as { response?: { status?: number } })?.response?.status;
+      if (status === 403) setOpened(true);
+      setError(reason instanceof Error ? reason.message : "This media cannot be opened again.");
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <div className="ms-view-once">
+      <button type="button" className="ms-view-once__card" onClick={() => void open()} disabled={!available || opening}>
+        <span className="ms-view-once__icon"><ViewOnceIcon /></span>
+        <span>
+          <strong>{opened ? "Opened" : own ? `View once ${isVideo ? "video" : "photo"} sent` : `View once ${isVideo ? "video" : "photo"}`}</strong>
+          <small>{error || (available ? "Tap to view" : "This media is no longer available")}</small>
+        </span>
+      </button>
+      {sessionUrl ? (
+        <div className="ms-view-once__backdrop" role="dialog" aria-modal="true" aria-label={`View once ${isVideo ? "video" : "image"}`} onContextMenu={(event) => event.preventDefault()}>
+          <div className="ms-view-once__viewer">
+            {isVideo ? (
+              <AuthenticatedVideo src={sessionUrl} posterSrc="" attachment={attachment} currentUserId={currentUserId} autoPlay restricted />
+            ) : (
+              <AuthenticatedImage src={sessionUrl} alt="View once image" attachment={attachment} currentUserId={currentUserId} />
+            )}
+            <button type="button" className="ms-view-once__close" onClick={() => setSessionUrl("")} aria-label="Close view-once media"><CloseIcon /></button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function LazyVideo({ attachment, src, posterSrc, currentUserId }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string }) {
@@ -41,16 +109,19 @@ export function MediaMessage({
   currentUserId,
   onPreviewAttachment,
   warmMedia = false,
+  own = false,
 }: {
   attachments: MessageAttachment[];
   currentUserId?: string;
   onPreviewAttachment?: (attachmentId: string) => void;
   warmMedia?: boolean;
+  own?: boolean;
 }) {
   if (!attachments.length) return null;
   return (
     <div className={`ms-message-media ms-message-media--count-${Math.min(attachments.length, 4)}`}>
       {attachments.map((attachment) => {
+        if (attachment.view_once) return <ViewOnceMedia key={attachment.id} attachment={attachment} currentUserId={currentUserId} own={own} />;
         const isVideo = (attachment.mime_type || "").toLowerCase().startsWith("video/") || attachment.media_kind === "video";
         const mediaUrl = isVideo ? getAttachmentPlaybackUrl(attachment) : getAttachmentPreviewUrl(attachment);
         const posterUrl = isVideo ? getAttachmentPosterUrl(attachment) : "";

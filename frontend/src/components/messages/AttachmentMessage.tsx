@@ -12,7 +12,7 @@ export function AttachmentMessage({ attachments, currentUserId, onPreviewAttachm
   return (
     <div className="ms-file-message-list">
       {attachments.map((attachment) => {
-        const tone = attachmentTone(attachment.mime_type || "");
+        const tone = attachmentTone(attachment.mime_type || "", attachment.original_name);
         const details = [attachment.mime_type || "Document", formatFileSize(attachment.size)].filter(Boolean).join(" · ");
         if (tone === "pdf") {
           return (

@@ -30,6 +30,9 @@ export type MessageAttachment = {
   signed_preview?: { url?: string; preview_url?: string } | null;
   is_encrypted?: boolean;
   encryption?: AttachmentEncryptionEnvelope | null;
+  view_once?: boolean;
+  view_once_opened?: boolean;
+  can_open_view_once?: boolean;
 };
 
 export type Reaction = {

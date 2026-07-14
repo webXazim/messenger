@@ -2154,6 +2154,54 @@ class ChatApiTests(TestCase):
         download = self.client.get(reverse("attachment-download", kwargs={"attachment_id": attachment_id}), {"token": token})
         self.assertEqual(download.status_code, 200)
 
+    def test_view_once_media_grants_exactly_one_recipient_session(self):
+        image_bytes = BytesIO()
+        Image.new("RGB", (8, 6), color=(25, 50, 75)).save(image_bytes, format="PNG")
+        upload_response = self.client.post(
+            reverse("upload-create"),
+            {"file": SimpleUploadedFile("secret.png", image_bytes.getvalue(), content_type="image/png")},
+            format="multipart",
+        )
+        self.assertEqual(upload_response.status_code, 201)
+        conversation = self.create_direct_conversation()
+        message_response = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {
+                "attachment_ids": [str(upload_response.data["id"])],
+                "view_once_attachment_ids": [str(upload_response.data["id"])],
+            },
+            format="json",
+        )
+        self.assertEqual(message_response.status_code, 201)
+        attachment = message_response.data["attachments"][0]
+        self.assertTrue(attachment["view_once"])
+        self.assertEqual(attachment["preview_url"], "")
+        self.assertIsNone(attachment["thumbnail_url"])
+        self.assertIsNone(attachment["signed_preview"])
+
+        attachment_id = attachment["id"]
+        sender_open = self.client.post(reverse("attachment-view-once-open", kwargs={"attachment_id": attachment_id}), format="json")
+        self.assertEqual(sender_open.status_code, 403)
+        standard_token = self.client.post(reverse("attachment-media-token", kwargs={"resource_id": attachment_id}), format="json")
+        self.assertEqual(standard_token.status_code, 403)
+
+        self.client.force_authenticate(self.other)
+        opened = self.client.post(reverse("attachment-view-once-open", kwargs={"attachment_id": attachment_id}), format="json")
+        self.assertEqual(opened.status_code, 200)
+        preview = self.client.get(
+            reverse("attachment-preview", kwargs={"attachment_id": attachment_id}),
+            {"token": opened.data["token"]},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("no-store", preview.headers.get("Cache-Control", ""))
+        second_open = self.client.post(reverse("attachment-view-once-open", kwargs={"attachment_id": attachment_id}), format="json")
+        self.assertEqual(second_open.status_code, 403)
+        download = self.client.get(
+            reverse("attachment-download", kwargs={"attachment_id": attachment_id}),
+            {"token": opened.data["token"]},
+        )
+        self.assertEqual(download.status_code, 403)
+
     def test_user_search_online_status_uses_presence(self):
         set_presence(self.other, device_id="mobile")
         response = self.client.get("/api/v1/chat/users/search/", {"q": "other"})

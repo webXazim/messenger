@@ -245,6 +245,17 @@ class MessageAttachment(BaseUUIDModel):
     scan_notes = models.CharField(max_length=255, blank=True)
     scanned_at = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    view_once = models.BooleanField(default=False, db_index=True)
+
+
+class MessageAttachmentViewReceipt(BaseUUIDModel):
+    attachment = models.ForeignKey(MessageAttachment, on_delete=models.CASCADE, related_name="view_receipts")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="view_once_attachment_receipts")
+    opened_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["attachment", "user"], name="uniq_view_once_attachment_user")]
+        indexes = [models.Index(fields=["user", "opened_at"])]
 
 
 class MessageReaction(BaseUUIDModel):

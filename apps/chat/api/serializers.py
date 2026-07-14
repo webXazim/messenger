@@ -309,6 +309,8 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
     signed_preview = serializers.SerializerMethodField()
     is_encrypted = serializers.SerializerMethodField()
     encryption = serializers.SerializerMethodField()
+    view_once_opened = serializers.SerializerMethodField()
+    can_open_view_once = serializers.SerializerMethodField()
 
     class Meta:
         model = MessageAttachment
@@ -336,9 +338,14 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
             "signed_preview",
             "is_encrypted",
             "encryption",
+            "view_once",
+            "view_once_opened",
+            "can_open_view_once",
         )
 
     def get_file_url(self, obj) -> str:
+        if obj.view_once:
+            return ""
         request = self.context.get("request")
         url = reverse("attachment-download", kwargs={"attachment_id": obj.id})
         return request.build_absolute_uri(url) if request else url
@@ -347,11 +354,15 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
         return self.get_file_url(obj)
 
     def get_preview_url(self, obj) -> str:
+        if obj.view_once:
+            return ""
         request = self.context.get("request")
         url = reverse("attachment-preview", kwargs={"attachment_id": obj.id})
         return request.build_absolute_uri(url) if request else url
 
     def get_thumbnail_url(self, obj) -> str | None:
+        if obj.view_once:
+            return None
         if not obj.thumbnail:
             return None
         request = self.context.get("request")
@@ -365,6 +376,8 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
         return public_media_metadata(obj.metadata)
 
     def get_can_preview_inline(self, obj) -> bool:
+        if obj.view_once:
+            return False
         if (obj.metadata or {}).get("encrypted_attachment"):
             return False
         mime = (obj.mime_type or "").lower()
@@ -375,7 +388,14 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
 
     def get_encryption(self, obj) -> dict[str, Any] | None:
         metadata = obj.metadata or {}
-        return metadata.get("encryption") if metadata.get("encrypted_attachment") else None
+        if not metadata.get("encrypted_attachment"):
+            return None
+        encryption = dict(metadata.get("encryption") or {})
+        if obj.view_once:
+            encryption.pop("preview_ciphertext", None)
+            encryption.pop("preview_nonce", None)
+            encryption.pop("preview_mime_type", None)
+        return encryption
 
     def _get_media_actor(self):
         request = self.context.get("request")
@@ -388,6 +408,8 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
         return None
 
     def get_signed_download(self, obj) -> dict[str, Any] | None:
+        if obj.view_once:
+            return None
         request = self.context.get("request")
         actor = self._get_media_actor()
         if not actor:
@@ -395,11 +417,21 @@ class MessageAttachmentSerializer(serializers.ModelSerializer):
         return create_media_access_payload(actor=actor, resource_type="attachment", resource_id=obj.id, request=request, disposition="attachment")
 
     def get_signed_preview(self, obj) -> dict[str, Any] | None:
+        if obj.view_once:
+            return None
         request = self.context.get("request")
         actor = self._get_media_actor()
         if not actor:
             return None
         return create_media_access_payload(actor=actor, resource_type="attachment", resource_id=obj.id, request=request, disposition="inline")
+
+    def get_view_once_opened(self, obj) -> bool:
+        actor = self._get_media_actor()
+        return bool(actor and obj.view_once and obj.view_receipts.filter(user_id=actor.id).exists())
+
+    def get_can_open_view_once(self, obj) -> bool:
+        actor = self._get_media_actor()
+        return bool(actor and obj.view_once and obj.message.sender_id != actor.id and not obj.view_receipts.filter(user_id=actor.id).exists())
 
 
 class MessageAttachmentPreviewSerializer(serializers.ModelSerializer):
@@ -409,6 +441,7 @@ class MessageAttachmentPreviewSerializer(serializers.ModelSerializer):
     download_url = serializers.SerializerMethodField()
     preview_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
+    view_once_opened = serializers.SerializerMethodField()
 
     class Meta:
         model = MessageAttachment
@@ -427,19 +460,27 @@ class MessageAttachmentPreviewSerializer(serializers.ModelSerializer):
             "thumbnail_url",
             "download_url",
             "preview_url",
+            "view_once",
+            "view_once_opened",
         )
 
     def get_download_url(self, obj) -> str:
+        if obj.view_once:
+            return ""
         request = self.context.get("request")
         url = reverse("attachment-download", kwargs={"attachment_id": obj.id})
         return request.build_absolute_uri(url) if request else url
 
     def get_preview_url(self, obj) -> str:
+        if obj.view_once:
+            return ""
         request = self.context.get("request")
         url = reverse("attachment-preview", kwargs={"attachment_id": obj.id})
         return request.build_absolute_uri(url) if request else url
 
     def get_thumbnail_url(self, obj) -> str | None:
+        if obj.view_once:
+            return None
         if not obj.thumbnail:
             return None
         request = self.context.get("request")
@@ -451,6 +492,11 @@ class MessageAttachmentPreviewSerializer(serializers.ModelSerializer):
 
     def get_metadata(self, obj) -> dict[str, Any]:
         return public_media_metadata(obj.metadata)
+
+    def get_view_once_opened(self, obj) -> bool:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        return bool(getattr(actor, "is_authenticated", False) and obj.view_once and obj.view_receipts.filter(user_id=actor.id).exists())
 
 
 class PendingUploadSerializer(serializers.ModelSerializer):
@@ -1036,6 +1082,7 @@ class MessageCreateSerializer(serializers.Serializer):
     reply_to_id = serializers.UUIDField(required=False, allow_null=True)
     client_temp_id = serializers.CharField(required=False, allow_blank=True)
     attachment_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=True)
+    view_once_attachment_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=True)
     attachment_encryption = AttachmentEncryptionEnvelopeSerializer(many=True, required=False)
     entities = MessageEntitySerializer(many=True, required=False)
     is_encrypted = serializers.BooleanField(required=False, default=False)
@@ -1054,6 +1101,8 @@ class MessageCreateSerializer(serializers.Serializer):
             attrs["type"] = Message.MessageType.AUDIO
         if attrs.get("attachment_encryption") and not attrs.get("attachment_ids"):
             raise serializers.ValidationError({"attachment_encryption": "Encrypted attachment metadata requires attachment uploads."})
+        if attrs.get("view_once_attachment_ids") and not attrs.get("attachment_ids"):
+            raise serializers.ValidationError({"view_once_attachment_ids": "View-once media requires attachment uploads."})
         if attrs.get("is_encrypted") or attrs.get("encryption"):
             attrs["is_encrypted"] = True
             if not attrs.get("encryption"):

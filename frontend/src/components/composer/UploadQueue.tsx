@@ -9,6 +9,7 @@ function formatFileSize(size: number) {
 
 function attachmentKindLabel(file: File) {
   const mime = file.type.toLowerCase();
+  if (mime === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return "PDF";
   if (mime.startsWith("image/")) return "Image";
   if (mime.startsWith("video/")) return "Video";
   if (mime.startsWith("audio/")) return "Audio";
@@ -23,14 +24,20 @@ function RetryIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></svg>;
 }
 
+function ViewOnceIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v8M10 10l2-2 2 2" /></svg>;
+}
+
 export function UploadQueue({
   uploads,
   onRetry,
   onRemove,
+  onToggleViewOnce,
 }: {
   uploads: PendingComposerUpload[];
   onRetry: (localId: string) => void;
   onRemove: (localId: string) => void;
+  onToggleViewOnce: (localId: string) => void;
 }) {
   if (!uploads.length) return null;
 
@@ -38,7 +45,7 @@ export function UploadQueue({
     <div className="ms-upload-queue" aria-label="Pending attachments">
       {uploads.map((upload) => {
         const mime = upload.file.type.toLowerCase();
-        const isPdf = mime === "application/pdf";
+        const isPdf = mime === "application/pdf" || upload.fileName.toLowerCase().endsWith(".pdf");
         const isVisualMedia = mime.startsWith("image/") || mime.startsWith("video/") || isPdf;
         const kind = attachmentKindLabel(upload.file);
         const progress = Math.max(0, Math.min(100, upload.progress ?? 0));
@@ -73,7 +80,7 @@ export function UploadQueue({
                 />
               ) : null}
               {isPdf && upload.thumbnailUrl ? <img src={upload.thumbnailUrl} alt={`First page of ${upload.fileName}`} /> : null}
-              {isPdf && !upload.thumbnailUrl && upload.previewUrl ? <iframe src={`${upload.previewUrl}#page=1&toolbar=0&navpanes=0`} title={`Preview ${upload.fileName}`} /> : null}
+              {isPdf && !upload.thumbnailUrl ? <span className="ms-upload-card__pdf-pending">Preparing first page…</span> : null}
               {!upload.previewUrl || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
             </div>
             <div className="ms-upload-card__copy">
@@ -87,6 +94,18 @@ export function UploadQueue({
               ) : null}
             </div>
             <div className="ms-upload-card__actions">
+              {(mime.startsWith("image/") || mime.startsWith("video/")) ? (
+                <button
+                  type="button"
+                  className={upload.viewOnce ? "is-active" : ""}
+                  onClick={() => onToggleViewOnce(upload.localId)}
+                  aria-pressed={Boolean(upload.viewOnce)}
+                  aria-label={`${upload.viewOnce ? "Disable" : "Enable"} view once for ${upload.fileName}`}
+                  title={upload.viewOnce ? "View once enabled" : "Send as view once"}
+                >
+                  <ViewOnceIcon />
+                </button>
+              ) : null}
               {upload.status === "failed" ? (
                 <button type="button" onClick={() => onRetry(upload.localId)} aria-label={`Retry ${upload.fileName}`} title="Retry upload">
                   <RetryIcon />

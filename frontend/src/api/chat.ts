@@ -119,6 +119,7 @@ function firstNumber(...values: unknown[]) {
 
 function inferMediaKind(file: File, mimeType?: string) {
   const normalizedMime = firstString(mimeType, file.type).toLowerCase();
+  if (normalizedMime === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return "pdf";
   if (normalizedMime.startsWith("image/")) return "image";
   if (normalizedMime.startsWith("video/")) return "video";
   if (normalizedMime.startsWith("audio/")) return "audio";
@@ -277,6 +278,9 @@ function normalizeAttachment(value: unknown): import("../types/chat").MessageAtt
     signed_download: Object.keys(signedDownload).length ? { download_url: signedDownloadUrl, url: signedDownloadUrl } : null,
     signed_preview: Object.keys(signedPreview).length ? { url: signedPreviewUrl, preview_url: signedPreviewUrl } : null,
     is_encrypted: isEncrypted,
+    view_once: firstBoolean(item.view_once),
+    view_once_opened: firstBoolean(item.view_once_opened),
+    can_open_view_once: firstBoolean(item.can_open_view_once),
     encryption: Object.keys(encryption).length ? {
       version: firstString(encryption.version) || undefined,
       algorithm: firstString(encryption.algorithm),
@@ -852,6 +856,13 @@ export const chatApi = {
     );
     const response = await http.post(`/chat/conversations/${conversationId}/messages/`, requestPayload);
     return normalizeMessage(unwrapData<unknown>(response.data));
+  },
+  async openViewOnceAttachment(attachmentId: string) {
+    const response = await http.post(`/chat/attachments/${attachmentId}/view-once/open/`);
+    const payload = asRecord(unwrapData<unknown>(response.data));
+    const url = resolveMediaUrl(firstString(payload.preview_url, payload.url));
+    if (!url) throw new Error("A secure viewing session could not be created.");
+    return url;
   },
   async editMessage(messageId: string, payload: Record<string, unknown>) {
     const response = await http.patch(`/chat/messages/${messageId}/manage/`, payload);

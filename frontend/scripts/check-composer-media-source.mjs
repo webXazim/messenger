@@ -52,7 +52,8 @@ assert.ok(mediaMessage.includes("currentUserId={currentUserId} autoPlay"), "The 
 assert.equal(mediaMessage.includes("ms-message-media__actions"), false, "Inline media still renders duplicate download or expand controls.");
 assert.ok(mediaPreviewCache.includes('import("pdfjs-dist")'), "PDF previews are not rendered privately in the browser.");
 assert.ok(attachmentMessage.includes("ms-pdf-message__preview"), "PDF attachments do not expose their first-page preview inline.");
-assert.ok(mediaModal.includes("{isImage ? <button") && mediaModal.includes(">Save</button> : null}"), "The fullscreen download action is not limited to images.");
+assert.ok(mediaModal.includes("ms-image-viewer__stage") && mediaModal.includes('aria-label="Download image"'), "The fullscreen image viewer or its image-only download action is missing.");
+assert.ok(mediaModal.includes("setImageControlsVisible((visible) => !visible)"), "Fullscreen image controls cannot be toggled from the image canvas.");
 assert.ok(views.includes("StreamingHttpResponse"), "Media byte-range responses are missing.");
 assert.ok(views.includes('status=206'), "Media byte-range requests do not return partial content.");
 assert.ok(views.includes('status=416'), "Invalid media ranges are not rejected correctly.");
