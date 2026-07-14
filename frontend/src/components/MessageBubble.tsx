@@ -223,6 +223,15 @@ export function MessageBubble({
                   {message.links.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}
                 </div>
               ) : null}
+              <MessageMeta
+                message={message}
+                own={own}
+                receiptStatus={receiptStatus}
+                receiptSummary={receiptSummary}
+                onRetry={onRetry}
+                actionError={actionError}
+                actionPending={actionPending}
+              />
             </div>
           ) : null}
 
@@ -244,6 +253,7 @@ export function MessageBubble({
                 compact={Boolean(message.voice_note?.is_voice_note)}
                 attachment={attachment}
                 currentUserId={currentUserId}
+                waveformData={message.voice_note?.waveform ?? (Array.isArray(attachment.metadata?.waveform) ? attachment.metadata.waveform.map(Number) : undefined)}
               />
             );
           })}
@@ -259,15 +269,17 @@ export function MessageBubble({
           ) : null}
         </article>
 
-        <MessageMeta
-          message={message}
-          own={own}
-          receiptStatus={receiptStatus}
-          receiptSummary={receiptSummary}
-          onRetry={onRetry}
-          actionError={actionError}
-          actionPending={actionPending}
-        />
+        {!hasCopySurface ? (
+          <MessageMeta
+            message={message}
+            own={own}
+            receiptStatus={receiptStatus}
+            receiptSummary={receiptSummary}
+            onRetry={onRetry}
+            actionError={actionError}
+            actionPending={actionPending}
+          />
+        ) : null}
       </div>
     </div>
   );

@@ -101,7 +101,7 @@ export type Message = {
   retry_count?: number;
   is_deleted?: boolean;
   transcript?: { text?: string } | null;
-  voice_note?: { is_voice_note: boolean; duration_seconds?: number | string | null } | null;
+  voice_note?: { is_voice_note: boolean; duration_seconds?: number | string | null; waveform?: number[] } | null;
   call_event?: {
     system_event?: string;
     call_id?: string;

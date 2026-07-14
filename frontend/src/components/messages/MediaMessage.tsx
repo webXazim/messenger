@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { MessageAttachment } from "../../types/chat";
 import { AuthenticatedImage, AuthenticatedVideo } from "../AuthenticatedMedia";
 import { AttachmentDownloadButton } from "../AttachmentDownloadButton";
@@ -9,6 +10,23 @@ function DownloadIcon() {
 
 function ExpandIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg>;
+}
+
+function PlayIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 10 6-10 6V6Z" /></svg>;
+}
+
+function LazyVideo({ attachment, src, posterSrc, currentUserId }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string }) {
+  const [playbackRequested, setPlaybackRequested] = useState(false);
+  if (playbackRequested) {
+    return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} />;
+  }
+  return (
+    <button type="button" className="ms-message-media__video-poster" onClick={() => setPlaybackRequested(true)} aria-label={`Play ${attachment.original_name}`}>
+      {posterSrc ? <AuthenticatedImage src={posterSrc} alt="" /> : <span className="ms-message-media__video-placeholder" aria-hidden="true">VID</span>}
+      <span className="ms-message-media__play"><PlayIcon /></span>
+    </button>
+  );
 }
 
 export function MediaMessage({
@@ -27,14 +45,16 @@ export function MediaMessage({
         const isVideo = (attachment.mime_type || "").toLowerCase().startsWith("video/") || attachment.media_kind === "video";
         const mediaUrl = isVideo ? getAttachmentPlaybackUrl(attachment) : getAttachmentPreviewUrl(attachment);
         const posterUrl = isVideo ? getAttachmentPosterUrl(attachment) : "";
-        if (!mediaUrl) return null;
+        if (isVideo && !mediaUrl) return null;
         return (
           <div className={`ms-message-media__item ${isVideo ? "is-video" : "is-image"}`} style={getAttachmentRatioStyle(attachment)} key={attachment.id}>
             {isVideo ? (
-              <AuthenticatedVideo src={mediaUrl} posterSrc={posterUrl} attachment={attachment} currentUserId={currentUserId} />
+              <LazyVideo attachment={attachment} src={mediaUrl} posterSrc={posterUrl} currentUserId={currentUserId} />
             ) : (
               <button type="button" className="ms-message-media__preview" onClick={() => onPreviewAttachment?.(attachment.id)} aria-label={`View ${attachment.original_name}`}>
-                <AuthenticatedImage src={mediaUrl} alt={attachment.original_name} attachment={attachment} currentUserId={currentUserId} />
+                {mediaUrl
+                  ? <AuthenticatedImage src={mediaUrl} alt={attachment.original_name} attachment={attachment} currentUserId={currentUserId} />
+                  : <span className="ms-message-media__image-placeholder" aria-hidden="true">IMG</span>}
               </button>
             )}
             <div className="ms-message-media__actions">

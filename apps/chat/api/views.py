@@ -275,13 +275,17 @@ def _build_media_file_response(file_field, *, filename, mime_type="", as_attachm
 
 def _build_thumbnail_file_response(file_field, *, filename, request=None):
     guessed_type, _ = mimetypes.guess_type(filename or "")
-    return _build_media_file_response(
+    response = _build_media_file_response(
         file_field,
         filename=filename,
         mime_type=guessed_type or "image/jpeg",
         as_attachment=False,
         request=request,
     )
+    # Thumbnails are immutable for an attachment id and contain no shared-user
+    # data beyond what the authenticated request already authorized.
+    response["Cache-Control"] = "private, max-age=86400, immutable"
+    return response
 
 def _broadcast_to_conversation(conversation_id, event, data):
     channel_layer = get_channel_layer()

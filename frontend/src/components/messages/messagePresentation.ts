@@ -21,21 +21,11 @@ export function attachmentKind(attachment: MessageAttachment): AttachmentKind {
 }
 
 export function getAttachmentPreviewUrl(attachment: MessageAttachment) {
-  return attachment.preview_url
-    || attachment.signed_preview?.preview_url
-    || attachment.signed_preview?.url
-    || attachment.file_url
-    || attachment.thumbnail_url
-    || "";
+  return attachment.thumbnail_url || "";
 }
 
 export function getAttachmentPosterUrl(attachment: MessageAttachment) {
-  return attachment.thumbnail_url
-    || attachment.signed_preview?.preview_url
-    || attachment.signed_preview?.url
-    || attachment.preview_url
-    || attachment.file_url
-    || "";
+  return attachment.thumbnail_url || "";
 }
 
 export function getAttachmentPlaybackUrl(attachment: MessageAttachment) {

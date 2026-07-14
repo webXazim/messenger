@@ -1634,7 +1634,7 @@ export function ConversationPage() {
             onCancelEdit={() => setEditingMessage(null)}
             onTyping={sendTyping}
             disabledReason={composerDisabledReason}
-            onSendVoiceNote={async ({ file, fileName, mimeType, durationSeconds, clientTempId }) => {
+            onSendVoiceNote={async ({ file, fileName, mimeType, durationSeconds, clientTempId, waveform }) => {
               const upload = await uploadConversationAttachment(file, {
                 original_name: fileName,
                 mime_type: mimeType,
@@ -1655,6 +1655,7 @@ export function ConversationPage() {
                 text: "",
                 is_voice_note: true,
                 duration_seconds: durationSeconds,
+                waveform: waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100)))),
                 client_temp_id: clientTempId,
               });
             }}

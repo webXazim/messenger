@@ -40,8 +40,8 @@ export function MessageText({
         : "";
   if (!content) return null;
   return (
-    <div className={`ms-message-text ${deleted ? "is-deleted" : ""} ${encrypted && !text ? "is-encryption-status" : ""}`}>
+    <span className={`ms-message-text ${deleted ? "is-deleted" : ""} ${encrypted && !text ? "is-encryption-status" : ""}`}>
       {content}
-    </div>
+    </span>
   );
 }

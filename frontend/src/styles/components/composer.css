@@ -675,7 +675,7 @@
   }
 
   .ms-message-composer__surface:focus-within {
-    border-color: #aaaaaa;
+    border-color: #d4d4d4;
     box-shadow: none;
   }
 

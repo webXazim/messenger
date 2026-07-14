@@ -26,7 +26,6 @@
 
 .ms-message-row.is-selected {
   background: rgb(17 17 17 / 0.055);
-  box-shadow: inset 0.1875rem 0 0 var(--ms-color-ink);
 }
 
 .ms-message-avatar {
@@ -141,8 +140,7 @@
   width: fit-content;
   max-width: 100%;
   min-width: 0;
-  display: grid;
-  gap: 0.45rem;
+  display: block;
   padding: 0.58rem 0.72rem 0.56rem;
   border: 1px solid var(--ms-color-line);
   border-radius: 1rem 1rem 1rem 0.34rem;
@@ -170,6 +168,20 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.ms-message-copy > .ms-reply-preview,
+.ms-message-copy > .ms-message-transcript,
+.ms-message-copy > .ms-message-links {
+  margin-bottom: 0.4rem;
+}
+
+.ms-message-copy > .ms-message-meta {
+  display: inline-flex;
+  margin-top: 0.2rem;
+  margin-left: 0.4rem;
+  padding: 0;
+  vertical-align: baseline;
 }
 
 .ms-message-text.is-encryption-status {
@@ -409,6 +421,64 @@ button.ms-message-reply:hover {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.ms-message-media__video-poster {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: #111;
+  color: #fff;
+}
+
+.ms-message-media__video-poster img,
+.ms-message-media__video-poster .ms-media-fallback {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ms-message-media__video-placeholder {
+  color: rgb(255 255 255 / 0.72);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.ms-message-media__image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink-faint);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.ms-message-media__play {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.58);
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(0.25rem);
+}
+
+.ms-message-media__play svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: currentColor;
 }
 
 .ms-message-media__item img,
@@ -1043,21 +1113,41 @@ button.ms-message-reply:hover {
   }
 
   .ms-message-stack {
-    max-width: 92%;
+    max-width: 84%;
   }
 
   .ms-message-stack.has-rich-content,
   .ms-message-stack--rich-only {
     width: min(100%, 28rem);
-    max-width: 94%;
+    max-width: 90%;
   }
 
   .ms-message-copy {
-    padding: 0.54rem 0.65rem 0.52rem;
+    padding: 0.38rem 0.6rem 0.36rem;
+    border-radius: 0.75rem 0.75rem 0.75rem 0.25rem;
+  }
+
+  .ms-message-row--own .ms-message-copy {
+    border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
   }
 
   .ms-message-text {
     font-size: 0.875rem;
+    line-height: 1.3;
+  }
+
+  .ms-message-copy > .ms-message-meta {
+    gap: 0.125rem;
+    margin-top: 0;
+    margin-left: 0.3rem;
+    font-size: 0.575rem;
+    line-height: 1;
+  }
+
+  .ms-message-copy .ms-message-receipt,
+  .ms-message-copy .ms-message-receipt svg {
+    width: 1rem;
+    height: 0.875rem;
   }
 
   .ms-message-media__item {
@@ -1112,6 +1202,11 @@ button.ms-message-reply:hover {
 }
 
 @media (max-width: 720px) {
+  .ms-message-card {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
   .ms-message-actions {
     position: absolute;
     top: 0.25rem;

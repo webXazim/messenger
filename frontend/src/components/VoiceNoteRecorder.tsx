@@ -25,6 +25,7 @@ export type VoiceNotePayload = {
   mimeType: string;
   fileName: string;
   clientTempId: string;
+  waveform: number[];
 };
 
 const PREFERRED_RECORDING_MIME_TYPES = [
@@ -258,6 +259,7 @@ export function VoiceNoteRecorder({
         mimeType: voiceDraft.mimeType,
         fileName: voiceDraft.file.name,
         clientTempId: voiceDraft.clientTempId,
+        waveform: voiceDraft.waveform,
       });
       audioRef.current?.pause();
       if (voiceDraft.previewUrl) URL.revokeObjectURL(voiceDraft.previewUrl);

@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import time
 import wave
+import sys
+from array import array
 from contextlib import contextmanager
 from uuid import uuid4
 import mimetypes
@@ -750,6 +752,49 @@ def _extract_wav_duration_seconds(upload):
     return _quantize_duration_seconds(frames / frame_rate)
 
 
+def _extract_audio_waveform(upload, sample_count=48):
+    """Return a compact normalized waveform without retaining decoded audio."""
+    ffmpeg_binary = shutil.which("ffmpeg")
+    if not ffmpeg_binary:
+        return None, "ffmpeg_unavailable"
+    with _materialized_filefield_path(upload.file) as media_path:
+        command = [
+            ffmpeg_binary,
+            "-v", "error",
+            "-i", media_path,
+            "-map", "0:a:0",
+            "-ac", "1",
+            "-ar", "8000",
+            "-f", "s16le",
+            "-",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                timeout=MEDIA_THUMBNAIL_GENERATION_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return None, "ffmpeg_timeout"
+    if result.returncode != 0 or len(result.stdout) < 2:
+        return None, "ffmpeg_failed"
+    samples = array("h")
+    samples.frombytes(result.stdout[:len(result.stdout) - (len(result.stdout) % 2)])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return None, "empty_audio"
+    bucket_size = max(1, len(samples) // sample_count)
+    peaks = []
+    for index in range(sample_count):
+        start = index * bucket_size
+        end = len(samples) if index == sample_count - 1 else min(len(samples), start + bucket_size)
+        peaks.append(max((abs(value) for value in samples[start:end]), default=0))
+    maximum = max(peaks) or 1
+    return [max(7, min(100, round((peak / maximum) * 100))) for peak in peaks], "generated"
+
+
 def _validate_or_normalize_thumbnail(upload):
     if not upload.thumbnail:
         return None
@@ -900,6 +945,12 @@ def enrich_pending_upload_media(upload):
                 metadata,
                 server_metadata_verified=True if upload.duration_seconds is not None or details else metadata.get("server_metadata_verified"),
                 server_metadata_verified_at=timezone.now().isoformat() if upload.duration_seconds is not None or details else metadata.get("server_metadata_verified_at"),
+            )
+            waveform, waveform_status = _extract_audio_waveform(upload)
+            metadata = _replace_public_media_metadata(
+                metadata,
+                waveform=waveform or metadata.get("waveform"),
+                waveform_generation_status=waveform_status,
             )
             updates.append("metadata")
     except Exception as exc:

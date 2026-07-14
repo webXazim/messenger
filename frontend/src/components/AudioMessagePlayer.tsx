@@ -8,6 +8,7 @@ type AudioMessagePlayerProps = {
   compact?: boolean;
   attachment?: MessageAttachment;
   currentUserId?: string;
+  waveformData?: number[];
 };
 
 const SPEEDS = [1, 1.25, 1.5, 2];
@@ -62,14 +63,21 @@ function PlayIcon({ playing }: { playing: boolean }) {
     : <svg viewBox="0 0 24 24" aria-hidden="true"><path className="fill" d="m9 6 10 6-10 6V6Z" /></svg>;
 }
 
-export function AudioMessagePlayer({ src, label = "Audio", compact = false, attachment, currentUserId }: AudioMessagePlayerProps) {
+function normalizeStoredWaveform(values?: number[]) {
+  if (!values?.length) return DEFAULT_WAVEFORM;
+  return values.slice(0, 64).map((value) => Math.max(0.18, Math.min(1, Number(value) > 1 ? Number(value) / 100 : Number(value))));
+}
+
+export function AudioMessagePlayer({ src, label = "Audio", compact = false, attachment, currentUserId, waveformData }: AudioMessagePlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingPlayRef = useRef(false);
   const retryCountRef = useRef(0);
   const [speedIndex, setSpeedIndex] = useState(0);
-  const [resolvedSrc, setResolvedSrc] = useState(src);
+  const [resolvedSrc, setResolvedSrc] = useState("");
+  const [loadRequested, setLoadRequested] = useState(false);
   const [failed, setFailed] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
-  const [waveform, setWaveform] = useState<number[]>(DEFAULT_WAVEFORM);
+  const [waveform, setWaveform] = useState<number[]>(() => normalizeStoredWaveform(waveformData));
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(Number(attachment?.duration_seconds) || 0);
   const [playing, setPlaying] = useState(false);
@@ -81,11 +89,16 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
     retryCountRef.current = 0;
     setRetryTick(0);
     setCurrentTime(0);
+    setResolvedSrc("");
+    setLoadRequested(false);
+    pendingPlayRef.current = false;
     setDuration(Number(attachment?.duration_seconds) || 0);
     setPlaying(false);
-  }, [attachment?.duration_seconds, attachment?.id, src]);
+    setWaveform(normalizeStoredWaveform(waveformData));
+  }, [attachment?.duration_seconds, attachment?.id, src, waveformData]);
 
   useEffect(() => {
+    if (!loadRequested) return;
     let cancelled = false;
     let objectUrl = "";
     let retryTimer: number | null = null;
@@ -126,7 +139,15 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
       if (retryTimer) window.clearTimeout(retryTimer);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [attachment?.id, attachment?.is_encrypted, currentUserId, retryTick, src]);
+  }, [attachment?.id, attachment?.is_encrypted, currentUserId, loadRequested, retryTick, src]);
+
+  useEffect(() => {
+    if (!resolvedSrc || !pendingPlayRef.current) return;
+    pendingPlayRef.current = false;
+    const audio = audioRef.current;
+    if (!audio) return;
+    void audio.play().catch(() => undefined);
+  }, [resolvedSrc]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -162,6 +183,11 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
   const activeBars = Math.round(progress * waveform.length);
 
   const togglePlayback = async () => {
+    if (!loadRequested) {
+      pendingPlayRef.current = true;
+      setLoadRequested(true);
+      return;
+    }
     const audio = audioRef.current;
     if (!audio || failed || !resolvedSrc) return;
     if (audio.paused) {
@@ -193,12 +219,12 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
 
   return (
     <div className={`ms-voice-message ${compact ? "ms-voice-message--compact" : ""} ${failed ? "is-failed" : ""}`}>
-      <button type="button" className="ms-voice-message__play" onClick={() => void togglePlayback()} disabled={failed || !resolvedSrc} aria-label={playing ? `Pause ${label}` : `Play ${label}`}>
+      <button type="button" className="ms-voice-message__play" onClick={() => void togglePlayback()} disabled={failed} aria-label={playing ? `Pause ${label}` : `Play ${label}`}>
         <PlayIcon playing={playing} />
       </button>
       <div className="ms-voice-message__content">
         {!isVoiceNote ? <strong className="ms-voice-message__label">{label}</strong> : null}
-        <button type="button" className="ms-voice-message__waveform" onClick={seek} disabled={failed || !duration} aria-label={`Seek ${label}`}>
+        <button type="button" className="ms-voice-message__waveform" onClick={seek} disabled={failed || !loadRequested || !duration} aria-label={`Seek ${label}`}>
           {waveform.map((value, index) => (
             <span key={`${attachment?.id || label}-${index}`} className={index < activeBars ? "is-active" : ""} style={{ height: `${Math.round(7 + value * 24)}px` }} />
           ))}
@@ -211,7 +237,7 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
       <button type="button" className="ms-voice-message__speed" onClick={cycleSpeed} disabled={failed} aria-label={`Playback speed ${speedLabel}`}>
         {speedLabel}
       </button>
-      <audio ref={audioRef} className="ms-voice-message__audio" src={resolvedSrc} preload="metadata" playsInline />
+      {loadRequested ? <audio ref={audioRef} className="ms-voice-message__audio" src={resolvedSrc} preload="none" playsInline /> : null}
     </div>
   );
 }

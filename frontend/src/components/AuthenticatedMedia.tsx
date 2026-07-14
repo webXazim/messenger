@@ -262,7 +262,9 @@ function useMediaReady(src: string, kind: MediaKind) {
 }
 
 function MediaFallback({ kind, name, loading, onRetry, message }: { kind: MediaKind; name?: string; loading?: boolean; onRetry?: () => void; message?: string; }) {
-  const label = loading ? `Loading ${kind}…` : message || `${kind[0]?.toUpperCase()}${kind.slice(1)} unavailable`;
+  const label = loading
+    ? (kind === "image" ? "Photo" : kind === "video" ? "Video" : "Voice message")
+    : message || `${kind[0]?.toUpperCase()}${kind.slice(1)} unavailable`;
   return (
     <div className={`ms-media-fallback ${loading ? "ms-media-fallback--loading" : ""} ${kind === "audio" ? "ms-media-fallback--audio" : ""}`}>
       <span className="ms-media-fallback__icon" aria-hidden="true">{kind === "image" ? "▧" : kind === "video" ? "▷" : "◖"}</span>
