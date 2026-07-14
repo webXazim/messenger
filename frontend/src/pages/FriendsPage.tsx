@@ -9,6 +9,7 @@ import { parseApiError } from "../lib/apiErrors";
 import { MessengerPageHeader } from "../components/pages/MessengerPageHeader";
 import { UserAvatar } from "../components/UserAvatar";
 import { personPresenceText } from "../lib/personPresentation";
+import { conversationPath } from "../lib/conversationRoute";
 import type { CurrentUser, FriendRequest, UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
 
@@ -191,7 +192,7 @@ export function FriendsPage() {
         const next = current.filter((item) => item.id !== conversation.id);
         return [conversation, ...next];
       });
-      navigate(`/chat/${conversation.id}`);
+      navigate(conversationPath(conversation, user));
     },
     onError: (error) => setActionError(parseApiError(error, "Unable to start the conversation.").message),
   });

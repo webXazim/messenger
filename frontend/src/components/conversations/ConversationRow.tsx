@@ -8,6 +8,7 @@ import {
   conversationTime,
   conversationViewerParticipant,
 } from "./conversationPresentation";
+import { conversationPath } from "../../lib/conversationRoute";
 
 function LockIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" /></svg>;
@@ -47,7 +48,7 @@ export function ConversationRow({
 
   return (
     <NavLink
-      to={`/chat/${conversation.id}`}
+      to={conversationPath(conversation, currentUser)}
       className={({ isActive }) => `ms-inbox-row${isActive ? " is-active" : ""}${unread ? " has-unread" : ""}`}
     >
       <UserAvatar

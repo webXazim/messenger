@@ -41,7 +41,9 @@ import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
 import { patchCallCaches } from "../lib/realtimeCache";
+import { conversationPath, isUsernameConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
+import { generateAndStoreLocalPreview, storeLocalPreview } from "../lib/mediaPreviewCache";
 import type { UserSearchResult } from "../types/auth";
 import type { AttachmentEncryptionEnvelope, Conversation, Message } from "../types/chat";
 
@@ -228,10 +230,27 @@ function readStoredDetailsWidth() {
 }
 
 export function ConversationPage() {
-  const { conversationId = "" } = useParams();
+  const { conversationId: routeConversationKey = "" } = useParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const usernameRoute = isUsernameConversationRoute(routeConversationKey);
+  const routeConversationQuery = useQuery({
+    queryKey: ["conversation-route", routeConversationKey.toLowerCase()],
+    queryFn: () => chatApi.getDirectConversationByUsername(routeConversationKey.slice(1)),
+    enabled: usernameRoute,
+    initialData: () => {
+      if (!usernameRoute) return undefined;
+      const username = routeConversationKey.slice(1).toLowerCase();
+      return (queryClient.getQueryData<Conversation[]>(["conversations"]) ?? []).find(
+        (conversation) => conversation.type === "direct"
+          && conversation.participants.some((participant) => participant.user.username?.toLowerCase() === username),
+      );
+    },
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const conversationId = usernameRoute ? routeConversationQuery.data?.id || "" : routeConversationKey;
   const { socket, socketStatus } = useChatSocket();
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -337,6 +356,15 @@ export function ConversationPage() {
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
   });
+  useEffect(() => {
+    const conversation = conversationQuery.data || routeConversationQuery.data;
+    if (!conversation || conversation.type !== "direct") return;
+    const canonicalPath = conversationPath(conversation, user);
+    if (window.location.pathname !== canonicalPath) {
+      queryClient.setQueryData(["conversation-route", canonicalPath.slice("/chat/".length).toLowerCase()], conversation);
+      navigate(canonicalPath, { replace: true });
+    }
+  }, [conversationQuery.data, navigate, queryClient, routeConversationQuery.data, user]);
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
@@ -462,7 +490,7 @@ export function ConversationPage() {
         const next = current.filter((item) => item.id !== conversation.id);
         return [conversation, ...next];
       });
-      navigate(`/chat/${conversation.id}`);
+      navigate(conversationPath(conversation, user));
     },
     onError: (error) => setConversationStateError(getErrorMessage(error, "Unable to open this conversation.")),
   });
@@ -1115,6 +1143,19 @@ export function ConversationPage() {
     });
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
     encryptedAttachmentUploadsRef.current[upload.id] = encrypted.envelope;
+    const localAttachment = {
+      id: upload.id,
+      original_name: metadata?.original_name || file.name,
+      mime_type: metadata?.mime_type || file.type || "application/octet-stream",
+      media_kind: file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : null,
+      size: file.size,
+      is_encrypted: true,
+      encryption: encrypted.envelope,
+    };
+    const previewTask = upload.localThumbnail
+      ? storeLocalPreview(String(user.id), localAttachment, upload.localThumbnail)
+      : generateAndStoreLocalPreview(String(user.id), localAttachment, file);
+    void previewTask.catch(() => undefined);
     return upload;
   };
 
@@ -1428,11 +1469,13 @@ export function ConversationPage() {
     "--chat-inbox-width": `${inboxWidth}px`,
     "--chat-details-width": `${detailsWidth}px`,
   } as CSSProperties;
-  const conversationError = conversationQuery.isError ? getErrorMessage(conversationQuery.error, "Could not load this conversation.") : null;
+  const conversationError = routeConversationQuery.isError
+    ? getErrorMessage(routeConversationQuery.error, "This username does not have a conversation with you.")
+    : conversationQuery.isError ? getErrorMessage(conversationQuery.error, "Could not load this conversation.") : null;
   const messagesError = messagesQuery.isError ? getErrorMessage(messagesQuery.error, "Could not load messages.") : null;
   const blockingConversationError = conversationError && messages.length === 0 ? conversationError : null;
   const chatError = messagesError || blockingConversationError;
-  const isInitialChatLoading = conversationQuery.isLoading || messagesQuery.isLoading;
+  const isInitialChatLoading = routeConversationQuery.isLoading || conversationQuery.isLoading || messagesQuery.isLoading;
   const showEmptyConversation = !isInitialChatLoading && !chatError && messages.length === 0;
 
   const headerNotices = useMemo<ChatHeaderNotice[]>(() => {

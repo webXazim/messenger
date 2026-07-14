@@ -125,15 +125,16 @@ function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: st
     let objectUrl = "";
     let cancelled = false;
     const load = async () => {
-      const blob = await readLocalPreview(currentUserId, attachment.id);
+      const blob = await readLocalPreview(currentUserId, attachment);
       if (!blob || cancelled) return;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       objectUrl = URL.createObjectURL(blob);
       setPreviewSrc(objectUrl);
     };
     const handlePreview = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string; attachmentId?: string }>).detail;
-      if (detail?.userId === currentUserId && detail.attachmentId === attachment.id) void load();
+      const detail = (event as CustomEvent<{ userId?: string; attachmentId?: string; cacheIdentity?: string }>).detail;
+      const digestIdentity = attachment.encryption?.original_sha256 ? `sha256:${attachment.encryption.original_sha256}` : "";
+      if (detail?.userId === currentUserId && (detail.attachmentId === attachment.id || (digestIdentity && detail.cacheIdentity === digestIdentity))) void load();
     };
     void load();
     window.addEventListener("ms-local-media-preview", handlePreview);
@@ -142,7 +143,7 @@ function useLocalMediaPreview(attachment?: MessageAttachment, currentUserId?: st
       window.removeEventListener("ms-local-media-preview", handlePreview);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [attachment?.id, currentUserId]);
+  }, [attachment?.encryption?.original_sha256, attachment?.id, currentUserId]);
   return previewSrc;
 }
 
@@ -381,7 +382,7 @@ export function AuthenticatedVideo({ src, posterSrc, className, attachment, curr
     <video
       className={`${className || ""} ms-auth-media-shell ${frameReady ? "is-frame-ready" : "is-frame-loading"}`.trim()}
       src={resolvedSrc || undefined}
-      poster={!frameReady ? posterMedia.resolvedSrc || localPosterSrc || undefined : undefined}
+      poster={posterMedia.resolvedSrc || localPosterSrc || undefined}
       controls
       playsInline
       preload={resolvedSrc ? "metadata" : "none"}

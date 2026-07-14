@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 from django.utils import timezone
 from django.utils.http import content_disposition_header
 from django.utils.cache import patch_vary_headers
@@ -459,6 +460,22 @@ class ConversationDetailView(generics.RetrieveDestroyAPIView):
         payload = {"conversation_id": conversation_id}
         for participant_id in participant_ids:
             _broadcast_to_user(str(participant_id), "conversation.deleted", payload)
+
+
+class DirectConversationByUsernameView(generics.RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ConversationDetailSerializer
+
+    def get_object(self):
+        username = str(self.kwargs.get("username") or "").lstrip("@").strip()
+        if username.lower() == str(self.request.user.username or "").lower():
+            raise Http404
+        queryset = user_conversations_qs(self.request.user).filter(
+            type=Conversation.ConversationType.DIRECT,
+            participants__left_at__isnull=True,
+            participants__user__username__iexact=username,
+        ).distinct()
+        return get_object_or_404(queryset)
 
 
 class ConversationDraftView(views.APIView):

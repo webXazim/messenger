@@ -8,6 +8,7 @@ import { GroupChatModal } from "../components/GroupChatModal";
 import { NewConversationModal } from "../components/NewConversationModal";
 import { useAuth } from "../contexts/AuthContext";
 import { parseApiError } from "../lib/apiErrors";
+import { conversationPath } from "../lib/conversationRoute";
 import type { UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
 
@@ -93,7 +94,7 @@ export function ConversationsPage() {
       setShowGroupModal(false);
       queryClient.setQueryData(["conversation", conversation.id], conversation);
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      navigate(`/chat/${conversation.id}`);
+      navigate(conversationPath(conversation, currentUserIdentity));
     },
     onError: (mutationError) => {
       setGroupError(parseApiError(mutationError, "Could not create this group.").message);
@@ -114,7 +115,7 @@ export function ConversationsPage() {
         return [conversation, ...next];
       });
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      navigate(`/chat/${conversation.id}`);
+      navigate(conversationPath(conversation, currentUserIdentity));
     },
     onError: (mutationError) => {
       setDirectChatError(parseApiError(mutationError, "Unable to open this conversation.").message);

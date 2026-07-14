@@ -231,6 +231,20 @@ class ChatApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         return response.data
 
+    def test_direct_conversation_resolves_by_case_insensitive_username(self):
+        conversation = self.create_direct_conversation()
+
+        response = self.client.get(reverse("conversation-by-username", kwargs={"username": "OtHeR"}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.data["id"]), str(conversation["id"]))
+
+    def test_direct_conversation_username_route_does_not_create_conversation(self):
+        response = self.client.get(reverse("conversation-by-username", kwargs={"username": self.third.username}))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(Conversation.objects.count(), 0)
+
     def test_safe_requests_do_not_consume_global_write_throttle(self):
         cache.clear()
 

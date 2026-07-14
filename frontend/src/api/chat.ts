@@ -763,6 +763,10 @@ export const chatApi = {
     const response = await http.get(`/chat/conversations/${id}/`);
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
+  async getDirectConversationByUsername(username: string) {
+    const response = await http.get(`/chat/conversations/by-username/${encodeURIComponent(username.replace(/^@/, ""))}/`);
+    return normalizeConversation(unwrapData<unknown>(response.data));
+  },
   async deleteConversation(conversationId: string) {
     await http.delete(`/chat/conversations/${conversationId}/`);
   },
@@ -922,6 +926,7 @@ export const chatApi = {
       // unencrypted media after the security scan.
       extracted = { media_kind: inferMediaKind(options?.metadata_source_file || file, options?.mime_type) };
     }
+    const localThumbnail = extracted.thumbnail;
     if (options?.include_thumbnail === false) extracted.thumbnail = undefined;
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
     const formData = new FormData();
@@ -945,7 +950,7 @@ export const chatApi = {
     });
     const payload = unwrapData<unknown>(response.data);
     const item = asRecord(payload);
-    return { id: firstString(item.id, item.upload_id) };
+    return { id: firstString(item.id, item.upload_id), localThumbnail };
   },
   async listCalls(status?: string, signal?: AbortSignal) {
     const items = await collectChatPages("/chat/calls/recent/", normalizeCall, {

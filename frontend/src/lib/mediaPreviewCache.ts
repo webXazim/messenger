@@ -3,6 +3,7 @@ import type { MessageAttachment } from "../types/chat";
 const DB_NAME = "crescentsphere-private-media";
 const STORE_NAME = "previews";
 const DB_VERSION = 1;
+const PREVIEW_CACHE_VERSION = "v2";
 const MAX_PREVIEW_ENTRIES = 180;
 const MAX_SESSION_MEDIA_BYTES = 64 * 1024 * 1024;
 const PREVIEW_MAX_EDGE = 960;
@@ -20,8 +21,14 @@ type SessionMediaRecord = {
 
 const sessionMedia = new Map<string, SessionMediaRecord>();
 
-function cacheKey(userId: string, attachmentId: string) {
-  return `${userId}:${attachmentId}`;
+function attachmentCacheIdentity(attachment: MessageAttachment | string) {
+  if (typeof attachment === "string") return `id:${attachment}`;
+  const digest = attachment.encryption?.original_sha256?.trim();
+  return digest ? `sha256:${digest}` : `id:${attachment.id}`;
+}
+
+function cacheKey(userId: string, attachment: MessageAttachment | string) {
+  return `${userId}:${PREVIEW_CACHE_VERSION}:${attachmentCacheIdentity(attachment)}`;
 }
 
 function openDatabase(): Promise<IDBDatabase | null> {
@@ -38,7 +45,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
 }
 
 export function getSessionMedia(userId: string, attachment: MessageAttachment) {
-  const key = cacheKey(userId, attachment.id);
+  const key = cacheKey(userId, attachment);
   const record = sessionMedia.get(key);
   if (!record) return null;
   record.touchedAt = Date.now();
@@ -46,7 +53,7 @@ export function getSessionMedia(userId: string, attachment: MessageAttachment) {
 }
 
 export function rememberSessionMedia(userId: string, attachment: MessageAttachment, blob: Blob) {
-  const key = cacheKey(userId, attachment.id);
+  const key = cacheKey(userId, attachment);
   sessionMedia.set(key, { blob, touchedAt: Date.now() });
   let total = [...sessionMedia.values()].reduce((sum, item) => sum + item.blob.size, 0);
   if (total <= MAX_SESSION_MEDIA_BYTES) return;
@@ -59,12 +66,12 @@ export function rememberSessionMedia(userId: string, attachment: MessageAttachme
   }
 }
 
-export async function readLocalPreview(userId: string, attachmentId: string) {
+export async function readLocalPreview(userId: string, attachment: MessageAttachment | string) {
   const database = await openDatabase();
   if (!database) return null;
   return new Promise<Blob | null>((resolve) => {
     const transaction = database.transaction(STORE_NAME, "readonly");
-    const request = transaction.objectStore(STORE_NAME).get(cacheKey(userId, attachmentId));
+    const request = transaction.objectStore(STORE_NAME).get(cacheKey(userId, attachment));
     request.onsuccess = () => resolve((request.result as PreviewRecord | undefined)?.blob || null);
     request.onerror = () => resolve(null);
     transaction.oncomplete = () => database.close();
@@ -92,12 +99,12 @@ export async function clearPrivateMediaCache(userId: string) {
   database.close();
 }
 
-async function writeLocalPreview(userId: string, attachmentId: string, blob: Blob) {
+async function writeLocalPreview(userId: string, attachment: MessageAttachment, blob: Blob) {
   const database = await openDatabase();
   if (!database) return;
   await new Promise<void>((resolve) => {
     const transaction = database.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).put({ key: cacheKey(userId, attachmentId), blob, savedAt: Date.now() } satisfies PreviewRecord);
+    transaction.objectStore(STORE_NAME).put({ key: cacheKey(userId, attachment), blob, savedAt: Date.now() } satisfies PreviewRecord);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => resolve();
   });
@@ -119,6 +126,12 @@ async function writeLocalPreview(userId: string, attachmentId: string, blob: Blo
     });
   }
   database.close();
+}
+
+export async function storeLocalPreview(userId: string, attachment: MessageAttachment, preview: Blob) {
+  if (!userId || !attachment.id || !preview.size) return;
+  await writeLocalPreview(userId, attachment, preview);
+  window.dispatchEvent(new CustomEvent("ms-local-media-preview", { detail: { userId, attachmentId: attachment.id, cacheIdentity: attachmentCacheIdentity(attachment) } }));
 }
 
 function canvasBlob(canvas: HTMLCanvasElement) {
@@ -151,8 +164,9 @@ async function videoPreview(source: Blob) {
       const video = document.createElement("video");
       video.muted = true;
       video.playsInline = true;
-      video.preload = "metadata";
+      video.preload = "auto";
       let settled = false;
+      let capturePending = false;
       const timeout = window.setTimeout(() => finish(null), 12_000);
       const finish = (value: Blob | null) => {
         if (settled) return;
@@ -162,7 +176,7 @@ async function videoPreview(source: Blob) {
         video.load();
         resolve(value);
       };
-      const capture = async () => {
+      const drawDecodedFrame = async () => {
         if (!video.videoWidth || !video.videoHeight) return;
         const size = fittedSize(video.videoWidth, video.videoHeight);
         const canvas = document.createElement("canvas");
@@ -176,15 +190,24 @@ async function videoPreview(source: Blob) {
         context.drawImage(video, 0, 0, size.width, size.height);
         finish(await canvasBlob(canvas));
       };
+      const capture = () => {
+        if (capturePending || settled) return;
+        capturePending = true;
+        if (typeof video.requestVideoFrameCallback === "function") {
+          video.requestVideoFrameCallback(() => void drawDecodedFrame());
+        } else {
+          window.setTimeout(() => void drawDecodedFrame(), 120);
+        }
+      };
       video.onerror = () => finish(null);
       video.onloadedmetadata = () => {
-        const target = video.duration > 0.4 ? Math.min(1, video.duration * 0.1) : 0;
+        const target = video.duration > 0.4 ? Math.min(2, Math.max(0.35, video.duration * 0.1)) : 0;
         if (target > 0) video.currentTime = target;
       };
       video.onloadeddata = () => {
-        if (!video.duration || video.duration <= 0.4) void capture();
+        if (!video.duration || video.duration <= 0.4) capture();
       };
-      video.onseeked = () => void capture();
+      video.onseeked = capture;
       video.src = url;
       video.load();
     });
@@ -195,7 +218,7 @@ async function videoPreview(source: Blob) {
 
 export async function generateAndStoreLocalPreview(userId: string, attachment: MessageAttachment, source: Blob) {
   if (!userId || !attachment.id || typeof document === "undefined") return;
-  if (await readLocalPreview(userId, attachment.id)) return;
+  if (await readLocalPreview(userId, attachment)) return;
   const mime = (attachment.mime_type || source.type || "").toLowerCase();
   const mediaKind = (attachment.media_kind || "").toLowerCase();
   const preview = mediaKind === "video" || mime.startsWith("video/")
@@ -204,6 +227,5 @@ export async function generateAndStoreLocalPreview(userId: string, attachment: M
       ? await imagePreview(source)
       : null;
   if (!preview) return;
-  await writeLocalPreview(userId, attachment.id, preview);
-  window.dispatchEvent(new CustomEvent("ms-local-media-preview", { detail: { userId, attachmentId: attachment.id } }));
+  await storeLocalPreview(userId, attachment, preview);
 }
