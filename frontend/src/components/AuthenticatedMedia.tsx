@@ -309,7 +309,7 @@ export function AuthenticatedImage({ src, alt, className, attachment, currentUse
   const { resolvedSrc, failed, loading, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
   const ready = useMediaReady(resolvedSrc, "image");
   if (failed) return <MediaFallback kind="image" name={attachment?.original_name || alt} message={errorMessage} onRetry={retry} />;
-  if ((loading && !resolvedSrc) || !ready) return <MediaFallback kind="image" name={attachment?.original_name || alt} loading />;
+  if ((loading && !resolvedSrc) || !ready) return <div className="ms-auth-media-shell ms-auth-media-shell--image" role="img" aria-label={alt} />;
   return <img className={className} src={resolvedSrc} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(true)} />;
 }
 
@@ -323,10 +323,9 @@ export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; cl
 );
 
 export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string }) {
-  const { resolvedSrc, failed, loading, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
+  const { resolvedSrc, failed, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
   const posterMedia = useAuthenticatedMediaUrl(posterSrc || "", undefined, currentUserId);
   const stableName = useMemo(() => attachment?.original_name || "Video", [attachment?.original_name]);
-  const ready = useMediaReady(resolvedSrc, "video");
   const [frameReady, setFrameReady] = useState(false);
 
   useEffect(() => {
@@ -334,15 +333,14 @@ export function AuthenticatedVideo({ src, posterSrc, className, attachment, curr
   }, [resolvedSrc]);
 
   if (failed) return <MediaFallback kind="video" name={stableName} message={errorMessage} onRetry={retry} />;
-  if ((loading && !resolvedSrc) || !ready) return <MediaFallback kind="video" name={stableName} loading />;
   return (
     <video
-      className={`${className || ""} ${frameReady ? "is-frame-ready" : "is-frame-loading"}`.trim()}
-      src={resolvedSrc}
+      className={`${className || ""} ms-auth-media-shell ${frameReady ? "is-frame-ready" : "is-frame-loading"}`.trim()}
+      src={resolvedSrc || undefined}
       poster={!frameReady ? posterMedia.resolvedSrc || undefined : undefined}
       controls
       playsInline
-      preload="metadata"
+      preload={resolvedSrc ? "metadata" : "none"}
       onLoadedData={() => setFrameReady(true)}
       onCanPlay={() => setFrameReady(true)}
       onError={() => setFailed(true)}

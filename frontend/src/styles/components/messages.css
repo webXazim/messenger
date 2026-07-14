@@ -436,6 +436,23 @@ button.ms-message-reply:hover {
   color: #fff;
 }
 
+.ms-auth-media-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  background: #111;
+}
+
+.ms-auth-media-shell--image {
+  background: linear-gradient(110deg, #f1f1f1 25%, #f7f7f7 40%, #f1f1f1 55%);
+  background-size: 220% 100%;
+  animation: ms-media-shell-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes ms-media-shell-shimmer {
+  to { background-position-x: -220%; }
+}
+
 .ms-message-media__video-poster img,
 .ms-message-media__video-poster .ms-media-fallback {
   width: 100%;

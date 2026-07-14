@@ -17,12 +17,10 @@ function PlayIcon() {
 }
 
 function LazyVideo({ attachment, src, posterSrc, currentUserId, warmMedia }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string; warmMedia?: boolean }) {
-  const [playbackRequested, setPlaybackRequested] = useState(false);
+  const [playbackRequested, setPlaybackRequested] = useState(Boolean(warmMedia));
   useEffect(() => {
-    if (!warmMedia) return;
-    const timer = window.setTimeout(() => setPlaybackRequested(true), 2800);
-    return () => window.clearTimeout(timer);
-  }, [posterSrc, warmMedia]);
+    if (warmMedia) setPlaybackRequested(true);
+  }, [warmMedia]);
   if (playbackRequested) {
     return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} />;
   }
@@ -35,11 +33,9 @@ function LazyVideo({ attachment, src, posterSrc, currentUserId, warmMedia }: { a
 }
 
 function LazyImage({ attachment, thumbnailSrc, fullSrc, currentUserId, warmMedia, onOpen }: { attachment: MessageAttachment; thumbnailSrc: string; fullSrc: string; currentUserId?: string; warmMedia?: boolean; onOpen: () => void }) {
-  const [useFullImage, setUseFullImage] = useState(false);
+  const [useFullImage, setUseFullImage] = useState(Boolean(warmMedia && !thumbnailSrc));
   useEffect(() => {
-    if (!warmMedia || thumbnailSrc) return;
-    const timer = window.setTimeout(() => setUseFullImage(true), 2200);
-    return () => window.clearTimeout(timer);
+    if (warmMedia && !thumbnailSrc) setUseFullImage(true);
   }, [thumbnailSrc, warmMedia]);
   const src = thumbnailSrc || (useFullImage ? fullSrc : "");
   const mediaAttachment = thumbnailSrc ? { ...attachment, is_encrypted: false, encryption: null } : attachment;
