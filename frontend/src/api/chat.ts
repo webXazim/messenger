@@ -253,7 +253,9 @@ function normalizeAttachment(value: unknown): import("../types/chat").MessageAtt
   const signedDownloadUrl = resolveMediaUrl(firstString(signedDownload.download_url, signedDownload.url));
   const signedPreviewUrl = resolveMediaUrl(firstString(signedPreview.preview_url, signedPreview.url));
   const isEncrypted = Boolean(item.is_encrypted);
-  const resolvedFileUrl = signedDownloadUrl || resolveMediaUrl(firstString(item.file_url, item.url, item.download_url));
+  // Prefer the stable authenticated endpoint so immutable browser caching can
+  // survive refreshes; signed URLs change whenever messages are serialized.
+  const resolvedFileUrl = resolveMediaUrl(firstString(item.file_url, item.url, item.download_url)) || signedDownloadUrl;
   const resolvedPreviewUrl = isEncrypted
     ? (resolvedFileUrl || signedPreviewUrl || resolveMediaUrl(firstString(item.preview_url)))
     : (signedPreviewUrl || resolveMediaUrl(firstString(item.preview_url)));

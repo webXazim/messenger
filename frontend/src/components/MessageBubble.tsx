@@ -10,6 +10,7 @@ import { AttachmentMessage } from "./messages/AttachmentMessage";
 import { MessageText } from "./messages/MessageText";
 import { MessageMeta } from "./messages/MessageMeta";
 import { UserAvatar } from "./UserAvatar";
+import { prefetchAttachmentForUser } from "./AuthenticatedMedia";
 import {
   getAttachmentPlaybackUrl,
   getCallEventPresentation,
@@ -47,6 +48,7 @@ export type MessageBubbleProps = {
   onJumpToReply?: (replyToId: string) => void;
   actionError?: string | null;
   actionPending?: boolean;
+  warmMedia?: boolean;
 };
 
 export function MessageBubble({
@@ -70,6 +72,7 @@ export function MessageBubble({
   onJumpToReply,
   actionError,
   actionPending = false,
+  warmMedia = false,
 }: MessageBubbleProps) {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [swipeOffset, setSwipeOffset] = useState(0);
@@ -112,6 +115,31 @@ export function MessageBubble({
   };
 
   useEffect(() => () => clearLongPress(), []);
+
+  useEffect(() => {
+    if (!warmMedia || !message.attachments?.length) return;
+    const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+    if (connection?.saveData || ["slow-2g", "2g"].includes(connection?.effectiveType || "")) return;
+    const eligible = message.attachments
+      .filter((attachment) => attachment.size > 0 && attachment.size <= 8 * 1024 * 1024)
+      .reduce<{ attachment: typeof message.attachments[number]; total: number }[]>((items, attachment) => {
+        const total = (items.length ? items[items.length - 1]!.total : 0) + attachment.size;
+        if (total <= 12 * 1024 * 1024) items.push({ attachment, total });
+        return items;
+      }, []);
+    if (!eligible.length) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void Promise.allSettled(eligible.map(({ attachment }) => {
+        const src = getAttachmentPlaybackUrl(attachment);
+        return src ? prefetchAttachmentForUser(src, controller.signal) : Promise.resolve();
+      }));
+    }, 3200);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [message.attachments, warmMedia]);
 
   const startLongPress = () => {
     clearLongPress();
@@ -202,7 +230,7 @@ export function MessageBubble({
             disabled={actionPending}
           />
           {callEvent ? <CallEventMessage event={callEvent} /> : null}
-          <MediaMessage attachments={media} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} />
+          <MediaMessage attachments={media} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} warmMedia={warmMedia} />
 
           {hasCopySurface ? (
             <div className="ms-message-copy">

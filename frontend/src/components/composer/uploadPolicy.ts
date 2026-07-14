@@ -71,7 +71,7 @@ export function validateComposerUpload(file: File, policy: ComposerUploadPolicy)
     return { valid: false, message: `${file.name} uses a file type that is not supported.` };
   }
 
-  const mime = (file.type || "").trim().toLowerCase();
+  const mime = (file.type || "").split(";", 1)[0]?.trim().toLowerCase() || "";
   if (!mimeAllowed(mime, policy.allowedMimeTypes)) {
     return { valid: false, message: `${file.name} uses a file type that is not supported.` };
   }

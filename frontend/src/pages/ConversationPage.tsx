@@ -1598,6 +1598,7 @@ export function ConversationPage() {
                   onJumpToReply={(messageId) => void jumpToMessage(messageId)}
                   actionError={messageActionErrors[message.id] || null}
                   actionPending={Boolean(messageActionPending[message.id])}
+                  warmMedia={index >= Math.max(0, messages.length - 6)}
                 />
               </div>
             );

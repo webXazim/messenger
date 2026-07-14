@@ -357,6 +357,7 @@ ALLOWED_UPLOAD_EXTENSIONS = [
     ).split(",")
     if item.strip()
 ]
+ALLOWED_UPLOAD_EXTENSIONS = sorted(set(ALLOWED_UPLOAD_EXTENSIONS) | {"webm", "ogg", "opus", "m4a", "wav"})
 ALLOWED_UPLOAD_MIME_TYPES = [
     item.strip().lower()
     for item in env_str(
@@ -365,6 +366,9 @@ ALLOWED_UPLOAD_MIME_TYPES = [
     ).split(",")
     if item.strip()
 ]
+ALLOWED_UPLOAD_MIME_TYPES = sorted(set(ALLOWED_UPLOAD_MIME_TYPES) | {
+    "audio/webm", "audio/ogg", "audio/opus", "audio/mp4", "audio/m4a", "audio/wav",
+})
 # Mobile browsers may throttle timers for several minutes. Clean WebSocket
 # disconnects still clear presence immediately; this floor protects live tabs.
 PRESENCE_TTL_SECONDS = max(env_int("PRESENCE_TTL_SECONDS", 300), 300)

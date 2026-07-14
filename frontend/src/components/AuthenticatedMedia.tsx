@@ -67,6 +67,13 @@ async function fetchMediaBlob(src: string, signal?: AbortSignal) {
   });
 }
 
+export async function prefetchAttachmentForUser(src: string, signal?: AbortSignal) {
+  if (!src || src === "#") return;
+  const response = await fetchMediaBlob(src, signal);
+  if (!response.ok) throw new Error(`Media prefetch failed with ${response.status}`);
+  await response.arrayBuffer();
+}
+
 export async function fetchAttachmentBlobForUser(
   src: string,
   attachment?: MessageAttachment,

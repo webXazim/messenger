@@ -9,6 +9,7 @@ from django.http import FileResponse, Http404, HttpResponse, StreamingHttpRespon
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.http import content_disposition_header
+from django.utils.cache import patch_vary_headers
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, OpenApiTypes, extend_schema, inline_serializer
 from rest_framework import generics, permissions, serializers, status, views
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -270,6 +271,7 @@ def _build_media_file_response(file_field, *, filename, mime_type="", as_attachm
     if not as_attachment:
         response["Accept-Ranges"] = "bytes"
         response["X-Content-Type-Options"] = "nosniff"
+        response["Cache-Control"] = "private, max-age=86400, immutable"
     return response
 
 
@@ -400,6 +402,12 @@ class ConversationListCreateView(generics.ListCreateAPIView):
 
     def get_serializer_class(self):
         return ConversationCreateSerializer if self.request.method == "POST" else ConversationListSerializer
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        response["Cache-Control"] = "private, max-age=15, stale-while-revalidate=300"
+        patch_vary_headers(response, ("Authorization", "Cookie"))
+        return response
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
