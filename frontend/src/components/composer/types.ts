@@ -3,6 +3,7 @@ export type PendingComposerUpload = {
   file: File;
   fileName: string;
   previewUrl?: string;
+  thumbnailUrl?: string;
   status: "queued" | "uploading" | "uploaded" | "failed";
   uploadId?: string;
   mediaKind?: string;
@@ -21,6 +22,7 @@ export type ComposerUploadResult = {
   height?: number;
   rotation?: number;
   durationSeconds?: number;
+  thumbnailBlob?: Blob | null;
 };
 
 export type ComposerUploadRequestOptions = {

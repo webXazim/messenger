@@ -2,7 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import type { MessageAttachment } from "../types/chat";
 import { useModalAccessibility } from "../hooks/useModalAccessibility";
 import { AudioMessagePlayer } from "./AudioMessagePlayer";
-import { AuthenticatedImage, AuthenticatedVideo, downloadAttachmentForUser } from "./AuthenticatedMedia";
+import { AuthenticatedImage, AuthenticatedPdf, AuthenticatedVideo, downloadAttachmentForUser } from "./AuthenticatedMedia";
 import { getAttachmentPlaybackUrl, getAttachmentPosterUrl, getAttachmentPreviewUrl } from "./messages/messagePresentation";
 
 export function MediaPreviewModal({
@@ -47,13 +47,14 @@ export function MediaPreviewModal({
   }, [attachment, onNext, onPrevious]);
 
   if (!attachment) return null;
-  const imagePreviewUrl = getAttachmentPreviewUrl(attachment) || "#";
+  const imagePreviewUrl = getAttachmentPreviewUrl(attachment) || getAttachmentPlaybackUrl(attachment) || "#";
   const videoPlaybackUrl = getAttachmentPlaybackUrl(attachment) || "#";
   const videoPosterUrl = getAttachmentPosterUrl(attachment);
   const mime = (attachment.mime_type || "").toLowerCase();
   const isImage = mime.startsWith("image/");
   const isVideo = mime.startsWith("video/");
   const isAudio = mime.startsWith("audio/");
+  const isPdf = mime === "application/pdf";
 
   return (
     <div className="ms-modal-backdrop ms-modal-backdrop--media" role="presentation" onMouseDown={(event) => {
@@ -78,14 +79,15 @@ export function MediaPreviewModal({
             {onNext ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={onNext} aria-label="Next attachment">Next →</button> : null}
             {onReply ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={onReply}>Reply</button> : null}
             {onForward ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={onForward}>Forward</button> : null}
-            <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => { void downloadAttachmentForUser(attachment, currentUserId); }}>Save</button>
+            {isImage ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => { void downloadAttachmentForUser(attachment, currentUserId); }}>Save</button> : null}
             <button ref={closeRef} type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={onClose}>Close</button>
           </div>
         </header>
         {isImage ? <AuthenticatedImage className="ms-media-preview__surface" src={imagePreviewUrl} alt={attachment.original_name} attachment={attachment} currentUserId={currentUserId} /> : null}
         {isVideo ? <AuthenticatedVideo className="ms-media-preview__surface" src={videoPlaybackUrl} posterSrc={videoPosterUrl} attachment={attachment} currentUserId={currentUserId} /> : null}
         {isAudio ? <AudioMessagePlayer src={getAttachmentPlaybackUrl(attachment) || imagePreviewUrl} label={attachment.original_name} attachment={attachment} currentUserId={currentUserId} /> : null}
-        {!isImage && !isVideo && !isAudio ? (
+        {isPdf ? <AuthenticatedPdf className="ms-media-preview__surface ms-media-preview__pdf" src={videoPlaybackUrl} title={attachment.original_name} attachment={attachment} currentUserId={currentUserId} /> : null}
+        {!isImage && !isVideo && !isAudio && !isPdf ? (
           <div className="ms-media-preview__unsupported">
             <p className="ms-muted">Preview is not available for this file type.</p>
           </div>

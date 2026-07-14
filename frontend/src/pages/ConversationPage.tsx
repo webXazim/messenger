@@ -1160,7 +1160,15 @@ export function ConversationPage() {
     const validation = validateComposerUpload(file, composerUploadPolicy);
     if (!validation.valid) throw new Error(validation.message || "This file cannot be uploaded.");
     if (options?.signal?.aborted) throw new DOMException("Upload cancelled", "AbortError");
-    const sourceMediaKind = file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "";
+    const sourceMediaKind = file.type.startsWith("video/")
+      ? "video"
+      : file.type.startsWith("image/")
+        ? "image"
+        : file.type === "application/pdf"
+          ? "pdf"
+          : file.type.startsWith("audio/")
+            ? "audio"
+            : "";
     const encryptedPreview = await createLocalAttachmentPreview(file, sourceMediaKind).catch(() => null);
     const encrypted = await encryptAttachmentForConversation({
       userId: String(user.id),
@@ -1195,7 +1203,7 @@ export function ConversationPage() {
       ? storeLocalPreview(String(user.id), localAttachment, upload.localThumbnail)
       : generateAndStoreLocalPreview(String(user.id), localAttachment, file);
     void previewTask.catch(() => undefined);
-    return upload;
+    return { ...upload, encryptedPreview };
   };
 
   const participantNames = useMemo(
@@ -1728,6 +1736,7 @@ export function ConversationPage() {
                 height: upload.height,
                 rotation: upload.rotation,
                 durationSeconds: upload.durationSeconds,
+                thumbnailBlob: upload.encryptedPreview,
               };
             }}
             onDiscardUpload={(uploadId) => {

@@ -238,6 +238,34 @@ async function videoPreview(source: Blob, maxEdge = PREVIEW_MAX_EDGE, quality = 
   }
 }
 
+async function pdfPreview(source: Blob, maxEdge = PREVIEW_MAX_EDGE, quality = 0.78) {
+  const [{ getDocument, GlobalWorkerOptions }, workerModule] = await Promise.all([
+    import("pdfjs-dist"),
+    import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+  ]);
+  GlobalWorkerOptions.workerSrc = workerModule.default;
+  const loadingTask = getDocument({ data: new Uint8Array(await source.arrayBuffer()) });
+  const pdfDocument = await loadingTask.promise;
+  try {
+    const page = await pdfDocument.getPage(1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(1.5, maxEdge / Math.max(baseViewport.width, baseViewport.height));
+    const viewport = page.getViewport({ scale: Math.max(0.1, scale) });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(viewport.width));
+    canvas.height = Math.max(1, Math.round(viewport.height));
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) return null;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvas, canvasContext: context, viewport }).promise;
+    page.cleanup();
+    return canvasBlob(canvas, quality);
+  } finally {
+    await loadingTask.destroy();
+  }
+}
+
 export async function createLocalAttachmentPreview(source: Blob, mediaKind = "", embedded = true) {
   const kind = mediaKind.toLowerCase();
   const mime = (source.type || "").toLowerCase();
@@ -246,6 +274,7 @@ export async function createLocalAttachmentPreview(source: Blob, mediaKind = "",
   let preview: Blob | null = null;
   if (kind === "video" || mime.startsWith("video/")) preview = await videoPreview(source, maxEdge, quality);
   else if (kind === "image" || mime.startsWith("image/")) preview = await imagePreview(source, maxEdge, quality);
+  else if (kind === "pdf" || mime === "application/pdf") preview = await pdfPreview(source, maxEdge, quality);
   if (!preview || !embedded || preview.size <= EMBEDDED_PREVIEW_MAX_BYTES) return preview;
   return imagePreview(preview, 320, 0.56);
 }

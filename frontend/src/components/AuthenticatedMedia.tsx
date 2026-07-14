@@ -386,6 +386,13 @@ export function AuthenticatedAttachmentPreview({
   return <div className={`ms-auth-media-shell ms-auth-media-shell--image ${className || ""}`.trim()} role="img" aria-label={alt || "Video preview"} />;
 }
 
+export function AuthenticatedPdf({ src, title, className, attachment, currentUserId }: { src: string; title: string; className?: string; attachment?: MessageAttachment; currentUserId?: string }) {
+  const { resolvedSrc, failed, loading, retry, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
+  if (failed) return <MediaFallback kind="image" name={attachment?.original_name || title} message={errorMessage} onRetry={retry} />;
+  if (loading || !resolvedSrc) return <div className="ms-auth-media-shell ms-auth-media-shell--image" role="status" aria-label={`Loading ${title}`} />;
+  return <iframe className={className} src={`${resolvedSrc}#page=1&toolbar=0&navpanes=0`} title={title} />;
+}
+
 export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; className?: string; onLoadedMetadata?: () => void; attachment?: MessageAttachment; currentUserId?: string }>(
   function AuthenticatedAudio({ src, className, onLoadedMetadata, attachment, currentUserId }, ref) {
     const { resolvedSrc, failed, loading, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);

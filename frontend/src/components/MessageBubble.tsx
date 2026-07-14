@@ -289,7 +289,7 @@ export function MessageBubble({
             );
           })}
 
-          <AttachmentMessage attachments={files} currentUserId={currentUserId} />
+          <AttachmentMessage attachments={files} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} />
 
           {!message.is_deleted && !isFailed && !isLocalUnsent ? (
             <ReactionBar

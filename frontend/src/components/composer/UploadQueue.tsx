@@ -38,7 +38,8 @@ export function UploadQueue({
     <div className="ms-upload-queue" aria-label="Pending attachments">
       {uploads.map((upload) => {
         const mime = upload.file.type.toLowerCase();
-        const isVisualMedia = mime.startsWith("image/") || mime.startsWith("video/");
+        const isPdf = mime === "application/pdf";
+        const isVisualMedia = mime.startsWith("image/") || mime.startsWith("video/") || isPdf;
         const kind = attachmentKindLabel(upload.file);
         const progress = Math.max(0, Math.min(100, upload.progress ?? 0));
         const statusLabel = upload.status === "queued"
@@ -55,7 +56,7 @@ export function UploadQueue({
         return (
           <article className={`ms-upload-card ${isVisualMedia ? "is-visual-media" : ""} is-${upload.status}`} key={upload.localId}>
             <div className={`ms-upload-card__preview ${isVisualMedia ? "is-visual-media" : ""}`}>
-              {upload.previewUrl && mime.startsWith("image/") ? <img src={upload.previewUrl} alt="" /> : null}
+              {(upload.thumbnailUrl || upload.previewUrl) && mime.startsWith("image/") ? <img src={upload.thumbnailUrl || upload.previewUrl} alt="" /> : null}
               {upload.previewUrl && mime.startsWith("video/") ? (
                 <video
                   src={upload.previewUrl}
@@ -63,6 +64,7 @@ export function UploadQueue({
                   playsInline
                   controls
                   preload="metadata"
+                  poster={upload.thumbnailUrl}
                   aria-label={`Preview ${upload.fileName}`}
                   onLoadedMetadata={(event) => {
                     const video = event.currentTarget;
@@ -70,6 +72,8 @@ export function UploadQueue({
                   }}
                 />
               ) : null}
+              {isPdf && upload.thumbnailUrl ? <img src={upload.thumbnailUrl} alt={`First page of ${upload.fileName}`} /> : null}
+              {isPdf && !upload.thumbnailUrl && upload.previewUrl ? <iframe src={`${upload.previewUrl}#page=1&toolbar=0&navpanes=0`} title={`Preview ${upload.fileName}`} /> : null}
               {!upload.previewUrl || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
             </div>
             <div className="ms-upload-card__copy">

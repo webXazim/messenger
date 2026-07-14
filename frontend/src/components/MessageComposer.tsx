@@ -157,6 +157,7 @@ export function MessageComposer({
 
   const revokeUploadPreview = (upload?: PendingComposerUpload) => {
     if (upload?.previewUrl) URL.revokeObjectURL(upload.previewUrl);
+    if (upload?.thumbnailUrl && upload.thumbnailUrl !== upload.previewUrl) URL.revokeObjectURL(upload.thumbnailUrl);
   };
 
   const buildPreviewUrl = (file: File) => {
@@ -189,6 +190,7 @@ export function MessageComposer({
         },
       });
       if (controller.signal.aborted) return;
+      const thumbnailUrl = upload.thumbnailBlob?.size ? URL.createObjectURL(upload.thumbnailBlob) : target.thumbnailUrl;
       setPendingUploads((current) => current.map((item) => item.localId === localId
         ? {
             ...item,
@@ -199,6 +201,7 @@ export function MessageComposer({
             height: upload.height,
             rotation: upload.rotation,
             durationSeconds: upload.durationSeconds,
+            thumbnailUrl,
             progress: 100,
           }
         : item));
@@ -306,7 +309,7 @@ export function MessageComposer({
           duration_seconds: item.durationSeconds,
           file_url: item.previewUrl,
           preview_url: item.previewUrl,
-          thumbnail_url: item.file.type.startsWith("image/") ? item.previewUrl : null,
+          thumbnail_url: item.thumbnailUrl || (item.file.type.startsWith("image/") ? item.previewUrl : null),
         }));
         pendingUploadsRef.current = [];
         setPendingUploads([]);

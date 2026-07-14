@@ -1,16 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MessageAttachment } from "../../types/chat";
 import { AuthenticatedAttachmentPreview, AuthenticatedImage, AuthenticatedVideo } from "../AuthenticatedMedia";
-import { AttachmentDownloadButton } from "../AttachmentDownloadButton";
 import { getAttachmentPosterUrl, getAttachmentPreviewUrl, getAttachmentPlaybackUrl, getAttachmentRatioStyle } from "./messagePresentation";
-
-function DownloadIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14" /></svg>;
-}
-
-function ExpandIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg>;
-}
 
 function PlayIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 10 6-10 6V6Z" /></svg>;
@@ -71,14 +62,6 @@ export function MediaMessage({
             ) : (
               <LazyImage attachment={attachment} thumbnailSrc={mediaUrl} fullSrc={getAttachmentPlaybackUrl(attachment)} currentUserId={currentUserId} warmMedia={warmMedia} onOpen={() => onPreviewAttachment?.(attachment.id)} />
             )}
-            <div className="ms-message-media__actions">
-              <AttachmentDownloadButton attachment={attachment} currentUserId={currentUserId}>
-                <DownloadIcon />
-              </AttachmentDownloadButton>
-              <button type="button" onClick={() => onPreviewAttachment?.(attachment.id)} aria-label={`Open ${attachment.original_name}`}>
-                <ExpandIcon />
-              </button>
-            </div>
           </div>
         );
       })}
