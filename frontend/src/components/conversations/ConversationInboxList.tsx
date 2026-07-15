@@ -4,13 +4,18 @@ import { ConversationListControls } from "./ConversationListControls";
 import { OnlineFriendsStrip } from "./OnlineFriendsStrip";
 import { ConversationRow } from "./ConversationRow";
 import { conversationListEmptyCopy, filterConversationsForInbox } from "./conversationFiltering";
+import { applyKnownOnlinePresence } from "./conversationPresentation";
 import type { ConversationListBaseProps } from "./types";
 
 export function ConversationInboxList({ conversations, currentUserId, currentUser, onlineFriends, openingFriendId, onOpenFriend }: ConversationListBaseProps) {
   const { search, filter, setSearch, setFilter } = useConversationListPreferences();
+  const presenceAwareConversations = useMemo(
+    () => applyKnownOnlinePresence(conversations, onlineFriends),
+    [conversations, onlineFriends],
+  );
   const filteredConversations = useMemo(
-    () => filterConversationsForInbox({ conversations, currentUserId, currentUser, filter, search }),
-    [conversations, currentUser, currentUserId, filter, search],
+    () => filterConversationsForInbox({ conversations: presenceAwareConversations, currentUserId, currentUser, filter, search }),
+    [presenceAwareConversations, currentUser, currentUserId, filter, search],
   );
   const emptyCopy = conversationListEmptyCopy(filter, search);
 

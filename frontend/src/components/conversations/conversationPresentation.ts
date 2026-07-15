@@ -1,6 +1,39 @@
 import { isSameUserIdentity } from "../../lib/userIdentity";
 import type { Conversation, UserLite } from "../../types/chat";
 
+export function applyKnownOnlinePresence(
+  conversations: Conversation[],
+  knownPeople: Array<Partial<UserLite> & { id: string | number }> = [],
+) {
+  const onlineById = new Map(
+    knownPeople
+      .filter((person) => person.is_online && person.presence_visibility !== "hidden")
+      .map((person) => [String(person.id), person]),
+  );
+  if (!onlineById.size) return conversations;
+
+  return conversations.map((conversation) => {
+    let changed = false;
+    const participants = conversation.participants.map((participant) => {
+      const onlinePerson = onlineById.get(String(participant.user.id));
+      if (!onlinePerson || participant.user.is_online) return participant;
+      changed = true;
+      return {
+        ...participant,
+        user: {
+          ...participant.user,
+          is_online: true,
+          active_devices: Math.max(1, Number(onlinePerson.active_devices || 0)),
+          last_seen_at: onlinePerson.last_seen_at ?? participant.user.last_seen_at,
+          presence_label: "online",
+          presence_visibility: "public" as const,
+        },
+      };
+    });
+    return changed ? { ...conversation, participants } : conversation;
+  });
+}
+
 export function userDisplayLabel(user?: Partial<UserLite> | null) {
   if (!user) return "";
   const displayName = String(user.display_name || "").trim();

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import {
+  applyKnownOnlinePresence,
   conversationDisplayName,
   conversationMatchesQuery,
   conversationViewerParticipant,
@@ -51,6 +52,9 @@ const archived = makeConversation({ id: "archived", peer: amina, at: "2026-07-14
 const group = makeConversation({ id: "group", peer: ben, at: "2026-07-11T12:00:00Z", type: "group", title: "Operations" });
 
 assert.equal(conversationDisplayName(recent, me.id, me), "Amina Noor", "Direct chats must show the other participant.");
+const presenceAware = applyKnownOnlinePresence([recent], [{ ...amina, is_online: true, active_devices: 1 }]);
+assert.equal(presenceAware[0].participants[1].user.is_online, true, "An online friend must not appear offline in the conversation row.");
+assert.equal(recent.participants[1].user.is_online, undefined, "Presence reconciliation must not mutate cached conversations.");
 assert.equal(conversationViewerParticipant(pinned, me.id, me)?.is_muted, true);
 assert.equal(conversationMatchesQuery(recent, "amina", me.id, me), true);
 assert.equal(conversationMatchesQuery(recent, "unknown", me.id, me), false);
