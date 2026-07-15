@@ -920,6 +920,7 @@ button.ms-message-reply:hover {
 
 /* Voice notes */
 .ms-voice-message {
+  position: relative;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -1047,8 +1048,11 @@ button.ms-message-reply:hover {
 }
 
 .ms-voice-message__meta {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.35rem;
   min-width: 0;
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .ms-voice-message--compact .ms-voice-message__content {
@@ -1404,6 +1408,10 @@ button.ms-message-reply:hover {
     grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
     gap: 0.5rem;
     padding: 0.35rem 0.45rem;
+  }
+
+  .ms-voice-message__meta {
+    right: 0.45rem;
   }
 
   .ms-voice-message__play,
