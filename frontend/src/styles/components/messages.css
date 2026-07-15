@@ -1050,15 +1050,15 @@ button.ms-message-reply:hover {
 .ms-voice-message__meta {
   position: absolute;
   right: 0.5rem;
-  bottom: 0.35rem;
+  bottom: 0.22rem;
   min-width: 0;
   margin-left: 0;
 }
 
 .ms-voice-message--compact .ms-voice-message__content {
-  height: 3.4rem;
+  height: 3.6rem;
   display: grid;
-  grid-template-rows: 0.7rem 2rem 0.7rem;
+  grid-template-rows: 0.8rem 2rem 0.8rem;
   align-content: center;
   gap: 0;
 }
@@ -1072,8 +1072,8 @@ button.ms-message-reply:hover {
 .ms-voice-message--compact .ms-voice-message__timing {
   position: static;
   grid-row: 3;
-  align-self: start;
-  min-height: 0.7rem;
+  align-self: end;
+  min-height: 0.8rem;
 }
 
 .ms-voice-message__audio {
