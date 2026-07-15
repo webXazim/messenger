@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const composer = read("src/components/MessageComposer.tsx");
 const uploadQueue = read("src/components/composer/UploadQueue.tsx");
+const pdfDocumentPreview = read("src/components/composer/PdfDocumentPreview.tsx");
 const uploadPolicy = read("src/components/composer/uploadPolicy.ts");
 const drafts = read("src/lib/conversationDrafts.ts");
 const conversation = read("src/pages/ConversationPage.tsx");
@@ -29,8 +30,9 @@ for (const required of [
   assert.ok(composer.includes(required), `Missing composer reliability behavior: ${required}`);
 }
 assert.ok(uploadQueue.includes("Uploading ${progress}%"), "Upload progress is not exposed to users.");
-assert.ok(uploadQueue.includes("#page=1&view=FitH&toolbar=0"), "PDF uploads do not open the actual document in the staging viewer.");
-assert.match(uploadQueue, /isPdf && upload\.previewUrl[\s\S]*?<iframe/, "PDF staging still prefers a generated thumbnail over the document viewer.");
+assert.ok(uploadQueue.includes("<PdfDocumentPreview"), "PDF staging does not use the interactive document viewer.");
+assert.ok(pdfDocumentPreview.includes('import("pdfjs-dist")'), "The staged PDF viewer does not render documents in-app.");
+assert.ok(pdfDocumentPreview.includes("document.numPages"), "The staged PDF viewer only exposes a thumbnail instead of all pages.");
 assert.ok(uploadQueue.includes("Cancel upload"), "Active uploads cannot be cancelled clearly.");
 assert.ok(uploadPolicy.includes("max_upload_bytes"), "Composer does not use backend upload limits.");
 assert.ok(drafts.includes("messenger:draft:v1"), "Drafts are not scoped to account and conversation.");

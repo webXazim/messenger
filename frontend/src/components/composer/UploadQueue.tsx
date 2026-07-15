@@ -1,4 +1,6 @@
+import { useState, type MouseEvent, type PointerEvent } from "react";
 import type { PendingComposerUpload } from "./types";
+import { PdfDocumentPreview } from "./PdfDocumentPreview";
 
 function formatFileSize(size: number) {
   if (!size) return "0 B";
@@ -39,7 +41,19 @@ export function UploadQueue({
   onRemove: (localId: string) => void;
   onToggleViewOnce: (localId: string) => void;
 }) {
+  const [hiddenControls, setHiddenControls] = useState<Record<string, boolean>>({});
   if (!uploads.length) return null;
+
+  const showControls = (localId: string) => {
+    setHiddenControls((current) => current[localId] ? { ...current, [localId]: false } : current);
+  };
+
+  const toggleControls = (event: MouseEvent<HTMLElement>, localId: string, visual: boolean) => {
+    if (!visual || (event.target as Element).closest("button, video")) return;
+    setHiddenControls((current) => ({ ...current, [localId]: !current[localId] }));
+  };
+
+  const handlePointerEnter = (_event: PointerEvent<HTMLElement>, localId: string) => showControls(localId);
 
   return (
     <div className="ms-upload-queue" aria-label="Pending attachments">
@@ -61,8 +75,14 @@ export function UploadQueue({
           : `Remove ${upload.fileName}`;
 
         return (
-          <article className={`ms-upload-card ${isVisualMedia ? "is-visual-media" : ""} is-${upload.status}`} key={upload.localId}>
-            <div className={`ms-upload-card__preview ${isVisualMedia ? "is-visual-media" : ""}`}>
+          <article
+            className={`ms-upload-card ${isVisualMedia ? "is-visual-media" : ""} ${isPdf ? "is-pdf" : ""} ${hiddenControls[upload.localId] ? "has-hidden-controls" : ""} is-${upload.status}`}
+            key={upload.localId}
+            onClick={(event) => toggleControls(event, upload.localId, isVisualMedia)}
+            onPointerEnter={(event) => handlePointerEnter(event, upload.localId)}
+            onFocusCapture={() => showControls(upload.localId)}
+          >
+            <div className={`ms-upload-card__preview ${isVisualMedia ? "is-visual-media" : ""} ${isPdf ? "is-pdf" : ""}`}>
               {(upload.thumbnailUrl || upload.previewUrl) && mime.startsWith("image/") ? <img src={upload.thumbnailUrl || upload.previewUrl} alt="" /> : null}
               {upload.previewUrl && mime.startsWith("video/") ? (
                 <video
@@ -79,16 +99,8 @@ export function UploadQueue({
                   }}
                 />
               ) : null}
-              {isPdf && upload.previewUrl ? (
-                <iframe
-                  src={`${upload.previewUrl}#page=1&view=FitH&toolbar=0&navpanes=0`}
-                  title={`Preview ${upload.fileName}`}
-                  aria-label={`Scrollable PDF preview of ${upload.fileName}`}
-                />
-              ) : null}
-              {isPdf && !upload.previewUrl && upload.thumbnailUrl ? <img src={upload.thumbnailUrl} alt={`First page of ${upload.fileName}`} /> : null}
-              {isPdf && !upload.thumbnailUrl && !upload.previewUrl ? <span className="ms-upload-card__pdf-pending">Preparing document preview…</span> : null}
-              {!upload.previewUrl || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
+              {isPdf ? <PdfDocumentPreview file={upload.file} title={upload.fileName} /> : null}
+              {(!upload.previewUrl && !isPdf) || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
             </div>
             <div className="ms-upload-card__copy">
               <strong title={upload.fileName}>{upload.fileName}</strong>
