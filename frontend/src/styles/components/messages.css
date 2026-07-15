@@ -1710,17 +1710,24 @@ button.ms-message-reply:hover {
 }
 
 .ms-message-card.has-attachment-caption {
+  --ms-caption-meta-reserve: 3.9rem;
   gap: 0;
 }
 
+.ms-message-row--own .ms-message-card.has-attachment-caption {
+  --ms-caption-meta-reserve: 5.25rem;
+}
+
+.ms-message-row.is-optimistic .ms-message-card.has-attachment-caption,
+.ms-message-card.has-attachment-caption.is-action-pending {
+  --ms-caption-meta-reserve: 7.25rem;
+}
+
 .ms-message-card.has-attachment-caption > .ms-message-copy {
+  position: relative;
   width: 100%;
   max-width: none;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  column-gap: 0.55rem;
-  row-gap: 0.35rem;
+  display: block;
   justify-self: stretch;
   border-radius: 0 0 var(--ms-caption-bottom-right) var(--ms-caption-bottom-left);
   box-shadow: none;
@@ -1728,19 +1735,26 @@ button.ms-message-reply:hover {
 
 .ms-message-card.has-attachment-caption > .ms-message-copy
   > :is(.ms-reply-preview, .ms-message-transcript, .ms-message-links) {
-  grid-column: 1 / -1;
   margin-bottom: 0;
 }
 
 .ms-message-card.has-attachment-caption > .ms-message-copy > .ms-message-text {
-  grid-column: 1;
   min-width: 0;
 }
 
+/* Reserve metadata width only after the final caption character. Earlier
+   wrapped lines retain the full card width. */
+.ms-message-card.has-attachment-caption > .ms-message-copy > .ms-message-text::after {
+  width: var(--ms-caption-meta-reserve);
+  height: 0.7em;
+  display: inline-block;
+  content: "";
+}
+
 .ms-message-card.has-attachment-caption > .ms-message-copy > .ms-message-meta {
-  grid-column: 2;
-  align-self: end;
-  justify-self: end;
+  position: absolute;
+  right: 0.58rem;
+  bottom: 0.48rem;
   margin: 0;
   white-space: nowrap;
 }
