@@ -45,10 +45,12 @@ assert.ok(composer.includes("width: item.width") && composer.includes("height: i
 assert.ok(conversation.includes("await sendMutation.mutateAsync(nextPayload)"), "Composer send failures are still swallowed.");
 assert.ok(voice.includes("clientTempId"), "Voice-note retry cannot reuse its optimistic message identity.");
 assert.ok(voice.includes("previewUrl: voiceDraft.previewUrl"), "Voice-note sends do not retain their local audio for the optimistic player.");
+assert.ok(voice.includes("analyzeRecordedWaveform(blob"), "Sent voice-note waveforms are not derived from the completed recording.");
 assert.ok(chatApi.includes("waveform: Array.isArray(voiceNote.waveform)"), "Normalized voice notes discard their real waveform.");
 assert.ok(conversation.includes("_optimistic_attachments") && conversation.includes("waveform: normalizedWaveform"), "Optimistic voice notes do not receive their audio or waveform immediately.");
 assert.ok(audioPlayer.includes("requestAnimationFrame(updateProgress)"), "Voice-note playback progress is not tracked continuously.");
 assert.ok(audioPlayer.includes("audio.defaultPlaybackRate = speed"), "Voice-note playback speed is not applied consistently.");
+assert.ok(audioPlayer.includes("durationSeconds ?? attachment?.duration_seconds"), "Voice-note duration waits for protected audio metadata.");
 assert.match(voice, /shouldDiscard \|\| chunks\.length === 0[\s\S]*setSending\(false\)/, "Empty or discarded voice recordings can leave the composer stuck in a sending state.");
 assert.ok(media.includes("hasMediaAccessToken"), "Signed media URLs are not streamed directly.");
 assert.ok(media.includes('preload="metadata"'), "Video/audio still preload the complete file unnecessarily.");

@@ -9,6 +9,7 @@ type AudioMessagePlayerProps = {
   attachment?: MessageAttachment;
   currentUserId?: string;
   waveformData?: number[];
+  durationSeconds?: number | string | null;
 };
 
 const SPEEDS = [1, 1.25, 1.5, 2];
@@ -78,7 +79,7 @@ function normalizeStoredWaveform(values?: number[]) {
   });
 }
 
-export function AudioMessagePlayer({ src, label = "Audio", compact = false, attachment, currentUserId, waveformData }: AudioMessagePlayerProps) {
+export function AudioMessagePlayer({ src, label = "Audio", compact = false, attachment, currentUserId, waveformData, durationSeconds }: AudioMessagePlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingPlayRef = useRef(false);
   const retryCountRef = useRef(0);
@@ -90,7 +91,8 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
   const [retryTick, setRetryTick] = useState(0);
   const [waveform, setWaveform] = useState<number[]>(() => normalizeStoredWaveform(waveformData));
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(Number(attachment?.duration_seconds) || 0);
+  const knownDuration = Number(durationSeconds ?? attachment?.duration_seconds) || 0;
+  const [duration, setDuration] = useState(knownDuration);
   const [playing, setPlaying] = useState(false);
   const speed = SPEEDS[speedIndex] ?? 1;
   const speedLabel = useMemo(() => `${speed}×`, [speed]);
@@ -103,10 +105,10 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
     setResolvedSrc("");
     setLoadRequested(false);
     pendingPlayRef.current = false;
-    setDuration(Number(attachment?.duration_seconds) || 0);
+    setDuration(knownDuration);
     setPlaying(false);
     setWaveform(normalizeStoredWaveform(waveformData));
-  }, [attachment?.duration_seconds, attachment?.id, src, waveformData]);
+  }, [attachment?.duration_seconds, attachment?.id, knownDuration, src, waveformData]);
 
   useEffect(() => {
     if (!loadRequested) return;
@@ -211,11 +213,17 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
 
   const cycleSpeed = () => {
     const nextIndex = (speedIndex + 1) % SPEEDS.length;
+    const nextSpeed = SPEEDS[nextIndex] ?? 1;
     setSpeedIndex(nextIndex);
+    const audio = audioRef.current;
+    if (audio) {
+      audio.defaultPlaybackRate = nextSpeed;
+      audio.playbackRate = nextSpeed;
+    }
   };
 
   const syncDuration = (audio: HTMLAudioElement) => {
-    setDuration(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Number(attachment?.duration_seconds) || 0);
+    setDuration(Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : knownDuration);
   };
 
   const seek = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -257,7 +265,11 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
           onLoadedMetadata={(event) => syncDuration(event.currentTarget)}
           onDurationChange={(event) => syncDuration(event.currentTarget)}
           onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
-          onPlaying={() => setPlaying(true)}
+          onPlaying={(event) => {
+            event.currentTarget.defaultPlaybackRate = speed;
+            event.currentTarget.playbackRate = speed;
+            setPlaying(true);
+          }}
           onPause={() => setPlaying(false)}
           onEnded={(event) => {
             setPlaying(false);

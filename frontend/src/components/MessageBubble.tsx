@@ -287,6 +287,7 @@ export function MessageBubble({
                 attachment={attachment}
                 currentUserId={currentUserId}
                 waveformData={message.voice_note?.waveform ?? (Array.isArray(attachment.metadata?.waveform) ? attachment.metadata.waveform.map(Number) : undefined)}
+                durationSeconds={message.voice_note?.duration_seconds}
               />
             );
           })}

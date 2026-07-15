@@ -78,6 +78,43 @@ function compressWaveform(samples: number[], outputCount: number) {
   });
 }
 
+async function analyzeRecordedWaveform(blob: Blob, outputCount: number) {
+  if (typeof window === "undefined") return null;
+  const AudioContextCtor = window.AudioContext
+    || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  const context = new AudioContextCtor();
+  try {
+    const audioBuffer = await context.decodeAudioData((await blob.arrayBuffer()).slice(0));
+    if (!audioBuffer.length || !audioBuffer.numberOfChannels) return null;
+    const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, index) => audioBuffer.getChannelData(index));
+    const levels = Array.from({ length: outputCount }, (_, index) => {
+      const start = Math.floor((index * audioBuffer.length) / outputCount);
+      const end = Math.max(start + 1, Math.floor(((index + 1) * audioBuffer.length) / outputCount));
+      const stride = Math.max(1, Math.floor((end - start) / 1200));
+      let squareTotal = 0;
+      let sampleCount = 0;
+      for (let cursor = start; cursor < end; cursor += stride) {
+        let mixedSample = 0;
+        for (const channel of channels) mixedSample += channel[cursor] ?? 0;
+        mixedSample /= channels.length;
+        squareTotal += mixedSample * mixedSample;
+        sampleCount += 1;
+      }
+      return sampleCount ? Math.sqrt(squareTotal / sampleCount) : 0;
+    });
+    const sorted = [...levels].sort((left, right) => left - right);
+    const noiseFloor = sorted[Math.floor(sorted.length * 0.1)] ?? 0;
+    const voiceCeiling = sorted[Math.floor(sorted.length * 0.95)] ?? Math.max(...levels, 0.001);
+    const range = Math.max(voiceCeiling - noiseFloor, 0.001);
+    return levels.map((level) => clampLevel(Math.pow(Math.max(0, level - noiseFloor) / range, 0.72)));
+  } catch {
+    return null;
+  } finally {
+    void context.close().catch(() => undefined);
+  }
+}
+
 function MicrophoneIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -304,7 +341,11 @@ export function VoiceNoteRecorder({
           squareTotal += normalized * normalized;
         }
         const rms = Math.sqrt(squareTotal / waveformData.length);
-        const level = clampLevel(rms * 5.4);
+        let peak = 0;
+        for (const sample of waveformData) peak = Math.max(peak, Math.abs((sample - 128) / 128));
+        // A lightly compressed peak/RMS blend keeps quiet speech visible while
+        // leaving silence near the baseline and loud speech near full height.
+        const level = clampLevel(Math.pow(Math.min(1, Math.max(rms * 10, peak * 2.8)), 0.72));
         waveformHistoryRef.current.push(level);
         setLiveWaveform(waveformHistoryRef.current.slice(-LIVE_WAVEFORM_BAR_COUNT));
         setDurationMs(Date.now() - startedAt);
@@ -347,7 +388,7 @@ export function VoiceNoteRecorder({
         const shouldDiscard = discardOnStopRef.current;
         const shouldSend = sendOnStopRef.current;
         const chunks = [...chunksRef.current];
-        const waveform = compressWaveform(waveformHistoryRef.current, PREVIEW_WAVEFORM_BAR_COUNT);
+        const liveWaveformFallback = compressWaveform(waveformHistoryRef.current, PREVIEW_WAVEFORM_BAR_COUNT);
         const mimeType = recorder.mimeType || recordingMimeType || "audio/webm";
 
         discardOnStopRef.current = false;
@@ -366,22 +407,25 @@ export function VoiceNoteRecorder({
           return;
         }
 
-        const fileName = `voice-note-${Date.now()}.${fileExtensionForMimeType(mimeType)}`;
-        const voiceDraft: VoiceDraft = {
-          file: new File([blob], fileName, { type: mimeType }),
-          previewUrl: URL.createObjectURL(blob),
-          durationMs: finalDuration,
-          durationSeconds: Math.max(1, Math.round(finalDuration / 1000)),
-          mimeType,
-          waveform,
-          clientTempId: safeId("voice-note"),
-        };
+        void (async () => {
+          const waveform = await analyzeRecordedWaveform(blob, PREVIEW_WAVEFORM_BAR_COUNT) ?? liveWaveformFallback;
+          const fileName = `voice-note-${Date.now()}.${fileExtensionForMimeType(mimeType)}`;
+          const voiceDraft: VoiceDraft = {
+            file: new File([blob], fileName, { type: mimeType }),
+            previewUrl: URL.createObjectURL(blob),
+            durationMs: finalDuration,
+            durationSeconds: Math.max(1, Math.ceil(finalDuration / 1000)),
+            mimeType,
+            waveform,
+            clientTempId: safeId("voice-note"),
+          };
 
-        if (shouldSend) {
-          void sendVoiceDraft(voiceDraft);
-        } else {
-          setDraft(voiceDraft);
-        }
+          if (shouldSend) await sendVoiceDraft(voiceDraft);
+          else setDraft(voiceDraft);
+        })().catch(() => {
+          setSending(false);
+          setError("Voice note processing failed. Please record it again.");
+        });
       };
 
       recorderRef.current = recorder;
