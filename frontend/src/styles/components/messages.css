@@ -1015,6 +1015,18 @@ button.ms-message-reply:hover {
   background: var(--ms-color-surface-strong);
 }
 
+.ms-voice-message__meta {
+  min-width: 0;
+  grid-column: 1 / -1;
+  margin-top: -0.15rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--ms-color-line);
+}
+
+.ms-voice-message__meta .ms-message-meta {
+  padding-inline: 0.15rem;
+}
+
 .ms-voice-message__audio {
   position: absolute;
   width: 1px;
@@ -1122,7 +1134,7 @@ button.ms-message-reply:hover {
   color: var(--ms-color-danger);
 }
 
-/* Metadata sits outside the content surface. */
+/* Timestamp and delivery state live inside their message card. */
 .ms-message-meta {
   min-width: 0;
   display: flex;

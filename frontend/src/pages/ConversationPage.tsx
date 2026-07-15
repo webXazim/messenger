@@ -1760,30 +1760,9 @@ export function ConversationPage() {
             onTyping={sendTyping}
             disabledReason={composerDisabledReason}
             onSendVoiceNote={async ({ file, previewUrl, fileName, mimeType, durationSeconds, clientTempId, waveform }) => {
-              const upload = await uploadConversationAttachment(file, {
-                original_name: fileName,
-                mime_type: mimeType,
-              });
-              const storedEnvelope = encryptedAttachmentUploadsRef.current[upload.id];
-              if (!storedEnvelope) throw new Error("The secure voice note is not ready. Record it again.");
-              const envelope = await rewrapAttachmentEncryptionForConversation({
-                userId: String(user?.id || ""),
-                conversationId,
-                envelope: storedEnvelope,
-                participantUserIds: conversationParticipantIds,
-              });
-              encryptedAttachmentUploadsRef.current[upload.id] = envelope;
               const normalizedWaveform = waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
-              await sendMutation.mutateAsync({
-                type: "audio",
-                attachment_ids: [upload.id],
-                attachment_encryption: [{ upload_id: upload.id, ...envelope }],
-                text: "",
-                is_voice_note: true,
-                duration_seconds: durationSeconds,
-                waveform: normalizedWaveform,
-                _optimistic_attachments: [{
-                  id: upload.id,
+              const optimisticAttachment: MessageAttachment = {
+                  id: `voice-${clientTempId}`,
                   original_name: fileName,
                   mime_type: mimeType,
                   media_kind: "audio",
@@ -1792,10 +1771,60 @@ export function ConversationPage() {
                   file_url: previewUrl,
                   preview_url: previewUrl,
                   is_encrypted: false,
-                  encryption: envelope,
-                }],
-                client_temp_id: clientTempId,
-              });
+              };
+              if (user?.id) {
+                const optimistic = buildOptimisticMessage(
+                  String(user.id),
+                  user.username || "You",
+                  "",
+                  [optimisticAttachment.id],
+                  null,
+                  clientTempId,
+                  [optimisticAttachment],
+                  { type: "audio", isVoiceNote: true, durationSeconds, waveform: normalizedWaveform },
+                );
+                queryClient.setQueryData<InfiniteData<MessagePage>>(
+                  ["messages", conversationId],
+                  (current) => upsertMessagePages(current, optimistic),
+                );
+              }
+
+              let sendStarted = false;
+              try {
+                const upload = await uploadConversationAttachment(file, {
+                  original_name: fileName,
+                  mime_type: mimeType,
+                });
+                const storedEnvelope = encryptedAttachmentUploadsRef.current[upload.id];
+                if (!storedEnvelope) throw new Error("The secure voice note is not ready. Record it again.");
+                const envelope = await rewrapAttachmentEncryptionForConversation({
+                  userId: String(user?.id || ""),
+                  conversationId,
+                  envelope: storedEnvelope,
+                  participantUserIds: conversationParticipantIds,
+                });
+                encryptedAttachmentUploadsRef.current[upload.id] = envelope;
+                sendStarted = true;
+                await sendMutation.mutateAsync({
+                  type: "audio",
+                  attachment_ids: [upload.id],
+                  attachment_encryption: [{ upload_id: upload.id, ...envelope }],
+                  text: "",
+                  is_voice_note: true,
+                  duration_seconds: durationSeconds,
+                  waveform: normalizedWaveform,
+                  _optimistic_attachments: [{ ...optimisticAttachment, id: upload.id, encryption: envelope }],
+                  client_temp_id: clientTempId,
+                });
+              } catch (error) {
+                if (!sendStarted) {
+                  queryClient.setQueryData<InfiniteData<MessagePage>>(
+                    ["messages", conversationId],
+                    (current) => removeMessagePages(current, (message) => message.id === `temp-${clientTempId}`),
+                  );
+                }
+                throw error;
+              }
             }}
           />
         </footer>

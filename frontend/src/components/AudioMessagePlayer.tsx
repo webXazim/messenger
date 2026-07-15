@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { fetchAttachmentBlobForUser } from "./AuthenticatedMedia";
 import type { MessageAttachment } from "../types/chat";
 
@@ -10,6 +10,7 @@ type AudioMessagePlayerProps = {
   currentUserId?: string;
   waveformData?: number[];
   durationSeconds?: number | string | null;
+  footer?: ReactNode;
 };
 
 const SPEEDS = [1, 1.25, 1.5, 2];
@@ -79,7 +80,7 @@ function normalizeStoredWaveform(values?: number[]) {
   });
 }
 
-export function AudioMessagePlayer({ src, label = "Audio", compact = false, attachment, currentUserId, waveformData, durationSeconds }: AudioMessagePlayerProps) {
+export function AudioMessagePlayer({ src, label = "Audio", compact = false, attachment, currentUserId, waveformData, durationSeconds, footer }: AudioMessagePlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingPlayRef = useRef(false);
   const retryCountRef = useRef(0);
@@ -255,6 +256,7 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
       <button type="button" className="ms-voice-message__speed" onClick={cycleSpeed} disabled={failed} aria-label={`Playback speed ${speedLabel}`}>
         {speedLabel}
       </button>
+      {footer ? <div className="ms-voice-message__meta">{footer}</div> : null}
       {loadRequested ? (
         <audio
           ref={audioRef}

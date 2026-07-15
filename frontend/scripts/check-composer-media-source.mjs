@@ -48,6 +48,7 @@ assert.ok(voice.includes("previewUrl: voiceDraft.previewUrl"), "Voice-note sends
 assert.ok(voice.includes("analyzeRecordedWaveform(blob"), "Sent voice-note waveforms are not derived from the completed recording.");
 assert.ok(chatApi.includes("waveform: Array.isArray(voiceNote.waveform)"), "Normalized voice notes discard their real waveform.");
 assert.ok(conversation.includes("_optimistic_attachments") && conversation.includes("waveform: normalizedWaveform"), "Optimistic voice notes do not receive their audio or waveform immediately.");
+assert.match(conversation, /buildOptimisticMessage\([\s\S]*await uploadConversationAttachment/, "Voice-note cards wait for upload before appearing optimistically.");
 assert.ok(audioPlayer.includes("requestAnimationFrame(updateProgress)"), "Voice-note playback progress is not tracked continuously.");
 assert.ok(audioPlayer.includes("audio.defaultPlaybackRate = speed"), "Voice-note playback speed is not applied consistently.");
 assert.ok(audioPlayer.includes("durationSeconds ?? attachment?.duration_seconds"), "Voice-note duration waits for protected audio metadata.");

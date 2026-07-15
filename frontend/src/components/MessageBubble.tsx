@@ -275,7 +275,7 @@ export function MessageBubble({
             </div>
           ) : null}
 
-          {audio.map((attachment) => {
+          {audio.map((attachment, index) => {
             const src = getAttachmentPlaybackUrl(attachment);
             if (!src) return null;
             return (
@@ -288,11 +288,34 @@ export function MessageBubble({
                 currentUserId={currentUserId}
                 waveformData={message.voice_note?.waveform ?? (Array.isArray(attachment.metadata?.waveform) ? attachment.metadata.waveform.map(Number) : undefined)}
                 durationSeconds={message.voice_note?.duration_seconds}
+                footer={!hasCopySurface && index === audio.length - 1 ? (
+                  <MessageMeta
+                    message={message}
+                    own={own}
+                    receiptStatus={receiptStatus}
+                    receiptSummary={receiptSummary}
+                    onRetry={onRetry}
+                    actionError={actionError}
+                    actionPending={actionPending}
+                  />
+                ) : null}
               />
             );
           })}
 
           <AttachmentMessage attachments={files} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} />
+
+          {!hasCopySurface && !audio.length ? (
+            <MessageMeta
+              message={message}
+              own={own}
+              receiptStatus={receiptStatus}
+              receiptSummary={receiptSummary}
+              onRetry={onRetry}
+              actionError={actionError}
+              actionPending={actionPending}
+            />
+          ) : null}
 
           {!message.is_deleted && !isFailed && !isLocalUnsent ? (
             <ReactionBar
@@ -303,17 +326,6 @@ export function MessageBubble({
           ) : null}
         </article>
 
-        {!hasCopySurface ? (
-          <MessageMeta
-            message={message}
-            own={own}
-            receiptStatus={receiptStatus}
-            receiptSummary={receiptSummary}
-            onRetry={onRetry}
-            actionError={actionError}
-            actionPending={actionPending}
-          />
-        ) : null}
       </div>
     </div>
   );
