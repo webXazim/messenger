@@ -567,6 +567,10 @@ export function CallRoomPage() {
       observedLiveCallRef.current = true;
       return;
     }
+    if (call.status === "missed") {
+      navigate(call.conversation ? `/chat/${call.conversation}` : "/calls", { replace: true });
+      return;
+    }
     if (isTerminalCall(call) && !observedLiveCallRef.current) {
       navigate(call.conversation ? `/chat/${call.conversation}` : "/calls", { replace: true });
     }

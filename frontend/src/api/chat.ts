@@ -412,7 +412,11 @@ export function normalizeMessage(value: unknown): Message {
           call_outcome: firstString(callEvent.call_outcome) || undefined,
           summary_text: firstString(callEvent.summary_text) || undefined,
           duration_seconds: firstNumber(callEvent.duration_seconds) ?? undefined,
+          ringing_duration_seconds: firstNumber(callEvent.ringing_duration_seconds) ?? undefined,
           reason: firstString(callEvent.reason) || undefined,
+          initiated_by_id: firstString(callEvent.initiated_by_id) || undefined,
+          answered_by_id: firstString(callEvent.answered_by_id) || undefined,
+          actor_id: firstString(callEvent.actor_id) || undefined,
         }
       : null,
     reply_preview: Object.keys(replyPreview).length

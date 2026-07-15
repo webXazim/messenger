@@ -1,8 +1,10 @@
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
+from django.conf import settings
 from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -82,8 +84,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if hasattr(self, "joined_groups"):
             self.joined_groups.clear()
         if getattr(self, "user", None) and getattr(self.user, "is_authenticated", False):
-            snapshot = await self._clear_presence()
-            await self._broadcast_presence_update(snapshot)
+            # Token refreshes and mobile network handoffs replace a websocket
+            # with a new one. Clearing immediately makes contacts see a brief
+            # offline flash. Keep this connection's presence record through a
+            # short grace window, then recompute presence across every active
+            # connection before broadcasting the result.
+            asyncio.create_task(self._clear_presence_after_grace())
 
     async def receive_json(self, content, **kwargs):
         event = content.get("event")
@@ -639,6 +645,17 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     @database_sync_to_async
     def _clear_presence(self):
         return clear_presence(self.user, device_id=self.presence_device_id)
+
+    async def _clear_presence_after_grace(self):
+        grace_seconds = max(int(getattr(settings, "PRESENCE_DISCONNECT_GRACE_SECONDS", 12) or 12), 5)
+        await asyncio.sleep(grace_seconds)
+        try:
+            snapshot = await self._clear_presence()
+            await self._broadcast_presence_update(snapshot)
+        except Exception:
+            # Presence expiry remains protected by the registry TTL even if a
+            # worker shuts down before this best-effort cleanup completes.
+            pass
 
     async def _broadcast_call_timeline(self, call_payload):
         timeline = call_payload.get("_timeline_message")

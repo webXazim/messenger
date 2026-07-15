@@ -25,6 +25,7 @@ import {
   findActiveCallForConversation,
   formatCallDuration,
 } from "../.call-test-build/lib/callLifecycle.js";
+import { getCallEventPresentation } from "../.call-test-build/components/messages/messagePresentation.js";
 
 const remote = {
   id: "participant-2",
@@ -44,6 +45,31 @@ const baseCall = {
   status: "ringing",
   started_at: new Date(0).toISOString(),
 };
+
+const ringingCallMessage = {
+  id: "call-message-1",
+  type: "system",
+  text: "Outgoing call",
+  sender: { id: "caller", username: "caller", display_name: "Caller" },
+  created_at: new Date(0).toISOString(),
+  attachments: [],
+  call_event: {
+    system_event: "call",
+    call_status: "ringing",
+    call_outcome: "ringing",
+    call_type: "voice",
+    summary_text: "Outgoing call",
+    initiated_by_id: "caller",
+  },
+};
+assert.equal(getCallEventPresentation(ringingCallMessage, "caller")?.title, "Outgoing call");
+assert.equal(getCallEventPresentation(ringingCallMessage, "receiver")?.title, "Incoming call");
+assert.equal(getCallEventPresentation(ringingCallMessage, "receiver")?.direction, "incoming");
+const missedCallMessage = {
+  ...ringingCallMessage,
+  call_event: { ...ringingCallMessage.call_event, call_status: "missed", call_outcome: "missed", ringing_duration_seconds: 50 },
+};
+assert.equal(getCallEventPresentation(missedCallMessage, "caller")?.detail, "Voice call was not answered · Rang for 50s");
 
 assert.equal(getCallViewState(baseCall, {
   isInitiator: true,

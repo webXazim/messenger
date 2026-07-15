@@ -4,6 +4,7 @@ import {
   applyKnownOnlinePresence,
   conversationDisplayName,
   conversationMatchesQuery,
+  conversationSnippet,
   conversationViewerParticipant,
   sortConversationsForInbox,
 } from "../.navigation-test-build/components/conversations/conversationPresentation.js";
@@ -50,8 +51,19 @@ const recent = makeConversation({ id: "recent", peer: amina, at: "2026-07-13T12:
 const pinned = makeConversation({ id: "pinned", peer: ben, at: "2026-07-12T12:00:00Z", pinned: true, muted: true });
 const archived = makeConversation({ id: "archived", peer: amina, at: "2026-07-14T12:00:00Z", archived: true, unread: 2 });
 const group = makeConversation({ id: "group", peer: ben, at: "2026-07-11T12:00:00Z", type: "group", title: "Operations" });
+const ringingConversation = {
+  ...recent,
+  last_message: {
+    ...recent.last_message,
+    text: "Outgoing call",
+    sender: amina,
+    call_event: { system_event: "call", call_outcome: "ringing", initiated_by_id: amina.id, summary_text: "Outgoing call" },
+  },
+};
 
 assert.equal(conversationDisplayName(recent, me.id, me), "Amina Noor", "Direct chats must show the other participant.");
+assert.equal(conversationSnippet(ringingConversation, me.id, me), "Incoming call");
+assert.equal(conversationSnippet(ringingConversation, amina.id, amina), "You: Outgoing call");
 const presenceAware = applyKnownOnlinePresence([recent], [{ ...amina, is_online: true, active_devices: 1 }]);
 assert.equal(presenceAware[0].participants[1].user.is_online, true, "An online friend must not appear offline in the conversation row.");
 assert.equal(recent.participants[1].user.is_online, undefined, "Presence reconciliation must not mutate cached conversations.");

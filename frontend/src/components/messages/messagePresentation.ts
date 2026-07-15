@@ -83,28 +83,37 @@ export function formatCallDuration(durationSeconds?: number) {
   return `${seconds}s`;
 }
 
-export function getCallEventPresentation(message: Message): CallEventPresentation | null {
+export function getCallEventPresentation(message: Message, currentUserId?: string): CallEventPresentation | null {
   const event = message.call_event || null;
   if (!event || (event.system_event && event.system_event !== "call")) return null;
 
   const outcome = (event.call_outcome || event.call_status || "").toLowerCase();
   const duration = formatCallDuration(event.duration_seconds);
+  const ringingDuration = formatCallDuration(event.ringing_duration_seconds);
+  const ringingDetail = ringingDuration ? ` · Rang for ${ringingDuration}` : "";
   const callType = event.call_type === "video" ? "video" : "voice";
-  const summary = (event.summary_text || "").toLowerCase();
-  const direction = summary.includes("incoming")
-    ? "incoming"
-    : summary.includes("outgoing")
-      ? "outgoing"
-      : "neutral";
+  const direction = event.initiated_by_id && currentUserId
+    ? String(event.initiated_by_id) === String(currentUserId) ? "outgoing" : "incoming"
+    : "neutral";
+
+  if (outcome === "ringing" || outcome === "initiated") {
+    return {
+      title: direction === "incoming" ? "Incoming call" : direction === "outgoing" ? "Outgoing call" : "Call",
+      detail: callType === "video" ? "Video call" : "Voice call",
+      tone: "neutral",
+      direction,
+      callType,
+    };
+  }
 
   if (outcome === "missed") {
-    return { title: "Missed call", detail: callType === "video" ? "Video call was not answered" : "Voice call was not answered", tone: "missed", direction, callType };
+    return { title: direction === "outgoing" ? "No answer" : "Missed call", detail: `${callType === "video" ? "Video call was not answered" : "Voice call was not answered"}${ringingDetail}`, tone: "missed", direction, callType };
   }
   if (outcome === "declined" || outcome === "denied") {
-    return { title: "Call declined", detail: callType === "video" ? "Video call declined" : "Voice call declined", tone: "declined", direction, callType };
+    return { title: "Call declined", detail: `${callType === "video" ? "Video call declined" : "Voice call declined"}${ringingDetail}`, tone: "declined", direction, callType };
   }
   if (outcome === "cancelled" || outcome === "canceled") {
-    return { title: "Call cancelled", detail: "Ended before it was answered", tone: "cancelled", direction, callType };
+    return { title: "Call cancelled", detail: `Ended before it was answered${ringingDetail}`, tone: "cancelled", direction, callType };
   }
   if (["received", "accepted", "connected", "ongoing"].includes(outcome)) {
     return { title: "Call connected", detail: callType === "video" ? "Video call accepted" : "Voice call accepted", tone: "connected", direction, callType };

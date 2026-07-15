@@ -1236,6 +1236,15 @@ button.ms-message-reply:hover {
   font-weight: 800;
 }
 
+.ms-call-message__meta {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+
+.ms-call-message__meta .ms-message-meta {
+  padding-inline: 0;
+}
+
 .ms-call-message--missed .ms-call-message__direction,
 .ms-call-message--declined .ms-call-message__direction {
   color: var(--ms-color-danger);

@@ -1751,7 +1751,9 @@ class PresenceDisconnectView(views.APIView):
 
     def post(self, request):
         device_id = request.data.get("device_id", "default")
-        snapshot = clear_presence(request.user, device_id=device_id)
+        # Explicit sign-out owns the logical browser device and should also
+        # remove any websocket connection records created for that device.
+        snapshot = clear_presence(request.user, device_id=device_id, include_device_connections=True)
         _broadcast_presence_update(request.user, snapshot)
         return Response({"user_id": str(request.user.id), **snapshot, "server_time": timezone.now().isoformat()})
 

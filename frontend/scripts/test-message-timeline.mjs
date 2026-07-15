@@ -8,6 +8,7 @@ import {
   removeMessagePages,
   upsertMessagePages,
 } from "../.timeline-test-build/lib/messageTimeline.js";
+import { mergeConversationReceipts, mergeParticipantReceipts } from "../.timeline-test-build/lib/messageReceipts.js";
 
 const user = { id: "user-1", username: "user", display_name: "User" };
 const makeMessage = (id, createdAt, patch = {}) => ({
@@ -91,6 +92,35 @@ assert.ok(!flattenMessagePages(removedData).some((message) => message.id === "co
 
 const emptyData = upsertMessagePages(undefined, makeMessage("first", "2026-07-13T12:00:00Z"));
 assert.equal(emptyData.pages[0].results[0].id, "first", "Optimistic sends must work before the first page settles.");
+
+const participant = {
+  id: "participant-1",
+  role: "member",
+  user,
+  last_delivered_message: "new-delivered",
+  last_delivered_at: "2026-07-13T12:02:00Z",
+  last_read_message: "new-read",
+  last_read_at: "2026-07-13T12:03:00Z",
+};
+const staleReceipt = mergeParticipantReceipts(participant, {
+  last_delivered_message: "old-delivered",
+  last_delivered_at: "2026-07-13T12:00:00Z",
+  last_read_message: "old-read",
+  last_read_at: "2026-07-13T12:01:00Z",
+});
+assert.equal(staleReceipt.last_delivered_message, "new-delivered", "Delivered receipts must never move backwards.");
+assert.equal(staleReceipt.last_read_message, "new-read", "Read receipts must never move backwards.");
+
+const baseConversation = { id: "conversation-1", type: "direct", title: "", unread_count: 0, participants: [participant] };
+const staleConversation = {
+  ...baseConversation,
+  participants: [{ ...participant, last_read_message: "old-read", last_read_at: "2026-07-13T12:01:00Z" }],
+};
+assert.equal(
+  mergeConversationReceipts(baseConversation, staleConversation).participants[0].last_read_message,
+  "new-read",
+  "A stale conversation refresh must not downgrade a live receipt.",
+);
 
 rmSync(new URL("../.timeline-test-build", import.meta.url), { recursive: true, force: true });
 console.log("Message timeline core tests passed.");

@@ -78,14 +78,23 @@ export function conversationSnippet(
   if (message.is_deleted) return "Message deleted";
   if (message.is_encrypted) return "Encrypted message";
 
-  let content = message.text?.trim() || "";
-  if (!content && message.call_event) content = message.call_event.summary_text || "Call update";
+  const currentIdentity = currentUser ?? { id: currentUserId };
+  const callOwnedByViewer = message.call_event?.initiated_by_id
+    ? String(message.call_event.initiated_by_id) === String(currentIdentity.id || "")
+    : isSameUserIdentity(message.sender, currentIdentity);
+  const callOutcome = String(message.call_event?.call_outcome || message.call_event?.call_status || "").toLowerCase();
+  let content = "";
+  if (message.call_event) {
+    if (["ringing", "initiated"].includes(callOutcome)) content = callOwnedByViewer ? "Outgoing call" : "Incoming call";
+    else if (callOutcome === "missed") content = callOwnedByViewer ? "No answer" : "Missed call";
+    else content = message.call_event.summary_text || "Call update";
+  }
+  if (!content) content = message.text?.trim() || "";
   if (!content && message.voice_note?.is_voice_note) content = "Voice message";
   if (!content) content = attachmentSnippet(conversation);
   if (!content) content = "New message";
 
-  const currentIdentity = currentUser ?? { id: currentUserId };
-  if (isSameUserIdentity(message.sender, currentIdentity)) return `You: ${content}`;
+  if (message.call_event ? callOwnedByViewer : isSameUserIdentity(message.sender, currentIdentity)) return `You: ${content}`;
   if (conversation.type === "group") {
     const sender = userDisplayLabel(message.sender);
     return sender ? `${sender}: ${content}` : content;

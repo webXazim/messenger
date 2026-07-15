@@ -372,6 +372,10 @@ ALLOWED_UPLOAD_MIME_TYPES = sorted(set(ALLOWED_UPLOAD_MIME_TYPES) | {
 # Mobile browsers may throttle timers for several minutes. Clean WebSocket
 # disconnects still clear presence immediately; this floor protects live tabs.
 PRESENCE_TTL_SECONDS = max(env_int("PRESENCE_TTL_SECONDS", 300), 300)
+# A websocket can be replaced during token refresh, mobile radio handoff, or a
+# brief browser suspension. Do not publish an offline transition until the
+# replacement has had time to register itself.
+PRESENCE_DISCONNECT_GRACE_SECONDS = max(env_int("PRESENCE_DISCONNECT_GRACE_SECONDS", 12), 5)
 UPLOAD_SCAN_ASYNC = False if USE_LOCAL_TEST_SERVICES else env_bool("UPLOAD_SCAN_ASYNC", True)
 
 CHAT_ATTACHMENT_FORCE_DOWNLOAD = env_bool("CHAT_ATTACHMENT_FORCE_DOWNLOAD", True)

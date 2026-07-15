@@ -88,7 +88,7 @@ export function MessageBubble({
   const hasViewOnceAttachments = (message.attachments ?? []).some((attachment) => Boolean(attachment.view_once));
   const canForward = !message.is_deleted && !isFailed && !isLocalUnsent && !isEncrypted && !hasEncryptedAttachments && !hasViewOnceAttachments;
   const { media, audio, files } = useMemo(() => splitAttachments(message), [message]);
-  const callEvent = useMemo(() => getCallEventPresentation(message), [message]);
+  const callEvent = useMemo(() => getCallEventPresentation(message, currentUserId), [currentUserId, message]);
   const readLabel = readByNames.length
     ? `Seen by ${readByNames.slice(0, 3).join(", ")}${readByNames.length > 3 ? ` +${readByNames.length - 3}` : ""}`
     : "";
@@ -236,7 +236,22 @@ export function MessageBubble({
             onReport={onReport}
             disabled={actionPending}
           />
-          {callEvent ? <CallEventMessage event={callEvent} /> : null}
+          {callEvent ? (
+            <CallEventMessage
+              event={callEvent}
+              footer={(
+                <MessageMeta
+                  message={message}
+                  own={own}
+                  receiptStatus={receiptStatus}
+                  receiptSummary={receiptSummary}
+                  onRetry={onRetry}
+                  actionError={actionError}
+                  actionPending={actionPending}
+                />
+              )}
+            />
+          ) : null}
           <MediaMessage
             attachments={media}
             currentUserId={currentUserId}
@@ -324,7 +339,7 @@ export function MessageBubble({
             </div>
           ) : null}
 
-          {!hasCopySurface && !audio.length && (!media.length || files.length > 0) ? (
+          {!callEvent && !hasCopySurface && !audio.length && (!media.length || files.length > 0) ? (
             <MessageMeta
               message={message}
               own={own}

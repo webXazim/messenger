@@ -41,6 +41,7 @@ import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
 import { patchCallCaches } from "../lib/realtimeCache";
+import { mergeConversationReceipts, mergeParticipantReceipts } from "../lib/messageReceipts";
 import { conversationPath, isNamedConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
 import { createLocalAttachmentPreview, generateAndStoreLocalPreview, storeLocalPreview, transferLocalPreview } from "../lib/mediaPreviewCache";
@@ -139,19 +140,12 @@ function applyParticipantReceiptInCache(
         const participantUser = item.user && typeof item.user === "object" ? item.user as Record<string, unknown> : {};
         if (String(participantUser.id || "") !== receiptUserId) return participant;
 
-        if (eventName === "message.read") {
-          return {
-            ...item,
-            last_read_message: String(data.last_read_message_id || item.last_read_message || "") || null,
-            last_read_at: String(data.last_read_at || item.last_read_at || "") || null,
-          };
-        }
-
-        return {
-          ...item,
-          last_delivered_message: String(data.last_delivered_message_id || item.last_delivered_message || "") || null,
-          last_delivered_at: String(data.last_delivered_at || item.last_delivered_at || "") || null,
-        };
+        return mergeParticipantReceipts(item as unknown as Conversation["participants"][number], {
+          last_delivered_message: String(data.last_delivered_message_id || "") || undefined,
+          last_delivered_at: String(data.last_delivered_at || "") || undefined,
+          last_read_message: eventName === "message.read" ? String(data.last_read_message_id || "") || undefined : undefined,
+          last_read_at: eventName === "message.read" ? String(data.last_read_at || "") || undefined : undefined,
+        });
       }),
     };
   };
@@ -369,6 +363,7 @@ export function ConversationPage() {
     staleTime: 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
+    structuralSharing: (current, incoming) => mergeConversationReceipts(current as Conversation | undefined, incoming as Conversation),
   });
   useEffect(() => {
     const conversation = conversationQuery.data || routeConversationQuery.data;
@@ -714,7 +709,7 @@ export function ConversationPage() {
       if (payload.event === "conversation.updated") {
         const updated = normalizeConversation(data);
         if (updated.id === conversationId) {
-          queryClient.setQueryData(["conversation", conversationId], (current: unknown) => current && typeof current === "object" ? { ...(current as Record<string, unknown>), ...updated } : updated);
+          queryClient.setQueryData<Conversation>(["conversation", conversationId], (current) => mergeConversationReceipts(current, updated));
           queryClient.setQueryData(["conversations"], (current: unknown) => Array.isArray(current)
             ? current.map((item) => item && typeof item === "object" && String((item as Record<string, unknown>).id || "") === conversationId ? { ...item, ...updated } : item)
             : current);
@@ -1718,7 +1713,9 @@ export function ConversationPage() {
             const groupedBefore = unreadBoundary !== index && isGrouped(previous, message);
             const groupedAfter = unreadBoundary !== index + 1 && isGrouped(message, next);
             const groupPosition = getMessageGroupPosition(groupedBefore, groupedAfter);
-            const isOwnMessage = isSameUserIdentity(message.sender, user);
+            const isOwnMessage = message.call_event?.initiated_by_id
+              ? String(message.call_event.initiated_by_id) === String(user?.id || "")
+              : isSameUserIdentity(message.sender, user);
             return (
               <div
                 key={message.id}

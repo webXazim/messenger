@@ -1797,13 +1797,21 @@ def set_presence(user, device_id="default"):
     return {"is_online": True, "active_devices": len(registry)}
 
 
-def clear_presence(user, device_id="default"):
+def clear_presence(user, device_id="default", *, include_device_connections=False):
     ttl = max(int(getattr(settings, "PRESENCE_TTL_SECONDS", 75) or 75), 15)
     device_id = str(device_id or "default")[:160]
     now = timezone.now()
     with _presence_cache_lock(user.id):
         registry = _active_presence_devices(user.id, now_ts=now.timestamp())
-        registry.pop(device_id, None)
+        if include_device_connections:
+            prefix = f"{device_id}:"
+            registry = {
+                registered_id: last_seen
+                for registered_id, last_seen in registry.items()
+                if registered_id != device_id and not registered_id.startswith(prefix)
+            }
+        else:
+            registry.pop(device_id, None)
         if registry:
             cache.set(_presence_user_key(user.id), registry, timeout=ttl * 2)
         else:
@@ -2809,7 +2817,15 @@ def retry_message(actor, message):
 
 @transaction.atomic
 def mark_conversation_delivered(actor, conversation, message_id=None):
+    # Receipt requests are frequently sent close together (delivered followed by
+    # read, or once for each newly arriving message). Lock the participant row
+    # so an older request cannot commit after a newer one and move the pointer
+    # backwards.
     participant = ensure_participant(conversation, actor)
+    participant = ConversationParticipant.objects.select_for_update().select_related(
+        "last_delivered_message",
+        "last_read_message",
+    ).get(pk=participant.pk)
     participant._delivery_changed = False
     if message_id:
         if not _is_valid_uuid(message_id):
@@ -2846,6 +2862,10 @@ def mark_conversation_delivered(actor, conversation, message_id=None):
 @transaction.atomic
 def mark_conversation_read(actor, conversation, message_id=None):
     participant = ensure_participant(conversation, actor)
+    participant = ConversationParticipant.objects.select_for_update().select_related(
+        "last_delivered_message",
+        "last_read_message",
+    ).get(pk=participant.pk)
     participant._read_changed = False
     if message_id:
         if not _is_valid_uuid(message_id):
@@ -2867,7 +2887,11 @@ def mark_conversation_read(actor, conversation, message_id=None):
     participant.save(update_fields=["last_read_message", "last_read_at", "updated_at"])
     participant._read_changed = bool(message)
     if message:
-        mark_conversation_delivered(actor, conversation, message.id)
+        delivered_participant = mark_conversation_delivered(actor, conversation, message.id)
+        participant.last_delivered_message_id = delivered_participant.last_delivered_message_id
+        participant.last_delivered_message = delivered_participant.last_delivered_message
+        participant.last_delivered_at = delivered_participant.last_delivered_at
+        participant._delivery_changed = bool(getattr(delivered_participant, "_delivery_changed", False))
         log_chat_event(ChatAuditLog.EventType.READ_MARKED, actor=actor, conversation=conversation, message=message)
     return participant
 
@@ -3019,6 +3043,10 @@ def _format_call_duration_label(duration_seconds):
 def _resolve_call_event_payload(call, *, actor=None):
     actor = actor or call.initiated_by
     duration_seconds = 0
+    ringing_duration_seconds = 0
+    if call.started_at:
+        ring_end_time = call.answered_at or call.ended_at or timezone.now()
+        ringing_duration_seconds = max(int((ring_end_time - call.started_at).total_seconds()), 0)
     if call.answered_at:
         end_time = call.ended_at or timezone.now()
         duration_seconds = max(int((end_time - call.answered_at).total_seconds()), 0)
@@ -3050,6 +3078,7 @@ def _resolve_call_event_payload(call, *, actor=None):
         "summary_text": summary_text,
         "reason": call.ended_reason or "",
         "duration_seconds": duration_seconds,
+        "ringing_duration_seconds": ringing_duration_seconds,
         "started_at": call.started_at.isoformat() if call.started_at else None,
         "answered_at": call.answered_at.isoformat() if call.answered_at else None,
         "ended_at": call.ended_at.isoformat() if call.ended_at else None,
@@ -3075,14 +3104,17 @@ def _upsert_call_event_message(call, *, actor=None):
     if target_message is None:
         target_message = Message.objects.create(
             conversation=call.conversation,
-            sender=actor,
+            sender=call.initiated_by,
             type=Message.MessageType.SYSTEM,
             text=payload["summary_text"],
             metadata=payload,
         )
         created = True
     else:
-        target_message.sender = actor
+        # A call card represents the caller's original event. The participant
+        # accepting or declining it must not take ownership of the message,
+        # otherwise direction and read receipts flip sides mid-call.
+        target_message.sender = call.initiated_by
         target_message.text = payload["summary_text"]
         target_message.metadata = payload
         target_message.is_deleted = False

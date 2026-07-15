@@ -954,8 +954,19 @@ class ChatApiTests(TestCase):
             format="json",
         )
         self.assertEqual(ringing.status_code, 201)
+        started_message = Message.objects.get(
+            conversation_id=conversation["id"],
+            type=Message.MessageType.SYSTEM,
+            metadata__call_id=str(ringing.data["id"]),
+        )
 
         self.client.force_authenticate(self.other)
+        read = self.client.post(
+            reverse("conversation-mark-read", kwargs={"conversation_id": conversation["id"]}),
+            {"message_id": str(started_message.id)},
+            format="json",
+        )
+        self.assertEqual(read.status_code, 200)
         declined = self.client.post(
             reverse("call-decline", kwargs={"call_id": ringing.data["id"]}),
             {"reason": "declined"},
@@ -963,6 +974,15 @@ class ChatApiTests(TestCase):
         )
         self.assertEqual(declined.status_code, 200)
         self.assertEqual(declined.data["status"], CallSession.Status.DECLINED)
+        declined_message = Message.objects.get(id=started_message.id)
+        self.assertEqual(declined_message.sender_id, self.user.id)
+        self.assertEqual(declined_message.metadata["initiated_by_id"], str(self.user.id))
+        self.assertGreaterEqual(declined_message.metadata["ringing_duration_seconds"], 0)
+        self.assertTrue(declined_message.deliveries.filter(user=self.other).exists())
+        self.assertEqual(
+            ConversationParticipant.objects.get(conversation_id=conversation["id"], user=self.other).last_read_message_id,
+            started_message.id,
+        )
         self.assertEqual(
             CallParticipant.objects.get(call_id=ringing.data["id"], user=self.user).state,
             CallParticipant.State.LEFT,
@@ -1051,6 +1071,7 @@ class ChatApiTests(TestCase):
 
         accepted_message = Message.objects.filter(conversation_id=conversation["id"], type=Message.MessageType.SYSTEM).latest("created_at")
         self.assertEqual(accepted_message.id, started_message.id)
+        self.assertEqual(accepted_message.sender_id, self.user.id)
         self.assertEqual(accepted_message.metadata["call_outcome"], "received")
         self.assertEqual(accepted_message.text, "Call connected")
 
@@ -2266,6 +2287,37 @@ class ChatApiTests(TestCase):
         participant = ConversationParticipant.objects.get(conversation_id=conversation["id"], user=self.other)
         self.assertEqual(str(participant.last_read_message_id), message["id"])
         self.assertEqual(str(participant.last_delivered_message_id), message["id"])
+        self.assertEqual(response.data["last_read_message_id"], message["id"])
+        self.assertEqual(response.data["last_delivered_message_id"], message["id"])
+
+    def test_receipt_pointers_never_move_backwards(self):
+        conversation = self.create_direct_conversation()
+        first = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "first"},
+            format="json",
+        ).data
+        second = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "second"},
+            format="json",
+        ).data
+
+        self.client.force_authenticate(self.other)
+        self.client.post(
+            reverse("conversation-mark-read", kwargs={"conversation_id": conversation["id"]}),
+            {"message_id": second["id"]},
+            format="json",
+        )
+        older = self.client.post(
+            reverse("conversation-mark-read", kwargs={"conversation_id": conversation["id"]}),
+            {"message_id": first["id"]},
+            format="json",
+        )
+
+        self.assertEqual(older.status_code, 200)
+        self.assertEqual(older.data["last_read_message_id"], second["id"])
+        self.assertEqual(older.data["last_delivered_message_id"], second["id"])
 
     def test_pending_android_receipt_ids_are_ignored(self):
         conversation = self.create_direct_conversation()
@@ -2377,6 +2429,21 @@ class ChatApiTests(TestCase):
         snapshot = get_presence_snapshot(self.other.id)
         self.assertTrue(snapshot["is_online"])
         self.assertEqual(snapshot["active_devices"], 1)
+        clear_presence(self.other, device_id="desktop")
+
+    def test_explicit_device_disconnect_removes_its_websocket_connections(self):
+        clear_presence(self.other, device_id="browser", include_device_connections=True)
+        clear_presence(self.other, device_id="mobile", include_device_connections=True)
+        set_presence(self.other, device_id="browser:socket-old")
+        set_presence(self.other, device_id="browser:socket-new")
+        set_presence(self.other, device_id="mobile:socket")
+
+        clear_presence(self.other, device_id="browser", include_device_connections=True)
+
+        snapshot = get_presence_snapshot(self.other.id)
+        self.assertTrue(snapshot["is_online"])
+        self.assertEqual(snapshot["active_devices"], 1)
+        clear_presence(self.other, device_id="mobile", include_device_connections=True)
 
     def test_conversation_serialization_hides_private_presence(self):
         set_presence(self.other, device_id="mobile")

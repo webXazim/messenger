@@ -119,7 +119,11 @@ export type Message = {
     call_outcome?: string;
     summary_text?: string;
     duration_seconds?: number;
+    ringing_duration_seconds?: number;
     reason?: string;
+    initiated_by_id?: string;
+    answered_by_id?: string;
+    actor_id?: string;
   } | null;
   reply_preview?: { id?: string; text: string } | null;
   reactions?: Reaction[];

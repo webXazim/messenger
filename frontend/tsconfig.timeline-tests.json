@@ -11,6 +11,7 @@
   },
   "include": [
     "src/lib/messageTimeline.ts",
+    "src/lib/messageReceipts.ts",
     "src/types/chat.ts"
   ]
 }
