@@ -897,11 +897,15 @@ export function CallRoomPage() {
 
   const replaceLocalTrack = useCallback(async (
     kind: "audio" | "video",
-    options?: { videoDeviceId?: string; facingMode?: CameraFacingMode; relaxedFacingMode?: boolean },
+    options?: {
+      videoDeviceId?: string;
+      facingMode?: CameraFacingMode;
+      relaxedFacingMode?: boolean;
+      releaseCurrentBeforeAcquire?: boolean;
+    },
   ) => {
     const peer = peerRef.current;
     markLocalMediaMutation();
-    const { stream, track } = await acquireTrack(kind, options);
     const localStream = localStreamRef.current ?? new MediaStream();
     localStreamRef.current = localStream;
     const sender = peer ? getSenderForKind(peer, kind) : null;
@@ -909,6 +913,14 @@ export function CallRoomPage() {
     const previousTracks = kind === "audio" ? localStream.getAudioTracks() : localStream.getVideoTracks();
     const senderHadTrack = Boolean(sender?.track);
     const transceiverWasRecvOnly = transceiver?.direction === "recvonly";
+    if (kind === "video" && options?.releaseCurrentBeforeAcquire) {
+      previousTracks.forEach((existing) => {
+        localStream.removeTrack(existing);
+        existing.stop();
+      });
+      syncLocalPreview(localVideoRef.current, localStream);
+    }
+    const { stream, track } = await acquireTrack(kind, options);
     try {
       if (sender) {
         await sender.replaceTrack(track);
@@ -922,7 +934,7 @@ export function CallRoomPage() {
       }
       previousTracks.forEach((existing) => {
         localStream.removeTrack(existing);
-        existing.stop();
+        if (existing.readyState !== "ended") existing.stop();
       });
       localStream.addTrack(track);
       syncLocalPreview(localVideoRef.current, localStream);
@@ -1587,6 +1599,9 @@ export function CallRoomPage() {
 
   const switchCamera = async () => {
     if (!navigator.mediaDevices?.getUserMedia) return;
+    const previousTrack = localStreamRef.current?.getVideoTracks()[0];
+    const previousFacing = cameraFacingFromTrack(previousTrack);
+    const cameraWasEnabled = videoEnabled;
     try {
       setMediaAction("Switching camera...");
       setMediaError(null);
@@ -1608,22 +1623,19 @@ export function CallRoomPage() {
           // Some mobile browsers enumerate both cameras but only allow switching by facing mode.
         }
       }
-      if (!switched && currentTrack?.applyConstraints) {
-        try {
-          await currentTrack.applyConstraints({ facingMode: { exact: targetFacing } });
-          await refreshVideoDeviceState(localStreamRef.current);
-          setLocalVideoMirrored(targetFacing !== "environment");
-          switched = true;
-        } catch {
-          // Fall through to replacing the camera track.
-        }
-      }
       if (!switched) {
         try {
-          await replaceLocalTrack("video", { facingMode: targetFacing });
+          await replaceLocalTrack("video", {
+            facingMode: targetFacing,
+            releaseCurrentBeforeAcquire: true,
+          });
           switched = true;
         } catch {
-          await replaceLocalTrack("video", { facingMode: targetFacing, relaxedFacingMode: true });
+          await replaceLocalTrack("video", {
+            facingMode: targetFacing,
+            relaxedFacingMode: true,
+            releaseCurrentBeforeAcquire: true,
+          });
           switched = true;
         }
       }
@@ -1641,6 +1653,22 @@ export function CallRoomPage() {
         preferred_video_quality: String(orchestration?.recommended_video_quality || "medium"),
       }));
     } catch (error) {
+      let usableVideoTrack = localStreamRef.current?.getVideoTracks().some((track) => track.readyState === "live") ?? false;
+      if (!usableVideoTrack && previousTrack) {
+        try {
+          const restoredTrack = await replaceLocalTrack("video", {
+            facingMode: previousFacing,
+            relaxedFacingMode: true,
+            releaseCurrentBeforeAcquire: true,
+          });
+          restoredTrack.enabled = cameraWasEnabled;
+          setLocalVideoMirrored(previousFacing !== "environment");
+          usableVideoTrack = true;
+        } catch {
+          // Keep the original switch error when the browser cannot restore the previous camera.
+        }
+      }
+      setVideoEnabled(usableVideoTrack && cameraWasEnabled);
       setMediaError(error instanceof Error ? error.message : "Unable to switch camera.");
     } finally {
       setMediaAction(null);

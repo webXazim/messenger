@@ -18,7 +18,7 @@ for (const required of [
   "VideoCallScreen",
   "facingMode: targetFacing",
   "relaxedFacingMode: true",
-  "currentTrack.applyConstraints",
+  "releaseCurrentBeforeAcquire: true",
   "videoActive = videoEnabled",
 ]) {
   assert.ok(controller.includes(required), `Missing call-controller invariant: ${required}`);
