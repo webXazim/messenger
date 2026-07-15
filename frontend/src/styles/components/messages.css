@@ -927,7 +927,7 @@ button.ms-message-reply:hover {
   grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid var(--ms-color-line);
   border-radius: 0.95rem;
   background: var(--ms-color-surface);
@@ -1052,20 +1052,22 @@ button.ms-message-reply:hover {
 }
 
 .ms-voice-message--compact .ms-voice-message__content {
-  height: 2.7rem;
+  height: 3.4rem;
   display: grid;
-  grid-template-rows: 2rem 0.7rem;
+  grid-template-rows: 0.7rem 2rem 0.7rem;
   align-content: center;
   gap: 0;
 }
 
 .ms-voice-message--compact .ms-voice-message__waveform {
   position: static;
+  grid-row: 2;
   align-self: center;
 }
 
 .ms-voice-message--compact .ms-voice-message__timing {
   position: static;
+  grid-row: 3;
   align-self: start;
   min-height: 0.7rem;
 }
@@ -1401,7 +1403,7 @@ button.ms-message-reply:hover {
     min-width: min(17rem, 100%);
     grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
     gap: 0.5rem;
-    padding: 0.25rem 0.45rem;
+    padding: 0.35rem 0.45rem;
   }
 
   .ms-voice-message__play,
