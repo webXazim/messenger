@@ -204,7 +204,7 @@ export function MessageBubble({
         ) : null}
 
         <article
-          className={`ms-message-card ${hasCopySurface && hasRichContent ? "has-attachment-caption" : ""}`}
+          className={`ms-message-card ${hasCopySurface && hasRichContent ? "has-attachment-caption" : ""} ${hasCopySurface && media.length ? "has-media-caption" : ""}`}
           onContextMenu={(event) => {
             event.preventDefault();
             setShowContextMenu(true);

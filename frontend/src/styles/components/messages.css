@@ -1710,19 +1710,46 @@ button.ms-message-reply:hover {
 }
 
 .ms-message-card.has-attachment-caption {
-  gap: 0.125rem;
+  gap: 0;
 }
 
 .ms-message-card.has-attachment-caption > .ms-message-copy {
   width: 100%;
   max-width: none;
   justify-self: stretch;
-  border-radius: 0.3rem 0.3rem var(--ms-caption-bottom-right) var(--ms-caption-bottom-left);
+  border-radius: 0 0 var(--ms-caption-bottom-right) var(--ms-caption-bottom-left);
+  box-shadow: none;
 }
 
 .ms-message-card.has-attachment-caption
   > :is(.ms-message-media, .ms-voice-message, .ms-voice-message-fallback, .ms-call-message),
 .ms-message-card.has-attachment-caption > .ms-file-message-list > :last-child {
-  border-bottom-right-radius: 0.3rem;
-  border-bottom-left-radius: 0.3rem;
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* Visual media and its caption are one message surface. The media owns the
+   upper corners and the caption owns the lower corners, with one shared seam. */
+.ms-message-card.has-media-caption > .ms-message-media {
+  border: 1px solid var(--ms-color-line);
+  border-bottom: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.ms-message-row--own .ms-message-card.has-media-caption > .ms-message-media {
+  border-color: var(--ms-color-line-strong);
+}
+
+.ms-message-card.has-media-caption > .ms-message-media .ms-message-media__item {
+  border-radius: 0;
+}
+
+.ms-message-card.has-media-caption > .ms-message-copy {
+  padding-top: 0.62rem;
+  border-top: 1px solid var(--ms-color-line);
+}
+
+.ms-message-row--own .ms-message-card.has-media-caption > .ms-message-copy {
+  border-top-color: var(--ms-color-line-strong);
 }
