@@ -1005,6 +1005,10 @@
   background: #111;
 }
 
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__preview.is-visual-media iframe {
+  pointer-events: auto;
+}
+
 .ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card.is-visual-media .ms-upload-card__copy {
   position: absolute;
   top: 0.75rem;
