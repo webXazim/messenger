@@ -235,7 +235,24 @@ export function MessageBubble({
             disabled={actionPending}
           />
           {callEvent ? <CallEventMessage event={callEvent} /> : null}
-          <MediaMessage attachments={media} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} warmMedia={warmMedia} own={own} />
+          <MediaMessage
+            attachments={media}
+            currentUserId={currentUserId}
+            onPreviewAttachment={onPreviewAttachment}
+            warmMedia={warmMedia}
+            own={own}
+            footer={!hasCopySurface && !audio.length && !files.length && media.length ? (
+              <MessageMeta
+                message={message}
+                own={own}
+                receiptStatus={receiptStatus}
+                receiptSummary={receiptSummary}
+                onRetry={onRetry}
+                actionError={actionError}
+                actionPending={actionPending}
+              />
+            ) : null}
+          />
 
           {hasCopySurface ? (
             <div className="ms-message-copy">
@@ -305,7 +322,7 @@ export function MessageBubble({
 
           <AttachmentMessage attachments={files} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} />
 
-          {!hasCopySurface && !audio.length ? (
+          {!hasCopySurface && !audio.length && (!media.length || files.length > 0) ? (
             <MessageMeta
               message={message}
               own={own}

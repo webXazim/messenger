@@ -249,14 +249,13 @@ export function AudioMessagePlayer({ src, label = "Audio", compact = false, atta
           ))}
         </button>
         <div className="ms-voice-message__timing">
-          <span>{formatTime(currentTime)}</span>
-          <span>{failed ? "Unavailable" : formatTime(duration)}</span>
+          <span>{failed ? "Unavailable" : formatTime(playing ? currentTime : duration)}</span>
+          {footer ? <span className="ms-voice-message__meta">{footer}</span> : null}
         </div>
       </div>
       <button type="button" className="ms-voice-message__speed" onClick={cycleSpeed} disabled={failed} aria-label={`Playback speed ${speedLabel}`}>
         {speedLabel}
       </button>
-      {footer ? <div className="ms-voice-message__meta">{footer}</div> : null}
       {loadRequested ? (
         <audio
           ref={audioRef}

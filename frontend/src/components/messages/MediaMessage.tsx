@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { MessageAttachment } from "../../types/chat";
 import { AuthenticatedAttachmentPreview, AuthenticatedImage, AuthenticatedVideo } from "../AuthenticatedMedia";
 import { chatApi } from "../../api/chat";
@@ -89,7 +89,7 @@ function LazyVideo({ attachment, src, posterSrc, currentUserId }: { attachment: 
 }
 
 function LazyImage({ attachment, thumbnailSrc, fullSrc, currentUserId, warmMedia, onOpen }: { attachment: MessageAttachment; thumbnailSrc: string; fullSrc: string; currentUserId?: string; warmMedia?: boolean; onOpen: () => void }) {
-  const [useFullImage, setUseFullImage] = useState(Boolean(warmMedia && !thumbnailSrc));
+  const [useFullImage, setUseFullImage] = useState(!thumbnailSrc);
   useEffect(() => {
     if (warmMedia && !thumbnailSrc) setUseFullImage(true);
   }, [thumbnailSrc, warmMedia]);
@@ -110,12 +110,14 @@ export function MediaMessage({
   onPreviewAttachment,
   warmMedia = false,
   own = false,
+  footer,
 }: {
   attachments: MessageAttachment[];
   currentUserId?: string;
   onPreviewAttachment?: (attachmentId: string) => void;
   warmMedia?: boolean;
   own?: boolean;
+  footer?: ReactNode;
 }) {
   if (!attachments.length) return null;
   return (
@@ -136,6 +138,7 @@ export function MediaMessage({
           </div>
         );
       })}
+      {footer ? <div className="ms-message-media__meta">{footer}</div> : null}
     </div>
   );
 }
