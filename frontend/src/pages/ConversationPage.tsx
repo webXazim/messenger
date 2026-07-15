@@ -81,7 +81,7 @@ function buildOptimisticMessage(
     reaction_summary: {},
     links: Array.from(text.matchAll(/https?:\/\/\S+/g)).map((match) => match[0]),
     reply_preview: replyTo ? { id: replyTo.id, text: replyTo.text || "Attachment / voice note" } : null,
-    delivery_status: "sending",
+    delivery_status: "pending",
     failed_reason: null,
     retry_count: 0,
     is_encrypted: Boolean(options.isEncrypted),
@@ -1759,8 +1759,8 @@ export function ConversationPage() {
             onCancelEdit={() => setEditingMessage(null)}
             onTyping={sendTyping}
             disabledReason={composerDisabledReason}
-            onSendVoiceNote={async ({ file, previewUrl, fileName, mimeType, durationSeconds, clientTempId, waveform }) => {
-              const normalizedWaveform = waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
+            onSendVoiceNote={async ({ file, previewUrl, fileName, mimeType, durationSeconds, clientTempId, waveform, waveformPromise }) => {
+              let normalizedWaveform = waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
               const optimisticAttachment: MessageAttachment = {
                   id: `voice-${clientTempId}`,
                   original_name: fileName,
@@ -1804,6 +1804,10 @@ export function ConversationPage() {
                   participantUserIds: conversationParticipantIds,
                 });
                 encryptedAttachmentUploadsRef.current[upload.id] = envelope;
+                const analyzedWaveform = await waveformPromise?.catch(() => null);
+                if (analyzedWaveform?.length) {
+                  normalizedWaveform = analyzedWaveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
+                }
                 sendStarted = true;
                 await sendMutation.mutateAsync({
                   type: "audio",

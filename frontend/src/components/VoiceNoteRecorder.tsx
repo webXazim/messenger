@@ -16,6 +16,7 @@ type VoiceDraft = {
   durationSeconds: number;
   mimeType: string;
   waveform: number[];
+  waveformPromise?: Promise<number[] | null>;
   clientTempId: string;
 };
 
@@ -27,6 +28,7 @@ export type VoiceNotePayload = {
   fileName: string;
   clientTempId: string;
   waveform: number[];
+  waveformPromise?: Promise<number[] | null>;
 };
 
 const PREFERRED_RECORDING_MIME_TYPES = [
@@ -220,7 +222,7 @@ export function VoiceNoteRecorder({
   const [playing, setPlaying] = useState(false);
   const [playbackMs, setPlaybackMs] = useState(0);
 
-  const active = recording || Boolean(draft) || sending;
+  const active = recording || Boolean(draft);
   const previewProgress = draft?.durationMs ? Math.min(1, playbackMs / draft.durationMs) : 0;
   const previewWaveform = useMemo(
     () => draft?.waveform ?? Array(PREVIEW_WAVEFORM_BAR_COUNT).fill(0.07),
@@ -291,6 +293,10 @@ export function VoiceNoteRecorder({
     try {
       setSending(true);
       setError(null);
+      audioRef.current?.pause();
+      setDraft((current) => current?.clientTempId === voiceDraft.clientTempId ? null : current);
+      setPlaybackMs(0);
+      setPlaying(false);
       await onSendVoiceNote({
         file: voiceDraft.file,
         previewUrl: voiceDraft.previewUrl,
@@ -299,14 +305,11 @@ export function VoiceNoteRecorder({
         fileName: voiceDraft.file.name,
         clientTempId: voiceDraft.clientTempId,
         waveform: voiceDraft.waveform,
+        waveformPromise: voiceDraft.waveformPromise,
       });
-      audioRef.current?.pause();
       if (voiceDraft.previewUrl) URL.revokeObjectURL(voiceDraft.previewUrl);
-      setDraft(null);
-      setPlaybackMs(0);
-      setPlaying(false);
     } catch (sendError) {
-      setDraft(voiceDraft);
+      setDraft((current) => current ?? voiceDraft);
       setError(sendError instanceof Error ? sendError.message : "Voice note could not be sent.");
     } finally {
       setSending(false);
@@ -359,7 +362,7 @@ export function VoiceNoteRecorder({
   };
 
   const startRecording = async () => {
-    if (disabled || sending || draft || recording) return;
+    if (disabled || draft || recording) return;
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setError("Voice notes are not supported in this browser.");
       return;
@@ -408,7 +411,8 @@ export function VoiceNoteRecorder({
         }
 
         void (async () => {
-          const waveform = await analyzeRecordedWaveform(blob, PREVIEW_WAVEFORM_BAR_COUNT) ?? liveWaveformFallback;
+          const waveformPromise = analyzeRecordedWaveform(blob, PREVIEW_WAVEFORM_BAR_COUNT);
+          const waveform = shouldSend ? liveWaveformFallback : await waveformPromise ?? liveWaveformFallback;
           const fileName = `voice-note-${Date.now()}.${fileExtensionForMimeType(mimeType)}`;
           const voiceDraft: VoiceDraft = {
             file: new File([blob], fileName, { type: mimeType }),
@@ -417,6 +421,7 @@ export function VoiceNoteRecorder({
             durationSeconds: Math.max(1, Math.ceil(finalDuration / 1000)),
             mimeType,
             waveform,
+            waveformPromise: shouldSend ? waveformPromise : undefined,
             clientTempId: safeId("voice-note"),
           };
 
@@ -453,6 +458,7 @@ export function VoiceNoteRecorder({
     if (!recording) return;
     sendOnStopRef.current = true;
     setSending(true);
+    setRecording(false);
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
       recorder.stop();
@@ -530,16 +536,16 @@ export function VoiceNoteRecorder({
 
       {draft ? (
         <div className="ms-voice-recorder__inline-state ms-voice-recorder__inline-state--preview">
-          <button type="button" className="ms-voice-recorder__control ms-voice-recorder__control--discard" onClick={discardRecording} disabled={sending} aria-label="Discard voice note" title="Discard voice note">
+          <button type="button" className="ms-voice-recorder__control ms-voice-recorder__control--discard" onClick={discardRecording} aria-label="Discard voice note" title="Discard voice note">
             <DeleteIcon />
           </button>
-          <button type="button" className="ms-voice-recorder__control ms-voice-recorder__control--play" onClick={() => void togglePreviewPlayback()} disabled={sending} aria-label={playing ? "Pause voice-note preview" : "Play voice-note preview"} title={playing ? "Pause" : "Play"}>
+          <button type="button" className="ms-voice-recorder__control ms-voice-recorder__control--play" onClick={() => void togglePreviewPlayback()} aria-label={playing ? "Pause voice-note preview" : "Play voice-note preview"} title={playing ? "Pause" : "Play"}>
             <PlayIcon playing={playing} />
           </button>
           <PreviewWaveform samples={previewWaveform} progress={previewProgress} onSeek={seekPreview} />
           <time className="ms-voice-recorder__preview-duration">{formatDuration(playbackMs || draft.durationMs)}</time>
-          <button type="button" className="ms-voice-recorder__control ms-voice-recorder__control--primary" onClick={() => void sendVoiceDraft(draft)} disabled={sending} aria-label="Send voice note" title="Send voice note">
-            {sending ? <span className="ms-voice-recorder__spinner" /> : <SendIcon />}
+          <button type="button" className="ms-voice-recorder__control ms-voice-recorder__control--primary" onClick={() => void sendVoiceDraft(draft)} aria-label="Send voice note" title="Send voice note">
+            <SendIcon />
           </button>
           <audio
             ref={audioRef}
@@ -551,13 +557,6 @@ export function VoiceNoteRecorder({
             onEnded={() => { setPlaying(false); setPlaybackMs(0); }}
             onTimeUpdate={(event) => setPlaybackMs(event.currentTarget.currentTime * 1000)}
           />
-        </div>
-      ) : null}
-
-      {sending && !draft && !recording ? (
-        <div className="ms-voice-recorder__inline-state ms-voice-recorder__inline-state--sending" aria-live="polite">
-          <span className="ms-voice-recorder__spinner ms-voice-recorder__spinner--dark" />
-          <span>Sending voice note…</span>
         </div>
       ) : null}
 

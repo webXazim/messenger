@@ -45,9 +45,12 @@ assert.ok(composer.includes("width: item.width") && composer.includes("height: i
 assert.ok(conversation.includes("await sendMutation.mutateAsync(nextPayload)"), "Composer send failures are still swallowed.");
 assert.ok(voice.includes("clientTempId"), "Voice-note retry cannot reuse its optimistic message identity.");
 assert.ok(voice.includes("previewUrl: voiceDraft.previewUrl"), "Voice-note sends do not retain their local audio for the optimistic player.");
+assert.equal(voice.includes("recording || Boolean(draft) || sending"), false, "Background voice-note sending still blocks the composer.");
+assert.ok(voice.includes("setRecording(false)"), "Sending a live recording does not release the composer immediately.");
 assert.ok(voice.includes("analyzeRecordedWaveform(blob"), "Sent voice-note waveforms are not derived from the completed recording.");
 assert.ok(chatApi.includes("waveform: Array.isArray(voiceNote.waveform)"), "Normalized voice notes discard their real waveform.");
 assert.ok(conversation.includes("_optimistic_attachments") && conversation.includes("waveform: normalizedWaveform"), "Optimistic voice notes do not receive their audio or waveform immediately.");
+assert.ok(conversation.includes('delivery_status: "pending"'), "Optimistic messages still expose a blocking loading label.");
 assert.match(conversation, /buildOptimisticMessage\([\s\S]*await uploadConversationAttachment/, "Voice-note cards wait for upload before appearing optimistically.");
 assert.ok(audioPlayer.includes("requestAnimationFrame(updateProgress)"), "Voice-note playback progress is not tracked continuously.");
 assert.ok(audioPlayer.includes("audio.defaultPlaybackRate = speed"), "Voice-note playback speed is not applied consistently.");
