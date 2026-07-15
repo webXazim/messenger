@@ -29,7 +29,7 @@ export function VideoTile({
 
   return (
     <div
-      className={`ms-video-tile ${onActivate ? "is-interactive" : ""} ${className}`.trim()}
+      className={`ms-video-tile ${showVideo && videoRef ? "is-showing-video" : "is-showing-fallback"} ${onActivate ? "is-interactive" : ""} ${className}`.trim()}
       role={onActivate ? "button" : undefined}
       tabIndex={onActivate ? 0 : undefined}
       aria-label={onActivate ? (activateLabel || `Switch ${label} video`) : undefined}

@@ -19,6 +19,7 @@ for (const required of [
   "facingMode: targetFacing",
   "relaxedFacingMode: true",
   "currentTrack.applyConstraints",
+  "videoActive = videoEnabled",
 ]) {
   assert.ok(controller.includes(required), `Missing call-controller invariant: ${required}`);
 }
@@ -32,6 +33,7 @@ for (const required of [
   "onToggleAudio",
   "onToggleVideo",
   "onSwitchCamera",
+  "Turn camera on and switch",
   "onHangup",
   "requestFullscreen",
   "CallParticipantsDrawer",

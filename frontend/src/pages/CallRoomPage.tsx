@@ -772,7 +772,10 @@ export function CallRoomPage() {
     await sendSignal("renegotiate", { reason }, { forceHttp: true });
   }, [isWithinLocalMediaMutationWindow, localCallUser, sendOffer, sendSignal]);
 
-  const applyNetworkRecommendation = useCallback(async (recommendation: Record<string, unknown> | null | undefined) => {
+  const applyNetworkRecommendation = useCallback(async (
+    recommendation: Record<string, unknown> | null | undefined,
+    videoActive = videoEnabled,
+  ) => {
     const peer = peerRef.current;
     if (!peer || callRef.current?.call_type !== "video") return;
     const sender = getSenderForKind(peer, "video");
@@ -801,7 +804,7 @@ export function CallRoomPage() {
           ? 2
           : 1;
     for (const encoding of encodings) {
-      encoding.active = videoEnabled;
+      encoding.active = videoActive;
       encoding.maxBitrate = nextBitrate;
       encoding.maxFramerate = nextFrameRate;
       encoding.scaleResolutionDownBy = scaleDown;
@@ -1569,7 +1572,7 @@ export function CallRoomPage() {
       await applyNetworkRecommendation({
         ...orchestration,
         mode: next ? orchestration?.mode ?? "standard" : "audio_only",
-      });
+      }, next);
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: next,
         preferred_video_quality: next ? String(orchestration?.recommended_video_quality || "medium") : "off",
@@ -1583,7 +1586,7 @@ export function CallRoomPage() {
   };
 
   const switchCamera = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || !videoEnabled) return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
     try {
       setMediaAction("Switching camera...");
       setMediaError(null);
@@ -1625,6 +1628,14 @@ export function CallRoomPage() {
         }
       }
       if (!switched) throw new Error("No alternate camera is available.");
+      const activeTrack = localStreamRef.current?.getVideoTracks()[0];
+      if (activeTrack) activeTrack.enabled = true;
+      setVideoEnabled(true);
+      syncLocalPreview(localVideoRef.current, localStreamRef.current);
+      await applyNetworkRecommendation({
+        ...orchestration,
+        mode: orchestration?.mode === "audio_only" ? "standard" : orchestration?.mode ?? "standard",
+      }, true);
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: true,
         preferred_video_quality: String(orchestration?.recommended_video_quality || "medium"),

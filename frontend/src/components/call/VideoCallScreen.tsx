@@ -424,9 +424,9 @@ export function VideoCallScreen({
                 type="button"
                 className="ms-video-call__control"
                 onClick={onSwitchCamera}
-                disabled={busy || !videoEnabled}
-                aria-label="Switch camera"
-                title="Switch camera"
+                disabled={busy}
+                aria-label={videoEnabled ? "Switch camera" : "Turn camera on and switch"}
+                title={videoEnabled ? "Switch camera" : "Turn camera on and switch"}
               >
                 <SwitchCameraIcon />
                 <span>Switch</span>
