@@ -22,14 +22,19 @@ export function upsertConversationList(current: Conversation[] | undefined, inco
   if (!current) return [incoming];
   const existingIndex = current.findIndex((conversation) => conversation.id === incoming.id);
   const next = [...current];
-  if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], ...incoming };
+  if (existingIndex >= 0) next[existingIndex] = mergeConversationPreservingPresence(next[existingIndex], incoming);
   else next.push(incoming);
   return next.sort((a, b) => conversationTimestamp(b) - conversationTimestamp(a));
 }
 
 export function patchConversationCaches(queryClient: QueryClient, incoming: Conversation) {
   queryClient.setQueryData<Conversation[]>(["conversations"], (current) => upsertConversationList(current, incoming));
-  queryClient.setQueryData<Conversation>(["conversation", incoming.id], (current) => ({ ...current, ...incoming }));
+  queryClient.setQueryData<Conversation>(["conversation", incoming.id], (current) =>
+    current ? mergeConversationPreservingPresence(current, incoming) : incoming,
+  );
+  queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, (current) =>
+    current?.id === incoming.id ? mergeConversationPreservingPresence(current, incoming) : current,
+  );
 }
 
 export function patchMessageCache(queryClient: QueryClient, conversationId: string, incoming: Message) {
@@ -99,6 +104,32 @@ type PresenceFriendRequest = {
   to_user: PresenceUser;
 };
 
+function preservePresence<T extends PresenceUser>(current: T | undefined, incoming: T): T {
+  if (!current) return incoming;
+  return {
+    ...incoming,
+    ...(current.is_online !== undefined ? { is_online: current.is_online } : {}),
+    ...(current.active_devices !== undefined ? { active_devices: current.active_devices } : {}),
+    ...(current.last_seen_at !== undefined ? { last_seen_at: current.last_seen_at } : {}),
+    ...(current.presence_label !== undefined ? { presence_label: current.presence_label } : {}),
+    ...(current.presence_visibility !== undefined ? { presence_visibility: current.presence_visibility } : {}),
+  };
+}
+
+function mergeConversationPreservingPresence(current: Conversation, incoming: Conversation): Conversation {
+  const currentUsers = new Map(
+    current.participants.map((participant) => [String(participant.user.id), participant.user]),
+  );
+  return {
+    ...current,
+    ...incoming,
+    participants: incoming.participants.map((participant) => ({
+      ...participant,
+      user: preservePresence(currentUsers.get(String(participant.user.id)), participant.user),
+    })),
+  };
+}
+
 function patchPresenceUser<T extends PresenceUser>(user: T, userId: string, payload: PresencePayload): T {
   if (String(user.id) !== userId) return user;
   const hidden = String(payload.visibility ?? payload.presence_visibility ?? "") === "hidden";
@@ -147,6 +178,9 @@ export function patchUserPresenceAcrossCaches(queryClient: QueryClient, userId: 
     current?.map((conversation) => patchConversationPresence(conversation, userId, payload) ?? conversation),
   );
   queryClient.setQueriesData<Conversation>({ queryKey: ["conversation"] }, (current) =>
+    patchConversationPresence(current, userId, payload),
+  );
+  queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, (current) =>
     patchConversationPresence(current, userId, payload),
   );
   queryClient.setQueriesData<PresenceFriendRequest[]>({ queryKey: ["friend-requests"] }, (current) =>

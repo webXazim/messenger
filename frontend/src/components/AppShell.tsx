@@ -237,6 +237,16 @@ export function AppShell() {
         patchUserPresenceAcrossCaches(queryClient, userId, data);
         return;
       }
+      if (["call.heartbeat", "call.media_state", "call.quality_report"].includes(payload.event)) {
+        const activeUserId = String(payload.data?.user_id || "");
+        if (activeUserId && activeUserId !== String(user?.id || "")) {
+          patchUserPresenceAcrossCaches(queryClient, activeUserId, {
+            is_online: true,
+            active_devices: 1,
+            presence_label: "online",
+          });
+        }
+      }
       if (payload.event === "e2ee.keys.updated") {
         const conversationId = String(payload.data?.conversation_id || "");
         if (conversationId) {
@@ -263,7 +273,18 @@ export function AppShell() {
 
       if (["call.started", "call.created", "call.accepted", "call.ended", "call.declined", "call.missed", "call.failed"].includes(payload.event)) {
         const callPayload = normalizeCall(payload.data || {});
-        if (callPayload.id) patchCallCaches(queryClient, callPayload);
+        if (callPayload.id) {
+          patchCallCaches(queryClient, callPayload);
+          if (payload.event === "call.accepted") {
+            callPayload.participants
+              ?.filter((participant) => participant.state === "joined" && !isSameUserIdentity(participant.user, user))
+              .forEach((participant) => patchUserPresenceAcrossCaches(queryClient, String(participant.user.id), {
+                is_online: true,
+                active_devices: Math.max(1, Number(participant.user.active_devices || 0)),
+                presence_label: "online",
+              }));
+          }
+        }
       }
       if (["call.ended", "call.declined", "call.missed", "call.failed"].includes(payload.event)) {
         if (String(payload.data?.id || payload.data?.call_id || "") === incomingCall?.id) {
@@ -298,6 +319,9 @@ export function AppShell() {
         if (conversationId && message.id) patchMessageCache(queryClient, conversationId, message);
       }
       if (payload.event === "message.created") {
+        const message = normalizeMessage(payload.data || {});
+        const isCallTimelineMessage = message.type === "system" && message.metadata?.system_event === "call";
+        if (isCallTimelineMessage) return;
         const sender = payload.data?.sender && typeof payload.data.sender === "object" ? (payload.data.sender as Record<string, unknown>) : null;
         const senderName =
           sender

@@ -71,6 +71,9 @@ for (const required of [
 }
 
 assert.ok(serializers.includes("_presence_is_visible"), "Chat participant serializers still expose private presence.");
+assert.ok(cache.includes("mergeConversationPreservingPresence"), "Conversation refreshes can still overwrite newer presence state.");
+assert.ok(cache.includes('{ queryKey: ["conversation-route"] }'), "Named conversation routes do not receive presence updates.");
+assert.ok(appShell.includes('["call.heartbeat", "call.media_state", "call.quality_report"]'), "Active call traffic does not reconcile global user presence.");
 assert.ok(serializers.includes("return getattr(obj, \"last_seen_at\", None) if self._presence_is_visible(obj) else None"), "Private last-seen data is still exposed.");
 assert.ok(views.includes('if getattr(participant, "_read_changed", False)'), "Unchanged read receipts are still broadcast repeatedly.");
 assert.ok(views.includes("_broadcast_presence_update(request.user, snapshot)"), "REST presence changes are not propagated to peers.");

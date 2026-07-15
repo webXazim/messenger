@@ -735,9 +735,8 @@ export function CallRoomPage() {
     const now = Date.now();
     if (!options?.iceRestart && now - lastOfferSentAtRef.current < 2500) {
       appendSignalLog("offer throttled");
-      return;
+      return false;
     }
-    lastOfferSentAtRef.current = now;
     const activeCallType = callRef.current?.call_type ?? "voice";
     await syncPeerLocalTracks(peer, activeCallType);
     appendSignalLog(`offer senders ${summarizeLocalSenders(peer)}`);
@@ -749,9 +748,11 @@ export function CallRoomPage() {
       sdp_type: offer.type,
       description: { type: offer.type, sdp: offer.sdp },
     });
+    lastOfferSentAtRef.current = Date.now();
     appendSignalLog(`offer ${summarizeSdpDirections(offer.sdp ?? "")}`);
     appendSignalLog(options?.iceRestart ? "sent ICE restart offer" : "sent offer");
     logOutboundMediaStats(peer, "offer");
+    return true;
   }, [appendSignalLog, logOutboundMediaStats, sendSignal, syncPeerLocalTracks]);
 
   const markLocalMediaMutation = useCallback(() => {
@@ -1084,7 +1085,8 @@ export function CallRoomPage() {
     offerSentRef.current = true;
     appendSignalLog(`start offer: ${reason}`);
     try {
-      await sendOffer(peer);
+      const sent = await sendOffer(peer);
+      if (!sent) offerSentRef.current = false;
     } catch (error) {
       offerSentRef.current = false;
       setMediaError(error instanceof Error ? error.message : "Unable to start the media handshake.");

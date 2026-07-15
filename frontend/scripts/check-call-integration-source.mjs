@@ -35,6 +35,9 @@ assert.ok(callRoom.includes("patchCallCaches(queryClient, updated)"), "Declined 
 assert.ok(callRoom.includes("isTerminalCall"), "Ended call URLs are not redirected back to their conversation.");
 assert.ok(appShell.includes("handleIncomingCallAction"), "Incoming banner and overlay do not share one guarded action path.");
 assert.ok(appShell.includes("claimCallAction"), "Incoming acceptance is not coordinated across tabs.");
+assert.ok(appShell.includes('message.metadata?.system_event === "call"'), "Call timeline messages can still appear as generic receiver toasts.");
+assert.ok(callRoom.indexOf("lastOfferSentAtRef.current = Date.now()") > callRoom.indexOf('await sendSignal("offer"'), "Initial offers are marked sent before signaling succeeds.");
+assert.ok(callRoom.includes("if (!sent) offerSentRef.current = false"), "A throttled or unsent initial offer can still block handshake retries.");
 assert.ok(!banner.includes("Call ID:"), "Incoming banner still exposes a technical call ID.");
 assert.ok(overlay.includes("onMinimize"), "Incoming overlay cannot be minimized into the banner.");
 assert.ok(media.includes("requestRequiredCallMedia"), "Strict call-media permission validation is missing.");
