@@ -59,6 +59,7 @@ assert.ok(media.includes("decryptAttachmentPreview"), "Encrypted attachment prev
 assert.ok(mediaMessage.includes("useState(false)"), "Video playback is still requested before the user presses play.");
 assert.ok(mediaMessage.includes("AuthenticatedAttachmentPreview"), "Video poster rendering does not use the encrypted preview payload.");
 assert.ok(mediaMessage.includes("useState(!thumbnailSrc)"), "Images without thumbnails wait indefinitely instead of loading their full source.");
+assert.ok(mediaMessage.includes("has-playing-video"), "Video metadata overlays do not react to active playback.");
 assert.ok(mediaMessage.includes("currentUserId={currentUserId} autoPlay"), "The poster play action does not start video playback directly.");
 assert.equal(mediaMessage.includes("ms-message-media__actions"), false, "Inline media still renders duplicate download or expand controls.");
 assert.ok(mediaPreviewCache.includes('import("pdfjs-dist")'), "PDF previews are not rendered privately in the browser.");

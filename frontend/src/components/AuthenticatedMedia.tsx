@@ -403,7 +403,7 @@ export const AuthenticatedAudio = forwardRef<HTMLAudioElement, { src: string; cl
   },
 );
 
-export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId, autoPlay = false, restricted = false }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string; autoPlay?: boolean; restricted?: boolean }) {
+export function AuthenticatedVideo({ src, posterSrc, className, attachment, currentUserId, autoPlay = false, restricted = false, onPlayingChange }: { src: string; posterSrc?: string; className?: string; attachment?: MessageAttachment; currentUserId?: string; autoPlay?: boolean; restricted?: boolean; onPlayingChange?: (playing: boolean) => void }) {
   const { resolvedSrc, failed, retry, setFailed, errorMessage } = useAuthenticatedMediaUrl(src, attachment, currentUserId);
   const posterMedia = useAuthenticatedMediaUrl(posterSrc || "", undefined, currentUserId);
   const localPosterSrc = useLocalMediaPreview(attachment, currentUserId);
@@ -431,6 +431,9 @@ export function AuthenticatedVideo({ src, posterSrc, className, attachment, curr
         setFrameReady(true);
         if (autoPlay) void event.currentTarget.play().catch(() => undefined);
       }}
+      onPlay={() => onPlayingChange?.(true)}
+      onPause={() => onPlayingChange?.(false)}
+      onEnded={() => onPlayingChange?.(false)}
       onError={() => setFailed(true)}
     />
   );

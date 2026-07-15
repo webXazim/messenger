@@ -414,6 +414,12 @@ button.ms-message-reply:hover {
   background: rgb(0 0 0 / 0.38);
   color: #fff;
   backdrop-filter: blur(0.25rem);
+  transition: opacity var(--ms-transition-fast);
+}
+
+.ms-message-media.has-playing-video .ms-message-media__meta {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ms-message-media__meta .ms-message-meta,
@@ -920,8 +926,8 @@ button.ms-message-reply:hover {
   display: grid;
   grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.625rem 0.6875rem;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
   border: 1px solid var(--ms-color-line);
   border-radius: 0.95rem;
   background: var(--ms-color-surface);
@@ -971,7 +977,7 @@ button.ms-message-reply:hover {
 .ms-voice-message__content {
   min-width: 0;
   display: grid;
-  gap: 0.2rem;
+  gap: 0;
 }
 
 .ms-voice-message__label {
@@ -984,7 +990,7 @@ button.ms-message-reply:hover {
 
 .ms-voice-message__waveform {
   width: 100%;
-  height: 1.85rem;
+  height: 1.5rem;
   display: grid;
   grid-template-columns: repeat(48, minmax(0, 1fr));
   align-items: center;
@@ -993,6 +999,7 @@ button.ms-message-reply:hover {
   border: 0;
   background: transparent;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .ms-voice-message__waveform:disabled {
@@ -1381,7 +1388,7 @@ button.ms-message-reply:hover {
     min-width: min(17rem, 100%);
     grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
     gap: 0.5rem;
-    padding: 0.5625rem;
+    padding: 0.4rem 0.5rem;
   }
 
   .ms-voice-message__play,

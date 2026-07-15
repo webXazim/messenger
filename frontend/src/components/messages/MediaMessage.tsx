@@ -75,10 +75,10 @@ function ViewOnceMedia({ attachment, currentUserId, own }: { attachment: Message
   );
 }
 
-function LazyVideo({ attachment, src, posterSrc, currentUserId }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string }) {
+function LazyVideo({ attachment, src, posterSrc, currentUserId, onPlayingChange }: { attachment: MessageAttachment; src: string; posterSrc: string; currentUserId?: string; onPlayingChange?: (playing: boolean) => void }) {
   const [playbackRequested, setPlaybackRequested] = useState(false);
   if (playbackRequested) {
-    return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} autoPlay />;
+    return <AuthenticatedVideo src={src} posterSrc={posterSrc} attachment={attachment} currentUserId={currentUserId} autoPlay onPlayingChange={onPlayingChange} />;
   }
   return (
     <button type="button" className="ms-message-media__video-poster" onClick={() => setPlaybackRequested(true)} aria-label={`Play ${attachment.original_name}`}>
@@ -119,9 +119,10 @@ export function MediaMessage({
   own?: boolean;
   footer?: ReactNode;
 }) {
+  const [playingVideoIds, setPlayingVideoIds] = useState<Set<string>>(() => new Set());
   if (!attachments.length) return null;
   return (
-    <div className={`ms-message-media ms-message-media--count-${Math.min(attachments.length, 4)}`}>
+    <div className={`ms-message-media ms-message-media--count-${Math.min(attachments.length, 4)} ${playingVideoIds.size ? "has-playing-video" : ""}`}>
       {attachments.map((attachment) => {
         if (attachment.view_once) return <ViewOnceMedia key={attachment.id} attachment={attachment} currentUserId={currentUserId} own={own} />;
         const isVideo = (attachment.mime_type || "").toLowerCase().startsWith("video/") || attachment.media_kind === "video";
@@ -131,7 +132,18 @@ export function MediaMessage({
         return (
           <div className={`ms-message-media__item ${isVideo ? "is-video" : "is-image"}`} style={getAttachmentRatioStyle(attachment)} key={attachment.id}>
             {isVideo ? (
-              <LazyVideo attachment={attachment} src={mediaUrl} posterSrc={posterUrl} currentUserId={currentUserId} />
+              <LazyVideo
+                attachment={attachment}
+                src={mediaUrl}
+                posterSrc={posterUrl}
+                currentUserId={currentUserId}
+                onPlayingChange={(playing) => setPlayingVideoIds((current) => {
+                  const next = new Set(current);
+                  if (playing) next.add(attachment.id);
+                  else next.delete(attachment.id);
+                  return next;
+                })}
+              />
             ) : (
               <LazyImage attachment={attachment} thumbnailSrc={mediaUrl} fullSrc={getAttachmentPlaybackUrl(attachment)} currentUserId={currentUserId} warmMedia={warmMedia} onOpen={() => onPreviewAttachment?.(attachment.id)} />
             )}
