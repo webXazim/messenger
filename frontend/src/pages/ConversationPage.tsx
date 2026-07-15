@@ -51,11 +51,21 @@ function isSameDay(a: string, b: string) {
   return new Date(a).toDateString() === new Date(b).toDateString();
 }
 
-function isGrouped(previous: Message | undefined, current: Message) {
-  if (!previous) return false;
+function isGrouped(previous: Message | undefined, current: Message | undefined) {
+  if (!previous || !current) return false;
   if (previous.sender.id !== current.sender.id) return false;
   if (!isSameDay(previous.created_at, current.created_at)) return false;
-  return Math.abs(new Date(current.created_at).getTime() - new Date(previous.created_at).getTime()) < 5 * 60 * 1000;
+  const elapsed = new Date(current.created_at).getTime() - new Date(previous.created_at).getTime();
+  return Number.isFinite(elapsed) && elapsed >= 0 && elapsed < 5 * 60 * 1000;
+}
+
+type MessageGroupPosition = "single" | "start" | "middle" | "end";
+
+function getMessageGroupPosition(groupedBefore: boolean, groupedAfter: boolean): MessageGroupPosition {
+  if (groupedBefore && groupedAfter) return "middle";
+  if (groupedBefore) return "end";
+  if (groupedAfter) return "start";
+  return "single";
 }
 
 function buildOptimisticMessage(
@@ -1673,14 +1683,17 @@ export function ConversationPage() {
           {!isInitialChatLoading && !chatError && !messagesQuery.hasNextPage && messages.length ? <div className="ms-timeline-chip">Start of conversation</div> : null}
           {messages.map((message, index) => {
             const previous = messages[index - 1];
+            const next = messages[index + 1];
             const showDate = !previous || !isSameDay(previous.created_at, message.created_at);
-            const grouped = isGrouped(previous, message);
+            const groupedBefore = unreadBoundary !== index && isGrouped(previous, message);
+            const groupedAfter = unreadBoundary !== index + 1 && isGrouped(message, next);
+            const groupPosition = getMessageGroupPosition(groupedBefore, groupedAfter);
             const isOwnMessage = isSameUserIdentity(message.sender, user);
             return (
               <div
                 key={message.id}
                 data-message-id={message.id}
-                className={`ms-message-block ${highlightedMessageId === message.id ? "message-search-active message-reference-active" : ""}`}
+                className={`ms-message-block is-group-${groupPosition} ${groupedBefore ? "is-group-continuation" : ""} ${highlightedMessageId === message.id ? "message-search-active message-reference-active" : ""}`}
                 ref={(node) => registerMessageRef(message.id, node)}
               >
                 {showDate ? <div className="ms-timeline-chip">{new Date(message.created_at).toLocaleDateString()}</div> : null}
@@ -1688,7 +1701,7 @@ export function ConversationPage() {
                 <MessageBubble
                   message={message}
                   own={isOwnMessage}
-                  grouped={grouped}
+                  groupPosition={groupPosition}
                   readByNames={isOwnMessage && isGroupConversation ? getReadByNames(message) : []}
                   deliveredByNames={isOwnMessage && isGroupConversation ? getDeliveredByNames(message) : []}
                   deliveryStatus={isOwnMessage ? getOwnDeliveryStatus(message) : message.delivery_status}

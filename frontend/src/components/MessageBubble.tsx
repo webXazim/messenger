@@ -30,7 +30,7 @@ type TouchState = {
 export type MessageBubbleProps = {
   message: Message;
   own: boolean;
-  grouped?: boolean;
+  groupPosition?: "single" | "start" | "middle" | "end";
   readByNames?: string[];
   deliveredByNames?: string[];
   deliveryStatus?: string;
@@ -54,7 +54,7 @@ export type MessageBubbleProps = {
 export function MessageBubble({
   message,
   own,
-  grouped = false,
+  groupPosition = "single",
   readByNames = [],
   deliveredByNames = [],
   deliveryStatus,
@@ -97,8 +97,10 @@ export function MessageBubble({
     : "";
   const receiptSummary = readLabel || deliveredLabel;
   const senderName = message.sender.display_name || message.sender.username || "User";
+  const groupedBefore = groupPosition === "middle" || groupPosition === "end";
+  const groupedAfter = groupPosition === "start" || groupPosition === "middle";
   const showAvatar = !own && showSenderIdentity;
-  const showAuthor = !grouped && showSenderIdentity;
+  const showAuthor = !groupedBefore && showSenderIdentity;
   const hasText = Boolean(message.text || message.is_deleted || isEncrypted) && !callEvent;
   const hasCopySurface = Boolean(message.reply_preview || message.transcript?.text || message.links?.length || hasText);
   const hasRichContent = Boolean(callEvent || media.length || audio.length || files.length || message.voice_note?.is_voice_note);
@@ -190,9 +192,9 @@ export function MessageBubble({
   };
 
   return (
-    <div className={`ms-message-row ${own ? "ms-message-row--own" : "ms-message-row--incoming"} ${grouped ? "is-grouped" : ""} ${showContextMenu ? "is-selected" : ""} ${isLocalUnsent ? "is-optimistic" : ""}`}>
+    <div className={`ms-message-row ${own ? "ms-message-row--own" : "ms-message-row--incoming"} is-group-${groupPosition} ${groupedBefore ? "is-grouped" : ""} ${showContextMenu ? "is-selected" : ""} ${isLocalUnsent ? "is-optimistic" : ""}`}>
       <span className={`ms-message-gesture ${Math.abs(swipeOffset) > 36 ? "is-visible" : ""}`} aria-hidden="true">↩</span>
-      {showAvatar ? <UserAvatar person={message.sender} size="xs" className={`ms-message-avatar ${grouped ? "is-hidden" : ""}`} decorative /> : null}
+      {showAvatar ? <UserAvatar person={message.sender} size="xs" className={`ms-message-avatar ${groupedAfter ? "is-hidden" : ""}`} decorative /> : null}
       <div className={`ms-message-stack ${richOnly ? "ms-message-stack--rich-only" : ""} ${hasRichContent ? "has-rich-content" : ""}`} style={{ transform: `translateX(${swipeOffset}px)` }}>
         {showAuthor ? (
           <div className="ms-message-author">

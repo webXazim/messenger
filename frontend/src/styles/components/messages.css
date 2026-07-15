@@ -29,10 +29,6 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-.ms-message-row.is-grouped {
-  margin-top: -0.15rem;
-}
-
 .ms-message-row.is-selected {
   background: rgb(17 17 17 / 0.055);
 }
@@ -163,6 +159,39 @@
   border-radius: 1rem 1rem 0.34rem 1rem;
   background: var(--ms-color-canvas);
   box-shadow: none;
+}
+
+/* Messenger-style stacks: connected corners identify a short, same-sender
+   sequence while the outer corners preserve the silhouette of the group. */
+.ms-message-row.is-group-start,
+.ms-message-row.is-group-middle,
+.ms-message-row.is-group-end {
+  --ms-group-round: 1rem;
+  --ms-group-join: 0.34rem;
+}
+
+.ms-message-row--incoming.is-group-start {
+  --ms-group-shape: var(--ms-group-round) var(--ms-group-round) var(--ms-group-round) var(--ms-group-join);
+}
+
+.ms-message-row--incoming.is-group-middle {
+  --ms-group-shape: var(--ms-group-join) var(--ms-group-round) var(--ms-group-round) var(--ms-group-join);
+}
+
+.ms-message-row--incoming.is-group-end {
+  --ms-group-shape: var(--ms-group-join) var(--ms-group-round) var(--ms-group-round) var(--ms-group-round);
+}
+
+.ms-message-row--own.is-group-start {
+  --ms-group-shape: var(--ms-group-round) var(--ms-group-round) var(--ms-group-join) var(--ms-group-round);
+}
+
+.ms-message-row--own.is-group-middle {
+  --ms-group-shape: var(--ms-group-round) var(--ms-group-join) var(--ms-group-join) var(--ms-group-round);
+}
+
+.ms-message-row--own.is-group-end {
+  --ms-group-shape: var(--ms-group-round) var(--ms-group-join) var(--ms-group-round) var(--ms-group-round);
 }
 
 .ms-message-copy:hover,
@@ -1602,4 +1631,30 @@ button.ms-message-reply:hover {
     border-right-color: currentColor;
     opacity: 0.55;
   }
+}
+
+@media (max-width: 520px) {
+  .ms-message-row:is(.is-group-start, .is-group-middle, .is-group-end) {
+    --ms-group-round: 0.75rem;
+    --ms-group-join: 0.25rem;
+  }
+}
+
+/* Keep grouped geometry last so responsive component radii cannot override it. */
+.ms-message-row:is(.is-group-start, .is-group-middle, .is-group-end)
+  :is(
+    .ms-message-copy,
+    .ms-message-media,
+    .ms-pdf-message,
+    .ms-file-message,
+    .ms-voice-message,
+    .ms-voice-message-fallback,
+    .ms-call-message,
+    .ms-view-once__card
+  ) {
+  border-radius: var(--ms-group-shape);
+}
+
+.ms-message-row:is(.is-group-start, .is-group-middle, .is-group-end) .ms-message-media__item {
+  border-radius: inherit;
 }

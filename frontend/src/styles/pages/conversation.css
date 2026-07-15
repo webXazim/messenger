@@ -238,7 +238,15 @@
 .ms-message-block {
   min-width: 0;
   width: 100%;
-  margin-block: 0.1875rem;
+  margin-block: 0;
+}
+
+.ms-message-block + .ms-message-block {
+  margin-top: 0.75rem;
+}
+
+.ms-message-block.is-group-continuation {
+  margin-top: 0.125rem;
 }
 
 .ms-message-block.message-reference-active {

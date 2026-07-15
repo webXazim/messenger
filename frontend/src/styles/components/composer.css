@@ -943,3 +943,117 @@
     transition: none;
   }
 }
+
+/* Immersive visual-attachment staging uses the conversation canvas itself. */
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) {
+  position: static;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-message-composer__surface {
+  position: relative;
+  z-index: 14;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-queue {
+  position: absolute;
+  top: var(--ms-header-height);
+  right: 0;
+  bottom: 4.75rem;
+  left: 0;
+  z-index: 13;
+  width: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: rgb(8 8 8 / 0.96);
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card.is-visual-media {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #111;
+  box-shadow: none;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__preview.is-visual-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  background: #111;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__preview.is-visual-media img,
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__preview.is-visual-media video,
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__preview.is-visual-media iframe {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  background: #111;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card.is-visual-media .ms-upload-card__copy {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 3;
+  width: min(70%, 34rem);
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 0.7rem;
+  background: rgb(0 0 0 / 0.58);
+  color: #fff;
+  backdrop-filter: blur(0.65rem);
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__copy strong,
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__copy > span {
+  color: #fff;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card.is-visual-media .ms-upload-card__actions {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 4;
+  padding: 0;
+}
+
+.ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card__actions button {
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(0 0 0 / 0.58);
+  color: #fff;
+  backdrop-filter: blur(0.65rem);
+}
+
+@media (max-width: 720px) {
+  .ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-queue {
+    top: var(--ms-mobile-header-height, var(--ms-header-height));
+    bottom: 4.5rem;
+  }
+
+  .ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card.is-visual-media .ms-upload-card__copy {
+    top: 0.5rem;
+    left: 0.5rem;
+    width: calc(100% - 4rem);
+    padding: 0.45rem 0.55rem;
+  }
+
+  .ms-chat-composer-dock:has(.ms-upload-card.is-visual-media) .ms-upload-card.is-visual-media .ms-upload-card__actions {
+    top: 0.5rem;
+    right: 0.5rem;
+  }
+}
