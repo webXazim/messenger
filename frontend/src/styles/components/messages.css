@@ -1064,23 +1064,22 @@ button.ms-message-reply:hover {
 }
 
 .ms-voice-message--compact .ms-voice-message__content {
-  position: relative;
-  height: 2.5rem;
-  display: block;
+  height: 2.55rem;
+  display: grid;
+  grid-template-rows: 2rem 0.55rem;
+  align-content: center;
+  gap: 0;
 }
 
 .ms-voice-message--compact .ms-voice-message__waveform {
-  position: absolute;
-  top: 0.4rem;
-  right: 0;
-  left: 0;
+  position: static;
+  align-self: center;
 }
 
 .ms-voice-message--compact .ms-voice-message__timing {
-  position: absolute;
-  right: 0;
-  bottom: 0.05rem;
-  left: 0;
+  position: static;
+  align-self: start;
+  min-height: 0.55rem;
 }
 
 .ms-voice-message__audio {
