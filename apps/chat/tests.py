@@ -946,6 +946,40 @@ class ChatApiTests(TestCase):
         self.assertEqual(fresh.status_code, 201)
         self.assertNotEqual(fresh.data["id"], ringing.data["id"])
 
+    def test_direct_call_decline_closes_call_and_redial_creates_fresh_session(self):
+        conversation = self.create_direct_conversation()
+        ringing = self.client.post(
+            reverse("call-start", kwargs={"conversation_id": conversation["id"]}),
+            {"call_type": "video"},
+            format="json",
+        )
+        self.assertEqual(ringing.status_code, 201)
+
+        self.client.force_authenticate(self.other)
+        declined = self.client.post(
+            reverse("call-decline", kwargs={"call_id": ringing.data["id"]}),
+            {"reason": "declined"},
+            format="json",
+        )
+        self.assertEqual(declined.status_code, 200)
+        self.assertEqual(declined.data["status"], CallSession.Status.DECLINED)
+        self.assertEqual(
+            CallParticipant.objects.get(call_id=ringing.data["id"], user=self.user).state,
+            CallParticipant.State.LEFT,
+        )
+
+        self.client.force_authenticate(self.user)
+        redial = self.client.post(
+            reverse("call-start", kwargs={"conversation_id": conversation["id"]}),
+            {"call_type": "video"},
+            format="json",
+        )
+        self.assertEqual(redial.status_code, 201)
+        self.assertNotEqual(redial.data["id"], ringing.data["id"])
+        self.assertEqual(str(redial.data["initiated_by"]["id"]), str(self.user.id))
+        remote = next(item for item in redial.data["participants"] if str(item["user"]["id"]) == str(self.other.id))
+        self.assertEqual(remote["state"], CallParticipant.State.RINGING)
+
     def test_direct_call_start_reports_busy_callee(self):
         self.client.force_authenticate(self.third)
         busy_conversation = self.client.post(

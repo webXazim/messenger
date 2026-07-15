@@ -3197,9 +3197,14 @@ def decline_call(actor, call, reason="declined"):
     participant.state = CallParticipant.State.DECLINED
     participant.left_at = now
     participant.save(update_fields=["state", "left_at", "updated_at"])
-    joined_count = call.participants.filter(state=CallParticipant.State.JOINED).count()
-    ringing_count = call.participants.filter(state=CallParticipant.State.RINGING).exclude(user=actor).count()
-    if joined_count == 0 and ringing_count == 0:
+    remaining_remote_participants = call.participants.exclude(user=call.initiated_by).filter(
+        state__in=[CallParticipant.State.RINGING, CallParticipant.State.JOINED],
+    ).exists()
+    should_close_call = call.conversation.type == Conversation.ConversationType.DIRECT or not remaining_remote_participants
+    if should_close_call:
+        call.participants.exclude(user=actor).filter(
+            state__in=[CallParticipant.State.RINGING, CallParticipant.State.JOINED],
+        ).update(state=CallParticipant.State.LEFT, left_at=now, updated_at=now)
         call.status = CallSession.Status.DECLINED
         call.ended_at = now
         call.ended_reason = reason

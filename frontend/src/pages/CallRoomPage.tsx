@@ -10,6 +10,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useCallWakeLock } from "../hooks/useCallWakeLock";
 import { buildCallMediaConstraints, getCallMediaErrorMessage, preflightCallMedia, requestCallMedia } from "../lib/mediaPermissions";
+import { patchCallCaches } from "../lib/realtimeCache";
 import { safeId } from "../lib/safeId";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { isTerminalCall } from "../lib/callLifecycle";
@@ -538,7 +539,12 @@ export function CallRoomPage() {
         releaseCallAction(call.id, ownerId);
       }
     },
-    onSuccess: () => navigate(call?.conversation ? `/chat/${call.conversation}` : "/calls", { replace: true }),
+    onSuccess: async (updated) => {
+      setLiveCall(updated);
+      patchCallCaches(queryClient, updated);
+      await queryClient.invalidateQueries({ queryKey: ["recent-calls"] });
+      navigate(updated.conversation ? `/chat/${updated.conversation}` : "/calls", { replace: true });
+    },
     onError: (error) => {
       setMediaError(getCallMutationError(error, "The call could not be declined."));
       if (call) callActionChannelRef.current?.publish({ callId: call.id, action: "released", ownerId: callActionOwnerRef.current, occurredAt: Date.now() });

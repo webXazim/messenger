@@ -31,6 +31,7 @@ assert.ok(conversationPage.includes("findActiveCallForUser"), "Conversation call
 assert.ok(conversationPage.includes("preflightCallMedia"), "Conversation call buttons do not validate media before creating a call.");
 assert.ok(callRoom.includes("canInitializeLocalMedia"), "Incoming call routes can still open camera or microphone before acceptance.");
 assert.ok(callRoom.includes("declineMutation"), "Incoming call-room decline still uses the generic end action.");
+assert.ok(callRoom.includes("patchCallCaches(queryClient, updated)"), "Declined calls can remain active in the frontend cache.");
 assert.ok(callRoom.includes("isTerminalCall"), "Ended call URLs are not redirected back to their conversation.");
 assert.ok(appShell.includes("handleIncomingCallAction"), "Incoming banner and overlay do not share one guarded action path.");
 assert.ok(appShell.includes("claimCallAction"), "Incoming acceptance is not coordinated across tabs.");
@@ -44,5 +45,6 @@ assert.ok(lifecycle.includes("Completed ·"), "Completed call duration is not pr
 assert.ok(services.includes("actor_active_call"), "Backend still allows one caller to start multiple simultaneous calls.");
 assert.ok(views.includes('"active_call_exists" if exc.actor_busy'), "Backend does not distinguish the caller's existing active call.");
 assert.ok(tests.includes("test_caller_cannot_start_a_second_active_call"), "Backend regression coverage for duplicate caller calls is missing.");
+assert.ok(tests.includes("test_direct_call_decline_closes_call_and_redial_creates_fresh_session"), "Decline/redial regression coverage is missing.");
 
 console.log("Call lifecycle integration source checks passed.");
