@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { chatApi } from "../api/chat";
 import { AudioCallScreen } from "../components/call/AudioCallScreen";
+import { cameraFacingFromTrack, findPreferredCameraDevice, supportsMobileCameraSwitch, type CameraFacingMode } from "../components/call/callCamera";
 import { VideoCallScreen } from "../components/call/VideoCallScreen";
 import { getCallViewState } from "../components/call/callPresentation";
 import { useAuth } from "../contexts/AuthContext";
@@ -403,6 +404,14 @@ export function CallRoomPage() {
   const callActionOwnerRef = useRef("");
   const callActionChannelRef = useRef<ReturnType<typeof createCallActionChannel> | null>(null);
   const observedLiveCallRef = useRef(false);
+  const mobileFacingModeSwitchAvailable = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    return supportsMobileCameraSwitch({
+      facingModeSupported: navigator.mediaDevices?.getSupportedConstraints?.().facingMode === true,
+      maxTouchPoints: navigator.maxTouchPoints,
+      userAgent: navigator.userAgent,
+    });
+  }, []);
   if (!callActionOwnerRef.current) callActionOwnerRef.current = createCallActionOwnerId();
 
   const callQuery = useQuery({
@@ -808,10 +817,7 @@ export function CallRoomPage() {
   const refreshVideoDeviceState = useCallback(async (stream: MediaStream | null = localStreamRef.current) => {
     const track = stream?.getVideoTracks()[0];
     if (track) {
-      const settings = track.getSettings();
-      const label = track.label || "";
-      const usesRearCamera = settings.facingMode === "environment" || /back|rear|environment/i.test(label);
-      setLocalVideoMirrored(!usesRearCamera);
+      setLocalVideoMirrored(cameraFacingFromTrack(track) !== "environment");
     }
     if (!navigator.mediaDevices?.enumerateDevices) return;
     try {
@@ -831,13 +837,21 @@ export function CallRoomPage() {
 
   const acquireTrack = useCallback(async (
     kind: "audio" | "video",
-    options?: { videoDeviceId?: string },
+    options?: { videoDeviceId?: string; facingMode?: CameraFacingMode; relaxedFacingMode?: boolean },
   ) => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Media devices are not supported in this browser.");
     const baseVideoConstraints = buildCallMediaConstraints("video").video as MediaTrackConstraints;
     const videoConstraints: MediaTrackConstraints = options?.videoDeviceId
       ? { ...baseVideoConstraints, facingMode: undefined, deviceId: { exact: options.videoDeviceId } }
-      : baseVideoConstraints;
+      : options?.facingMode
+        ? {
+            ...baseVideoConstraints,
+            deviceId: undefined,
+            facingMode: options.relaxedFacingMode
+              ? { ideal: options.facingMode }
+              : { exact: options.facingMode },
+          }
+        : baseVideoConstraints;
     const constraints = kind === "audio"
       ? { audio: buildCallMediaConstraints("voice").audio, video: false }
       : { audio: false, video: videoConstraints };
@@ -880,7 +894,7 @@ export function CallRoomPage() {
 
   const replaceLocalTrack = useCallback(async (
     kind: "audio" | "video",
-    options?: { videoDeviceId?: string },
+    options?: { videoDeviceId?: string; facingMode?: CameraFacingMode; relaxedFacingMode?: boolean },
   ) => {
     const peer = peerRef.current;
     markLocalMediaMutation();
@@ -1569,19 +1583,48 @@ export function CallRoomPage() {
   };
 
   const switchCamera = async () => {
-    if (!navigator.mediaDevices?.enumerateDevices || !videoEnabled) return;
+    if (!navigator.mediaDevices?.getUserMedia || !videoEnabled) return;
     try {
       setMediaAction("Switching camera...");
-      const devices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput");
+      setMediaError(null);
+      const devices = navigator.mediaDevices.enumerateDevices
+        ? (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "videoinput")
+        : [];
       setVideoInputCount(devices.length);
-      if (devices.length < 2) return;
+      const currentTrack = localStreamRef.current?.getVideoTracks()[0];
+      const currentDeviceId = currentTrack?.getSettings().deviceId || "";
+      const targetFacing: CameraFacingMode = cameraFacingFromTrack(currentTrack) === "environment" ? "user" : "environment";
+      const nextDevice = findPreferredCameraDevice(devices, targetFacing, currentDeviceId);
 
-      const currentDeviceId = localStreamRef.current?.getVideoTracks()[0]?.getSettings().deviceId || "";
-      const currentIndex = devices.findIndex((device) => device.deviceId === currentDeviceId);
-      const nextDevice = devices[(currentIndex + 1 + devices.length) % devices.length] ?? devices[0];
-      if (!nextDevice?.deviceId) return;
-
-      await replaceLocalTrack("video", { videoDeviceId: nextDevice.deviceId });
+      let switched = false;
+      if (nextDevice?.deviceId) {
+        try {
+          await replaceLocalTrack("video", { videoDeviceId: nextDevice.deviceId });
+          switched = true;
+        } catch {
+          // Some mobile browsers enumerate both cameras but only allow switching by facing mode.
+        }
+      }
+      if (!switched && currentTrack?.applyConstraints) {
+        try {
+          await currentTrack.applyConstraints({ facingMode: { exact: targetFacing } });
+          await refreshVideoDeviceState(localStreamRef.current);
+          setLocalVideoMirrored(targetFacing !== "environment");
+          switched = true;
+        } catch {
+          // Fall through to replacing the camera track.
+        }
+      }
+      if (!switched) {
+        try {
+          await replaceLocalTrack("video", { facingMode: targetFacing });
+          switched = true;
+        } catch {
+          await replaceLocalTrack("video", { facingMode: targetFacing, relaxedFacingMode: true });
+          switched = true;
+        }
+      }
+      if (!switched) throw new Error("No alternate camera is available.");
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: true,
         preferred_video_quality: String(orchestration?.recommended_video_quality || "medium"),
@@ -1703,7 +1746,7 @@ export function CallRoomPage() {
       remotePlaybackBlocked={remotePlaybackBlocked}
       qualityMessage={primaryQualityAlert ? "Call quality is reduced. The connection is adjusting automatically." : undefined}
       remoteTrackCount={remoteTrackCount}
-      canSwitchCamera={videoInputCount > 1}
+      canSwitchCamera={videoInputCount > 1 || mobileFacingModeSwitchAvailable}
       localVideoMirrored={localVideoMirrored}
       localVideoRef={localVideoRef}
       remoteVideoRef={remoteVideoRef}

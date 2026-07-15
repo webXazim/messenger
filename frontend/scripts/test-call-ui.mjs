@@ -13,6 +13,11 @@ import {
   relativeFromPosition,
 } from "../.call-test-build/components/call/callGeometry.js";
 import {
+  cameraFacingFromTrack,
+  findPreferredCameraDevice,
+  supportsMobileCameraSwitch,
+} from "../.call-test-build/components/call/callCamera.js";
+import {
   callDestination,
   callDirection,
   callPeerLabel,
@@ -84,6 +89,16 @@ assert.ok(Math.abs(roundTrip.x - relative.x) < 0.000001);
 assert.ok(Math.abs(roundTrip.y - relative.y) < 0.000001);
 assert.equal(clampCallValue(20, 0, 10), 10);
 assert.equal(clampCallValue(-2, 0, 10), 0);
+
+const frontCamera = { deviceId: "front", label: "Front Camera" };
+const rearCamera = { deviceId: "rear", label: "Back Camera" };
+assert.equal(findPreferredCameraDevice([frontCamera, rearCamera], "environment", "front")?.deviceId, "rear");
+assert.equal(findPreferredCameraDevice([frontCamera, rearCamera], "user", "rear")?.deviceId, "front");
+assert.equal(findPreferredCameraDevice([{ deviceId: "one", label: "" }, { deviceId: "two", label: "" }], "environment", ""), null);
+assert.equal(cameraFacingFromTrack({ label: "Rear camera", getSettings: () => ({}) }), "environment");
+assert.equal(cameraFacingFromTrack({ label: "", getSettings: () => ({ facingMode: "user" }) }), "user");
+assert.equal(supportsMobileCameraSwitch({ facingModeSupported: true, maxTouchPoints: 5, userAgent: "" }), true);
+assert.equal(supportsMobileCameraSwitch({ facingModeSupported: true, maxTouchPoints: 0, userAgent: "Desktop" }), false);
 
 
 const me = { id: "1", username: "me" };

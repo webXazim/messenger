@@ -16,6 +16,9 @@ for (const required of [
   "remoteAudioStreamRef.current?.getTracks().forEach((track) => track.stop())",
   "AudioCallScreen",
   "VideoCallScreen",
+  "facingMode: targetFacing",
+  "relaxedFacingMode: true",
+  "currentTrack.applyConstraints",
 ]) {
   assert.ok(controller.includes(required), `Missing call-controller invariant: ${required}`);
 }

@@ -343,3 +343,72 @@
     min-height: 3.75rem;
   }
 }
+
+/* Minimal production voice-call treatment. */
+.ms-audio-call {
+  background:
+    radial-gradient(circle at 50% 34%, rgb(255 255 255 / 0.075), transparent 30%),
+    linear-gradient(180deg, #141414 0%, #080808 100%);
+}
+
+.ms-audio-call__header {
+  min-height: 4rem;
+  color: rgb(255 255 255 / 0.64);
+}
+
+.ms-audio-call__back {
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.06);
+}
+
+.ms-audio-call__avatar {
+  width: clamp(6.5rem, min(12vw, 20vh), 8.25rem);
+  height: clamp(6.5rem, min(12vw, 20vh), 8.25rem);
+  margin-bottom: var(--ms-space-2);
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 0.26);
+}
+
+.ms-audio-call__content h1 {
+  font-size: clamp(1.4rem, 3.5vw, 2rem);
+}
+
+.ms-audio-call__controls {
+  gap: clamp(0.6rem, 2vw, 1rem);
+  padding-top: var(--ms-space-4);
+}
+
+.ms-audio-call__control {
+  width: 4.35rem;
+  min-height: 4.35rem;
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.09);
+}
+
+.ms-audio-call__notice {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(18 18 18 / 0.78);
+}
+
+@media (max-width: 560px) {
+  .ms-audio-call__avatar {
+    width: clamp(5.75rem, 28vw, 7rem);
+    height: clamp(5.75rem, 28vw, 7rem);
+  }
+
+  .ms-audio-call__control {
+    width: 4rem;
+    min-height: 4rem;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 620px) {
+  .ms-audio-call__avatar {
+    width: clamp(4.5rem, 18vh, 5.5rem);
+    height: clamp(4.5rem, 18vh, 5.5rem);
+  }
+
+  .ms-audio-call__control {
+    width: 3.6rem;
+    min-height: 3.6rem;
+  }
+}
