@@ -2822,7 +2822,10 @@ def mark_conversation_delivered(actor, conversation, message_id=None):
     # so an older request cannot commit after a newer one and move the pointer
     # backwards.
     participant = ensure_participant(conversation, actor)
-    participant = ConversationParticipant.objects.select_for_update().select_related(
+    # last_delivered_message and last_read_message are nullable, so their
+    # select_related joins are outer joins. PostgreSQL rejects an unrestricted
+    # FOR UPDATE in that case; only the participant row needs to be locked.
+    participant = ConversationParticipant.objects.select_for_update(of=("self",)).select_related(
         "last_delivered_message",
         "last_read_message",
     ).get(pk=participant.pk)
@@ -2862,7 +2865,7 @@ def mark_conversation_delivered(actor, conversation, message_id=None):
 @transaction.atomic
 def mark_conversation_read(actor, conversation, message_id=None):
     participant = ensure_participant(conversation, actor)
-    participant = ConversationParticipant.objects.select_for_update().select_related(
+    participant = ConversationParticipant.objects.select_for_update(of=("self",)).select_related(
         "last_delivered_message",
         "last_read_message",
     ).get(pk=participant.pk)
