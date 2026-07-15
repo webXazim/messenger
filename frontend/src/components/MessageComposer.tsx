@@ -305,7 +305,7 @@ export function MessageComposer({
           id: String(item.uploadId),
           original_name: item.fileName,
           mime_type: item.file.type || (item.fileName.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream"),
-          media_kind: item.mediaKind || (item.file.type.startsWith("video/") ? "video" : item.file.type.startsWith("image/") ? "image" : item.file.type.startsWith("audio/") ? "audio" : item.fileName.toLowerCase().endsWith(".pdf") ? "pdf" : "file"),
+          media_kind: item.mediaKind || (item.file.type.startsWith("video/") ? "video" : item.file.type.startsWith("image/") ? "image" : item.file.type.startsWith("audio/") ? "audio" : "file"),
           size: item.file.size,
           width: item.width,
           height: item.height,

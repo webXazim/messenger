@@ -1170,11 +1170,20 @@ class GroupParticipantBanSerializer(serializers.Serializer):
         return sanitize_chat_text(value, max_length=255)
 
 
+class UploadMediaKindField(serializers.ChoiceField):
+    """Keep compatibility with clients that used `pdf` as a presentation kind."""
+
+    def to_internal_value(self, data):
+        if str(data or "").strip().lower() == "pdf":
+            data = PendingUpload.MediaKind.FILE
+        return super().to_internal_value(data)
+
+
 class UploadCreateSerializer(serializers.Serializer):
     file = serializers.FileField()
     original_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     mime_type = serializers.CharField(required=False, allow_blank=True, max_length=255)
-    media_kind = serializers.ChoiceField(choices=PendingUpload.MediaKind.choices, required=False)
+    media_kind = UploadMediaKindField(choices=PendingUpload.MediaKind.choices, required=False)
     width = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=100000)
     height = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=100000)
     rotation = serializers.IntegerField(required=False, allow_null=True)

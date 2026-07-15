@@ -66,7 +66,7 @@ function buildOptimisticMessage(
   replyTo: Message | null,
   clientTempId: string,
   optimisticAttachments: MessageAttachment[] = [],
-  options: { isEncrypted?: boolean; type?: string; isVoiceNote?: boolean; durationSeconds?: number | string | null } = {},
+  options: { isEncrypted?: boolean; type?: string; isVoiceNote?: boolean; durationSeconds?: number | string | null; waveform?: number[] } = {},
 ) {
   const now = new Date().toISOString();
   return {
@@ -85,7 +85,9 @@ function buildOptimisticMessage(
     failed_reason: null,
     retry_count: 0,
     is_encrypted: Boolean(options.isEncrypted),
-    voice_note: options.isVoiceNote ? { is_voice_note: true, duration_seconds: options.durationSeconds ?? null } : null,
+    voice_note: options.isVoiceNote
+      ? { is_voice_note: true, duration_seconds: options.durationSeconds ?? null, waveform: options.waveform ?? [] }
+      : null,
   } as Message;
 }
 
@@ -523,6 +525,7 @@ export function ConversationPage() {
             type: String(payload.type || (Array.isArray(payload.attachment_ids) && payload.attachment_ids.length ? "file" : "text")),
             isVoiceNote: Boolean(payload.is_voice_note),
             durationSeconds: typeof payload.duration_seconds === "number" || typeof payload.duration_seconds === "string" ? payload.duration_seconds : null,
+            waveform: Array.isArray(payload.waveform) ? payload.waveform.map(Number).filter(Number.isFinite) : [],
           },
         );
         queryClient.setQueryData<InfiniteData<MessagePage>>(
@@ -1756,7 +1759,7 @@ export function ConversationPage() {
             onCancelEdit={() => setEditingMessage(null)}
             onTyping={sendTyping}
             disabledReason={composerDisabledReason}
-            onSendVoiceNote={async ({ file, fileName, mimeType, durationSeconds, clientTempId, waveform }) => {
+            onSendVoiceNote={async ({ file, previewUrl, fileName, mimeType, durationSeconds, clientTempId, waveform }) => {
               const upload = await uploadConversationAttachment(file, {
                 original_name: fileName,
                 mime_type: mimeType,
@@ -1770,6 +1773,7 @@ export function ConversationPage() {
                 participantUserIds: conversationParticipantIds,
               });
               encryptedAttachmentUploadsRef.current[upload.id] = envelope;
+              const normalizedWaveform = waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
               await sendMutation.mutateAsync({
                 type: "audio",
                 attachment_ids: [upload.id],
@@ -1777,7 +1781,19 @@ export function ConversationPage() {
                 text: "",
                 is_voice_note: true,
                 duration_seconds: durationSeconds,
-                waveform: waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100)))),
+                waveform: normalizedWaveform,
+                _optimistic_attachments: [{
+                  id: upload.id,
+                  original_name: fileName,
+                  mime_type: mimeType,
+                  media_kind: "audio",
+                  size: file.size,
+                  duration_seconds: durationSeconds,
+                  file_url: previewUrl,
+                  preview_url: previewUrl,
+                  is_encrypted: false,
+                  encryption: envelope,
+                }],
                 client_temp_id: clientTempId,
               });
             }}

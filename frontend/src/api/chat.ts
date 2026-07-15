@@ -119,10 +119,11 @@ function firstNumber(...values: unknown[]) {
 
 function inferMediaKind(file: File, mimeType?: string) {
   const normalizedMime = firstString(mimeType, file.type).toLowerCase();
-  if (normalizedMime === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) return "pdf";
   if (normalizedMime.startsWith("image/")) return "image";
   if (normalizedMime.startsWith("video/")) return "video";
   if (normalizedMime.startsWith("audio/")) return "audio";
+  // PDFs use the generic file kind in the API contract. Their richer
+  // presentation is inferred from application/pdf, not a separate kind.
   return "file";
 }
 
@@ -394,6 +395,9 @@ export function normalizeMessage(value: unknown): Message {
       ? {
           is_voice_note: Boolean(voiceNote.is_voice_note ?? metadata.voice_note),
           duration_seconds: firstNumber(voiceNote.duration_seconds, voiceNote.duration, item.duration_seconds) ?? null,
+          waveform: Array.isArray(voiceNote.waveform)
+            ? voiceNote.waveform.map(Number).filter(Number.isFinite)
+            : [],
         }
       : null,
     call_event: Object.keys(callEvent).length

@@ -21,6 +21,7 @@ type VoiceDraft = {
 
 export type VoiceNotePayload = {
   file: File;
+  previewUrl: string;
   durationSeconds: number;
   mimeType: string;
   fileName: string;
@@ -255,6 +256,7 @@ export function VoiceNoteRecorder({
       setError(null);
       await onSendVoiceNote({
         file: voiceDraft.file,
+        previewUrl: voiceDraft.previewUrl,
         durationSeconds: voiceDraft.durationSeconds,
         mimeType: voiceDraft.mimeType,
         fileName: voiceDraft.file.name,

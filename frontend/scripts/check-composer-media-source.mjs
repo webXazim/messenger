@@ -14,6 +14,7 @@ const attachmentMessage = read("src/components/messages/AttachmentMessage.tsx");
 const mediaPreviewCache = read("src/lib/mediaPreviewCache.ts");
 const mediaModal = read("src/components/MediaPreviewModal.tsx");
 const voice = read("src/components/VoiceNoteRecorder.tsx");
+const audioPlayer = read("src/components/AudioMessagePlayer.tsx");
 const auth = read("src/contexts/AuthContext.tsx");
 const views = read("../apps/chat/api/views.py");
 const services = read("../apps/chat/services.py");
@@ -34,6 +35,7 @@ assert.ok(drafts.includes("messenger:draft:v1"), "Drafts are not scoped to accou
 assert.ok(auth.includes("clearConversationDraftsForUser"), "Logout does not clear local private drafts.");
 assert.ok(chatApi.includes("onUploadProgress"), "Upload progress is not connected to Axios.");
 assert.ok(chatApi.includes("metadata_source_file"), "Encrypted uploads do not inspect the original media metadata safely.");
+assert.equal(/return ["']pdf["']/.test(chatApi), false, "PDF uploads still send a media kind rejected by the API.");
 assert.ok(conversation.includes("include_thumbnail: false"), "Encrypted media may leak an unencrypted thumbnail.");
 assert.ok(conversation.includes("previewBlob: encryptedPreview"), "Encrypted attachments do not carry a compact recipient-safe preview.");
 assert.ok(conversation.includes("_optimistic_attachments"), "Optimistic messages discard attachment media metadata.");
@@ -42,6 +44,11 @@ assert.ok(composer.includes("_optimistic_attachments: optimisticAttachments"), "
 assert.ok(composer.includes("width: item.width") && composer.includes("height: item.height"), "Optimistic media does not preserve the final attachment aspect ratio.");
 assert.ok(conversation.includes("await sendMutation.mutateAsync(nextPayload)"), "Composer send failures are still swallowed.");
 assert.ok(voice.includes("clientTempId"), "Voice-note retry cannot reuse its optimistic message identity.");
+assert.ok(voice.includes("previewUrl: voiceDraft.previewUrl"), "Voice-note sends do not retain their local audio for the optimistic player.");
+assert.ok(chatApi.includes("waveform: Array.isArray(voiceNote.waveform)"), "Normalized voice notes discard their real waveform.");
+assert.ok(conversation.includes("_optimistic_attachments") && conversation.includes("waveform: normalizedWaveform"), "Optimistic voice notes do not receive their audio or waveform immediately.");
+assert.ok(audioPlayer.includes("requestAnimationFrame(updateProgress)"), "Voice-note playback progress is not tracked continuously.");
+assert.ok(audioPlayer.includes("audio.defaultPlaybackRate = speed"), "Voice-note playback speed is not applied consistently.");
 assert.match(voice, /shouldDiscard \|\| chunks\.length === 0[\s\S]*setSending\(false\)/, "Empty or discarded voice recordings can leave the composer stuck in a sending state.");
 assert.ok(media.includes("hasMediaAccessToken"), "Signed media URLs are not streamed directly.");
 assert.ok(media.includes('preload="metadata"'), "Video/audio still preload the complete file unnecessarily.");

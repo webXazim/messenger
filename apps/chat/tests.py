@@ -1558,6 +1558,23 @@ class ChatApiTests(TestCase):
                 self.assertEqual(upload_response.status_code, 201)
                 self.assertEqual(upload_response.data["media_kind"], PendingUpload.MediaKind.FILE)
 
+    def test_upload_normalizes_legacy_pdf_media_kind_to_file(self):
+        upload_response = self.client.post(
+            reverse("upload-create"),
+            {
+                "file": SimpleUploadedFile(
+                    "document.pdf",
+                    b"%PDF-1.4\n%%EOF\n",
+                    content_type="application/pdf",
+                ),
+                "media_kind": "pdf",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(upload_response.status_code, 201)
+        self.assertEqual(upload_response.data["media_kind"], PendingUpload.MediaKind.FILE)
+
     @patch("apps.chat.api.views.dispatch_pending_upload_scan")
     @override_settings(UPLOAD_SCAN_ASYNC=True)
     def test_upload_endpoint_dispatches_async_scan_when_enabled(self, mock_dispatch_pending_upload_scan):
