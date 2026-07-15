@@ -54,6 +54,8 @@ export function MessageActions({
   const failed = String(message.delivery_status || "").toLowerCase() === "failed";
   const localUnsent = message.id.startsWith("temp-");
   const canInteract = !message.is_deleted && !failed && !localUnsent;
+  const editDeadlineActive = !message.edit_deadline || Date.parse(message.edit_deadline) > Date.now();
+  const canEdit = message.can_edit !== false && editDeadlineActive && (message.reactions?.length ?? 0) === 0;
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 720px)");
@@ -163,7 +165,7 @@ export function MessageActions({
             {canInteract ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onReply(message))}>Reply</button> : null}
             {canInteract && message.text ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => { void navigator.clipboard.writeText(message.text); })}>Copy</button> : null}
             {canForward ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onForward(message))}>Forward</button> : null}
-            {own && canInteract ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onEdit(message))}>Edit</button> : null}
+            {own && canInteract && canEdit ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onEdit(message))}>Edit</button> : null}
             {own ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onDelete(message))}>Delete</button> : null}
             {!own && onReport ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onReport(message))}>Report</button> : null}
           </div>

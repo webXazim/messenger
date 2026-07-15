@@ -390,6 +390,9 @@ export function normalizeMessage(value: unknown): Message {
     failed_reason: firstString(item.failed_reason, item.error_message) || null,
     retry_count: firstNumber(item.retry_count) ?? 0,
     is_deleted: Boolean(item.is_deleted ?? item.deleted_at),
+    can_edit: typeof item.can_edit === "boolean" ? item.can_edit : undefined,
+    edit_locked_reason: firstString(item.edit_locked_reason) || undefined,
+    edit_deadline: firstString(item.edit_deadline) || undefined,
     transcript: Object.keys(transcript).length ? { text: firstString(transcript.text, transcript.content) || undefined } : null,
     voice_note: Object.keys(voiceNote).length
       ? {

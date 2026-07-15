@@ -241,6 +241,11 @@
   margin-block: 0;
 }
 
+.ms-message-block:has(.ms-message-row.is-selected) {
+  position: relative;
+  z-index: 60;
+}
+
 .ms-message-block + .ms-message-block {
   margin-top: 0.75rem;
 }

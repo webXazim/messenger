@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { MessageAttachment } from "../types/chat";
 import { useModalAccessibility } from "../hooks/useModalAccessibility";
 import { AudioMessagePlayer } from "./AudioMessagePlayer";
-import { AuthenticatedImage, AuthenticatedPdf, AuthenticatedVideo, downloadAttachmentForUser } from "./AuthenticatedMedia";
+import { AuthenticatedImage, AuthenticatedVideo, downloadAttachmentForUser, fetchAttachmentBlobForUser } from "./AuthenticatedMedia";
+import { PdfDocumentPreview } from "./composer/PdfDocumentPreview";
 import { getAttachmentPlaybackUrl, getAttachmentPosterUrl, getAttachmentPreviewUrl } from "./messages/messagePresentation";
 
 export function MediaPreviewModal({
@@ -23,15 +24,19 @@ export function MediaPreviewModal({
   currentUserId?: string;
 }) {
   const [imageControlsVisible, setImageControlsVisible] = useState(false);
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+  const [pdfError, setPdfError] = useState("");
   const titleId = useId();
   const descriptionId = useId();
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const imageStageRef = useRef<HTMLDivElement | null>(null);
-  const attachmentIsImage = (attachment?.mime_type || "").toLowerCase().startsWith("image/");
+  const attachmentMime = (attachment?.mime_type || "").toLowerCase();
+  const attachmentIsImage = attachmentMime.startsWith("image/");
+  const attachmentIsPdf = attachmentMime === "application/pdf" || Boolean(attachment?.original_name.toLowerCase().endsWith(".pdf"));
   const dialogRef = useModalAccessibility<HTMLElement>({
     open: Boolean(attachment),
     onClose,
-    initialFocusRef: attachmentIsImage ? imageStageRef : closeRef,
+    initialFocusRef: attachmentIsImage || attachmentIsPdf ? imageStageRef : closeRef,
   });
 
   useEffect(() => {
@@ -53,6 +58,24 @@ export function MediaPreviewModal({
     setImageControlsVisible(false);
   }, [attachment?.id]);
 
+  useEffect(() => {
+    setPdfBlob(null);
+    setPdfError("");
+    if (!attachment || !attachmentIsPdf) return;
+    const src = getAttachmentPlaybackUrl(attachment);
+    if (!src) {
+      setPdfError("PDF preview is unavailable.");
+      return;
+    }
+    const controller = new AbortController();
+    void fetchAttachmentBlobForUser(src, attachment, currentUserId, controller.signal, "inline")
+      .then(setPdfBlob)
+      .catch((reason: unknown) => {
+        if ((reason as { name?: string })?.name !== "AbortError") setPdfError(reason instanceof Error ? reason.message : "PDF preview is unavailable.");
+      });
+    return () => controller.abort();
+  }, [attachment, attachmentIsPdf, currentUserId]);
+
   if (!attachment) return null;
   const imagePreviewUrl = getAttachmentPlaybackUrl(attachment) || getAttachmentPreviewUrl(attachment) || "#";
   const videoPlaybackUrl = getAttachmentPlaybackUrl(attachment) || "#";
@@ -63,7 +86,7 @@ export function MediaPreviewModal({
   const isAudio = mime.startsWith("audio/");
   const isPdf = mime === "application/pdf" || attachment.original_name.toLowerCase().endsWith(".pdf");
 
-  if (isImage) {
+  if (isImage || isPdf) {
     const toggleControls = () => setImageControlsVisible((visible) => !visible);
     const stopOverlayClick = (event: React.MouseEvent) => event.stopPropagation();
 
@@ -73,7 +96,7 @@ export function MediaPreviewModal({
       }}>
         <section
           ref={dialogRef}
-          className={`ms-image-viewer${imageControlsVisible ? " is-controls-visible" : ""}`}
+          className={`ms-image-viewer${isPdf ? " ms-image-viewer--pdf" : ""}${imageControlsVisible ? " is-controls-visible" : ""}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
@@ -82,10 +105,10 @@ export function MediaPreviewModal({
         >
           <div
             ref={imageStageRef}
-            className="ms-image-viewer__stage"
+            className={`ms-image-viewer__stage${isPdf ? " ms-image-viewer__stage--pdf" : ""}`}
             role="group"
             tabIndex={0}
-            aria-label="Image viewer. Press Enter or Space to show or hide controls."
+            aria-label={`${isPdf ? "PDF" : "Image"} viewer. Press Enter or Space to show or hide controls.`}
             aria-expanded={imageControlsVisible}
             onClick={toggleControls}
             onKeyDown={(event) => {
@@ -95,13 +118,9 @@ export function MediaPreviewModal({
               }
             }}
           >
-            <AuthenticatedImage
-              className="ms-image-viewer__image"
-              src={imagePreviewUrl}
-              alt={attachment.original_name}
-              attachment={attachment}
-              currentUserId={currentUserId}
-            />
+            {isImage ? <AuthenticatedImage className="ms-image-viewer__image" src={imagePreviewUrl} alt={attachment.original_name} attachment={attachment} currentUserId={currentUserId} /> : null}
+            {isPdf && pdfBlob ? <PdfDocumentPreview source={pdfBlob} title={attachment.original_name} /> : null}
+            {isPdf && !pdfBlob ? <div className="ms-image-viewer__pdf-state" role="status">{pdfError || "Preparing PDF…"}</div> : null}
             <header className="ms-image-viewer__overlay" onClick={stopOverlayClick}>
               <div className="ms-image-viewer__identity">
                 <strong id={titleId}>{attachment.original_name}</strong>
@@ -109,12 +128,12 @@ export function MediaPreviewModal({
               </div>
               <div className="ms-image-viewer__actions">
                 {onPrevious ? (
-                  <button type="button" className="ms-image-viewer__button" onClick={onPrevious} aria-label="Previous image" title="Previous image">
+                  <button type="button" className="ms-image-viewer__button" onClick={onPrevious} aria-label="Previous attachment" title="Previous attachment">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
                   </button>
                 ) : null}
                 {onNext ? (
-                  <button type="button" className="ms-image-viewer__button" onClick={onNext} aria-label="Next image" title="Next image">
+                  <button type="button" className="ms-image-viewer__button" onClick={onNext} aria-label="Next attachment" title="Next attachment">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
                   </button>
                 ) : null}
@@ -128,10 +147,10 @@ export function MediaPreviewModal({
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 7 5 5-5 5" /><path d="M4 18c0-4 3-6 8-6h8" /></svg>
                   </button>
                 ) : null}
-                <button type="button" className="ms-image-viewer__button" onClick={() => { void downloadAttachmentForUser(attachment, currentUserId); }} aria-label="Download image" title="Download image">
+                <button type="button" className="ms-image-viewer__button" onClick={() => { void downloadAttachmentForUser(attachment, currentUserId); }} aria-label={`Download ${isPdf ? "PDF" : "image"}`} title="Download">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>
                 </button>
-                <button ref={closeRef} type="button" className="ms-image-viewer__button" onClick={onClose} aria-label="Close image viewer" title="Close">
+                <button ref={closeRef} type="button" className="ms-image-viewer__button" onClick={onClose} aria-label={`Close ${isPdf ? "PDF" : "image"} viewer`} title="Close">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6 18 18M18 6 6 18" /></svg>
                 </button>
               </div>
@@ -170,7 +189,6 @@ export function MediaPreviewModal({
         </header>
         {isVideo ? <AuthenticatedVideo className="ms-media-preview__surface" src={videoPlaybackUrl} posterSrc={videoPosterUrl} attachment={attachment} currentUserId={currentUserId} /> : null}
         {isAudio ? <AudioMessagePlayer src={getAttachmentPlaybackUrl(attachment) || imagePreviewUrl} label={attachment.original_name} attachment={attachment} currentUserId={currentUserId} /> : null}
-        {isPdf ? <AuthenticatedPdf className="ms-media-preview__surface ms-media-preview__pdf" src={videoPlaybackUrl} title={attachment.original_name} attachment={attachment} currentUserId={currentUserId} /> : null}
         {!isImage && !isVideo && !isAudio && !isPdf ? (
           <div className="ms-media-preview__unsupported">
             <p className="ms-muted">Preview is not available for this file type.</p>

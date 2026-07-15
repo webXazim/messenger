@@ -113,6 +113,31 @@
   -webkit-user-drag: none;
 }
 
+.ms-image-viewer--pdf,
+.ms-image-viewer__stage--pdf {
+  background: var(--ms-color-surface-subtle);
+}
+
+.ms-image-viewer__stage--pdf {
+  display: block;
+}
+
+.ms-image-viewer__stage--pdf .ms-pdf-document-preview {
+  background: var(--ms-color-surface-subtle);
+}
+
+.ms-image-viewer__pdf-state {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-sm);
+  font-weight: 700;
+  text-align: center;
+}
+
 .ms-image-viewer__stage > .ms-auth-media-shell,
 .ms-image-viewer__stage > .ms-media-fallback {
   width: 100%;

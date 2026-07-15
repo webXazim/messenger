@@ -99,7 +99,7 @@ export function UploadQueue({
                   }}
                 />
               ) : null}
-              {isPdf ? <PdfDocumentPreview file={upload.file} title={upload.fileName} /> : null}
+              {isPdf ? <PdfDocumentPreview source={upload.file} title={upload.fileName} /> : null}
               {(!upload.previewUrl && !isPdf) || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
             </div>
             <div className="ms-upload-card__copy">

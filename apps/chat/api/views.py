@@ -726,6 +726,10 @@ class MessageListCreateView(generics.ListCreateAPIView):
         output["was_deduplicated"] = bool(getattr(message, "_deduplicated_send", False))
         if not output["was_deduplicated"]:
             _broadcast_to_conversation(str(conversation.id), "message.created", output)
+            locked_reply_target = getattr(message, "_edit_locked_reply_target", None)
+            if locked_reply_target is not None:
+                reply_target_output = MessageSerializer(locked_reply_target, context={"request": request}).data
+                _broadcast_to_conversation(str(conversation.id), "message.updated", reply_target_output)
             _broadcast_conversation_update(str(conversation.id), request=request)
         return Response(output, status=status.HTTP_201_CREATED if not output["was_deduplicated"] else status.HTTP_200_OK)
 
@@ -851,6 +855,10 @@ class MessageForwardView(views.APIView):
         message = forward_message(request.user, source_message, target_conversation, serializer.validated_data.get("client_temp_id", ""))
         output = MessageSerializer(message, context={"request": request}).data
         _broadcast_to_conversation(str(target_conversation.id), "message.created", output)
+        locked_source = getattr(message, "_edit_locked_source", None)
+        if locked_source is not None:
+            source_output = MessageSerializer(locked_source, context={"request": request}).data
+            _broadcast_to_conversation(str(locked_source.conversation_id), "message.updated", source_output)
         _broadcast_conversation_update(str(target_conversation.id), request=request)
         return Response(output, status=status.HTTP_201_CREATED)
 
@@ -1713,7 +1721,7 @@ class ReactionCreateDeleteView(views.APIView):
         message = self.get_message(request, message_id)
         serializer = ReactionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        add_reaction(request.user, message, serializer.validated_data["emoji"])
+        message = add_reaction(request.user, message, serializer.validated_data["emoji"])
         payload = MessageSerializer(message, context={"request": request}).data
         _broadcast_to_conversation(str(message.conversation_id), "message.reaction_updated", payload)
         return Response(payload)

@@ -48,7 +48,7 @@ function PdfPage({ document, pageNumber, availableWidth }: { document: PDFDocume
   return <canvas ref={canvasRef} className="ms-pdf-document-preview__page" style={{ aspectRatio: `1 / ${ratio}` }} aria-label={`Page ${pageNumber}`} />;
 }
 
-export function PdfDocumentPreview({ file, title }: { file: File; title: string }) {
+export function PdfDocumentPreview({ source, title }: { source: Blob; title: string }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [availableWidth, setAvailableWidth] = useState(0);
@@ -70,7 +70,7 @@ export function PdfDocumentPreview({ file, title }: { file: File; title: string 
     setDocument(null);
     setError("");
 
-    void Promise.all([loadPdfRuntime(), file.arrayBuffer()]).then(async ([{ getDocument }, bytes]) => {
+    void Promise.all([loadPdfRuntime(), source.arrayBuffer()]).then(async ([{ getDocument }, bytes]) => {
       const loadingTask = getDocument({ data: new Uint8Array(bytes) });
       destroy = () => loadingTask.destroy();
       const loadedDocument = await loadingTask.promise;
@@ -87,7 +87,7 @@ export function PdfDocumentPreview({ file, title }: { file: File; title: string 
       cancelled = true;
       if (destroy) void destroy();
     };
-  }, [file]);
+  }, [source]);
 
   return (
     <div ref={viewportRef} className="ms-pdf-document-preview" role="document" aria-label={`Preview ${title}`}>

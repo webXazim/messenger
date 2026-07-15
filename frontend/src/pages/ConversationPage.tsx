@@ -645,7 +645,17 @@ export function ConversationPage() {
 
       if (payload.event === "message.created" || payload.event === "message.updated") {
         const normalized = normalizeMessage(data);
-        queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => upsertMessagePages(current, normalized));
+        queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => {
+          const next = upsertMessagePages(current, normalized);
+          const replyTargetId = normalized.reply_preview?.id;
+          return replyTargetId
+            ? mapMessagePages(next, (message) => message.id === replyTargetId, (message) => ({
+                ...message,
+                can_edit: false,
+                edit_locked_reason: "This message can no longer be edited because it has replies.",
+              }))
+            : next;
+        });
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         return;
       }
@@ -655,7 +665,13 @@ export function ConversationPage() {
         queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => mapMessagePages(
           current,
           (message) => message.id === normalized.id,
-          (message) => ({ ...message, reactions: normalized.reactions, reaction_summary: normalized.reaction_summary }),
+          (message) => ({
+            ...message,
+            reactions: normalized.reactions,
+            reaction_summary: normalized.reaction_summary,
+            can_edit: normalized.can_edit,
+            edit_locked_reason: normalized.edit_locked_reason,
+          }),
         ));
         return;
       }
@@ -987,7 +1003,13 @@ export function ConversationPage() {
               },
               created_at: new Date().toISOString(),
             }];
-        return { ...item, reaction_summary: reactionSummary, reactions };
+        return {
+          ...item,
+          reaction_summary: reactionSummary,
+          reactions,
+          can_edit: reacted ? item.can_edit : false,
+          edit_locked_reason: reacted ? item.edit_locked_reason : "This message can no longer be edited because someone reacted to it.",
+        };
       }),
     );
 
@@ -1000,7 +1022,14 @@ export function ConversationPage() {
         (current) => mapMessagePages(
           current,
           (item) => item.id === updated.id,
-          (item) => ({ ...item, reactions: updated.reactions, reaction_summary: updated.reaction_summary }),
+          (item) => ({
+            ...item,
+            reactions: updated.reactions,
+            reaction_summary: updated.reaction_summary,
+            can_edit: updated.can_edit,
+            edit_locked_reason: updated.edit_locked_reason,
+            edit_deadline: updated.edit_deadline,
+          }),
         ),
       );
     } catch (error) {

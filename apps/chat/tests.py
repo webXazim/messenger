@@ -1147,6 +1147,13 @@ class ChatApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["text"], "forward me")
         self.assertEqual(response.data["forwarded_from"], message["id"])
+        edit_response = self.client.patch(
+            reverse("message-manage", kwargs={"message_id": message["id"]}),
+            {"text": "changed after forwarding"},
+            format="json",
+        )
+        self.assertEqual(edit_response.status_code, 400)
+        self.assertEqual(edit_response.data["errors"]["code"], "message_was_forwarded")
 
     def test_encrypted_message_forwarding_requires_client_reencryption(self):
         direct = self.create_direct_conversation()
@@ -1379,10 +1386,67 @@ class ChatApiTests(TestCase):
     def test_message_edit_history(self):
         conversation = self.create_direct_conversation()
         message = self.client.post(reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}), {"text": "draft"}, format="json").data
+        self.assertTrue(message["can_edit"])
+        self.assertTrue(message["edit_deadline"])
         response = self.client.patch(reverse("message-manage", kwargs={"message_id": message["id"]}), {"text": "final"}, format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["is_edited"])
         self.assertTrue(MessageEditHistory.objects.filter(message_id=message["id"], previous_text="draft", new_text="final").exists())
+
+    def test_message_edit_is_locked_after_window_expires(self):
+        conversation = self.create_direct_conversation()
+        message = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "too old to change"},
+            format="json",
+        ).data
+        Message.objects.filter(id=message["id"]).update(created_at=timezone.now() - timedelta(minutes=16))
+
+        response = self.client.patch(reverse("message-manage", kwargs={"message_id": message["id"]}), {"text": "changed"}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"]["code"], "edit_window_expired")
+        self.assertEqual(Message.objects.get(id=message["id"]).text, "too old to change")
+
+    def test_message_edit_is_locked_after_reaction(self):
+        conversation = self.create_direct_conversation()
+        message = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "engaged message"},
+            format="json",
+        ).data
+        self.client.force_authenticate(self.other)
+        self.client.post(reverse("message-reactions", kwargs={"message_id": message["id"]}), {"emoji": "👍"}, format="json")
+        self.client.delete(reverse("message-reactions", kwargs={"message_id": message["id"]}), {"emoji": "👍"}, format="json")
+        self.client.force_authenticate(self.user)
+
+        response = self.client.patch(reverse("message-manage", kwargs={"message_id": message["id"]}), {"text": "changed"}, format="json")
+        detail = self.client.get(reverse("message-detail", kwargs={"pk": message["id"]}))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"]["code"], "message_has_reactions")
+        self.assertFalse(detail.data["can_edit"])
+        self.assertIn("reacted", detail.data["edit_locked_reason"])
+
+    def test_message_edit_is_locked_after_reply(self):
+        conversation = self.create_direct_conversation()
+        message = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "reply target"},
+            format="json",
+        ).data
+        self.client.force_authenticate(self.other)
+        self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "a reply", "reply_to_id": message["id"]},
+            format="json",
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.patch(reverse("message-manage", kwargs={"message_id": message["id"]}), {"text": "changed"}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["errors"]["code"], "message_has_replies")
 
     def test_message_edit_history_endpoint_returns_revisions(self):
         conversation = self.create_direct_conversation()

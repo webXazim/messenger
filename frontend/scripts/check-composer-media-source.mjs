@@ -13,6 +13,7 @@ const conversation = read("src/pages/ConversationPage.tsx");
 const chatApi = read("src/api/chat.ts");
 const media = read("src/components/AuthenticatedMedia.tsx");
 const mediaMessage = read("src/components/messages/MediaMessage.tsx");
+const messageBubble = read("src/components/MessageBubble.tsx");
 const attachmentMessage = read("src/components/messages/AttachmentMessage.tsx");
 const mediaPreviewCache = read("src/lib/mediaPreviewCache.ts");
 const mediaModal = read("src/components/MediaPreviewModal.tsx");
@@ -20,6 +21,8 @@ const voice = read("src/components/VoiceNoteRecorder.tsx");
 const audioPlayer = read("src/components/AudioMessagePlayer.tsx");
 const auth = read("src/contexts/AuthContext.tsx");
 const views = read("../apps/chat/api/views.py");
+const conversationStyles = read("src/styles/pages/conversation.css");
+const styleIndex = read("src/styles/index.css");
 const services = read("../apps/chat/services.py");
 
 for (const required of [
@@ -72,11 +75,16 @@ assert.ok(mediaMessage.includes("AuthenticatedAttachmentPreview"), "Video poster
 assert.ok(mediaMessage.includes("useState(!thumbnailSrc)"), "Images without thumbnails wait indefinitely instead of loading their full source.");
 assert.ok(mediaMessage.includes("has-playing-video"), "Video metadata overlays do not react to active playback.");
 assert.ok(mediaMessage.includes("currentUserId={currentUserId} autoPlay"), "The poster play action does not start video playback directly.");
+assert.ok(messageBubble.includes("has-attachment-caption"), "Attachment captions are not styled as part of their attachment message.");
+assert.ok(messageBubble.indexOf("<AttachmentMessage") < messageBubble.lastIndexOf("{hasCopySurface ?"), "File captions still render above their attachments.");
 assert.equal(mediaMessage.includes("ms-message-media__actions"), false, "Inline media still renders duplicate download or expand controls.");
 assert.ok(mediaPreviewCache.includes("loadPdfRuntime"), "PDF previews are not rendered privately in the browser.");
-assert.ok(attachmentMessage.includes("ms-pdf-message__preview"), "PDF attachments do not expose their first-page preview inline.");
-assert.ok(mediaModal.includes("ms-image-viewer__stage") && mediaModal.includes('aria-label="Download image"'), "The fullscreen image viewer or its image-only download action is missing.");
+assert.equal(attachmentMessage.includes("ms-pdf-message__preview"), false, "PDF cards still embed an inline document preview.");
+assert.ok(attachmentMessage.includes("ms-pdf-message__actions") && attachmentMessage.includes("AttachmentDownloadButton"), "PDF cards do not provide separate view and download actions.");
+assert.ok(mediaModal.includes("ms-image-viewer__stage") && mediaModal.includes("<PdfDocumentPreview"), "The fullscreen image/PDF viewer is missing.");
 assert.ok(mediaModal.includes("setImageControlsVisible((visible) => !visible)"), "Fullscreen image controls cannot be toggled from the image canvas.");
+assert.ok(conversationStyles.includes(":has(.ms-message-row.is-selected)"), "Open reaction panels are not elevated above neighboring messages.");
+assert.ok(styleIndex.includes("foundation/scrollbars.css"), "The shared scrollbar theme is not loaded globally.");
 assert.ok(views.includes("StreamingHttpResponse"), "Media byte-range responses are missing.");
 assert.ok(views.includes('status=206'), "Media byte-range requests do not return partial content.");
 assert.ok(views.includes('status=416'), "Invalid media ranges are not rejected correctly.");

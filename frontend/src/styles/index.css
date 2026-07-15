@@ -4,6 +4,7 @@
 @import "./foundation/typography.css";
 @import "./foundation/primitives.css";
 @import "./foundation/layout.css";
+@import "./foundation/scrollbars.css";
 
 @import "./components/identity.css";
 @import "./components/navigation.css";

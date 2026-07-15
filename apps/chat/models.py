@@ -162,6 +162,8 @@ class Message(BaseUUIDModel):
     forwarded_from = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="forwards")
     is_edited = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)
+    edit_locked_at = models.DateTimeField(null=True, blank=True)
+    edit_locked_reason = models.CharField(max_length=32, blank=True)
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
     class DeliveryStatus(models.TextChoices):

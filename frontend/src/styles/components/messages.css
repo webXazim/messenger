@@ -814,46 +814,36 @@ button.ms-message-reply:hover {
 }
 
 .ms-pdf-message {
-  width: min(16rem, 100%);
+  width: min(22rem, 100%);
   min-width: 0;
   display: grid;
-  padding: 0;
-  overflow: hidden;
+  grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5625rem;
   border: 1px solid var(--ms-color-line);
   border-radius: 0.92rem;
   background: var(--ms-color-surface);
   color: var(--ms-color-ink);
-  text-align: left;
 }
 
-.ms-pdf-message__preview {
-  width: 100%;
-  aspect-ratio: 1 / 1.28;
-  display: block;
-  overflow: hidden;
-  background: #ececec;
-}
-
-.ms-pdf-message__preview img,
-.ms-pdf-message__preview .ms-auth-media-shell,
-.ms-pdf-message__preview iframe {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: top center;
-}
-
-.ms-pdf-message__preview iframe {
-  border: 0;
-  pointer-events: none;
+.ms-pdf-message__type {
+  width: 2.75rem;
+  height: 2.75rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.6875rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink-muted);
+  font-size: 0.625rem;
+  font-weight: 850;
+  letter-spacing: 0.025em;
 }
 
 .ms-pdf-message__copy {
   min-width: 0;
   display: grid;
   gap: 0.125rem;
-  padding: 0.625rem 0.7rem;
 }
 
 .ms-pdf-message__copy strong,
@@ -861,6 +851,39 @@ button.ms-message-reply:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ms-pdf-message__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.ms-pdf-message__action {
+  width: 2.125rem;
+  height: 2.125rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0.625rem;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-pdf-message__action:hover,
+.ms-pdf-message__action:focus-visible {
+  background: var(--ms-color-surface-strong);
+}
+
+.ms-pdf-message__action svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .ms-pdf-message__copy strong {
@@ -1657,4 +1680,49 @@ button.ms-message-reply:hover {
 
 .ms-message-row:is(.is-group-start, .is-group-middle, .is-group-end) .ms-message-media__item {
   border-radius: inherit;
+}
+
+/* Attachment captions belong to the attachment message, not a second bubble. */
+.ms-message-row--incoming {
+  --ms-caption-bottom-left: 0.34rem;
+  --ms-caption-bottom-right: 1rem;
+}
+
+.ms-message-row--own {
+  --ms-caption-bottom-left: 1rem;
+  --ms-caption-bottom-right: 0.34rem;
+}
+
+.ms-message-row--incoming:is(.is-group-start, .is-group-middle) {
+  --ms-caption-bottom-left: var(--ms-group-join);
+  --ms-caption-bottom-right: var(--ms-group-round);
+}
+
+.ms-message-row--incoming.is-group-end,
+.ms-message-row--own.is-group-end {
+  --ms-caption-bottom-left: var(--ms-group-round);
+  --ms-caption-bottom-right: var(--ms-group-round);
+}
+
+.ms-message-row--own:is(.is-group-start, .is-group-middle) {
+  --ms-caption-bottom-left: var(--ms-group-round);
+  --ms-caption-bottom-right: var(--ms-group-join);
+}
+
+.ms-message-card.has-attachment-caption {
+  gap: 0.125rem;
+}
+
+.ms-message-card.has-attachment-caption > .ms-message-copy {
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
+  border-radius: 0.3rem 0.3rem var(--ms-caption-bottom-right) var(--ms-caption-bottom-left);
+}
+
+.ms-message-card.has-attachment-caption
+  > :is(.ms-message-media, .ms-voice-message, .ms-voice-message-fallback, .ms-call-message),
+.ms-message-card.has-attachment-caption > .ms-file-message-list > :last-child {
+  border-bottom-right-radius: 0.3rem;
+  border-bottom-left-radius: 0.3rem;
 }

@@ -36,7 +36,7 @@ from apps.chat.models import (
     UserDevice,
 )
 from apps.chat.services import conversation_has_e2ee_enabled_participants, create_media_access_payload, get_calling_config, get_presence_snapshot, is_user_online
-from apps.chat.services import group_route_name_is_available, sanitize_chat_text
+from apps.chat.services import get_message_edit_policy, group_route_name_is_available, sanitize_chat_text
 from apps.chat.services import MEDIA_THUMBNAIL_MAX_BYTES, public_media_metadata, sanitize_media_metadata
 
 User = get_user_model()
@@ -719,6 +719,9 @@ class MessageSerializer(serializers.ModelSerializer):
     encryption = serializers.SerializerMethodField()
     reply_preview = MessageReplyPreviewSerializer(source="reply_to", read_only=True)
     reply_to_id = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    can_edit = serializers.SerializerMethodField()
+    edit_locked_reason = serializers.SerializerMethodField()
+    edit_deadline = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -753,6 +756,9 @@ class MessageSerializer(serializers.ModelSerializer):
             "is_encrypted",
             "encryption",
             "reply_preview",
+            "can_edit",
+            "edit_locked_reason",
+            "edit_deadline",
             "created_at",
             "updated_at",
         )
@@ -779,6 +785,9 @@ class MessageSerializer(serializers.ModelSerializer):
             "is_encrypted",
             "encryption",
             "reply_preview",
+            "can_edit",
+            "edit_locked_reason",
+            "edit_deadline",
             "created_at",
             "updated_at",
         )
@@ -793,6 +802,22 @@ class MessageSerializer(serializers.ModelSerializer):
             "waveform": metadata.get("waveform", []),
             "transcript_available": bool(getattr(obj, "transcript", None) and getattr(obj.transcript, "text", "")),
         }
+
+    def _edit_policy(self, obj):
+        cache = self.context.setdefault("_message_edit_policy", {})
+        if obj.pk not in cache:
+            request = self.context.get("request")
+            cache[obj.pk] = get_message_edit_policy(obj, getattr(request, "user", None))
+        return cache[obj.pk]
+
+    def get_can_edit(self, obj) -> bool:
+        return bool(self._edit_policy(obj)["can_edit"])
+
+    def get_edit_locked_reason(self, obj) -> str:
+        return self._edit_policy(obj)["reason"]
+
+    def get_edit_deadline(self, obj) -> str:
+        return self._edit_policy(obj)["deadline"].isoformat()
 
     def get_forwarded_from(self, obj) -> str | None:
         return str(obj.forwarded_from_id) if obj.forwarded_from_id else None

@@ -78,6 +78,7 @@ ACTIVE_CALL_STATUSES = (CallSession.Status.INITIATED, CallSession.Status.RINGING
 AUTO_HIDE_REPORT_THRESHOLD = int(getattr(settings, "AUTO_HIDE_REPORT_THRESHOLD", 3) or 3)
 MESSAGE_DUPLICATE_WINDOW_SECONDS = int(getattr(settings, "MESSAGE_DUPLICATE_WINDOW_SECONDS", 120) or 120)
 MESSAGE_DUPLICATE_THRESHOLD = int(getattr(settings, "MESSAGE_DUPLICATE_THRESHOLD", 3) or 3)
+MESSAGE_EDIT_WINDOW_SECONDS = max(0, int(getattr(settings, "MESSAGE_EDIT_WINDOW_SECONDS", 15 * 60) or 0))
 MESSAGE_BURST_WINDOW_SECONDS = int(getattr(settings, "MESSAGE_BURST_WINDOW_SECONDS", 30) or 30)
 MESSAGE_BURST_THRESHOLD = int(getattr(settings, "MESSAGE_BURST_THRESHOLD", 20) or 20)
 MESSAGE_MAX_LINKS = int(getattr(settings, "MESSAGE_MAX_LINKS", 5) or 5)
@@ -2465,7 +2466,7 @@ def send_message(
 
     reply_to = None
     if reply_to_id:
-        reply_to = Message.objects.filter(id=reply_to_id, conversation=conversation).first()
+        reply_to = Message.objects.select_for_update().filter(id=reply_to_id, conversation=conversation).first()
         if not reply_to:
             raise ValidationError({"reply_to_id": "Reply target not found in this conversation."})
 
@@ -2537,6 +2538,9 @@ def send_message(
         metadata=metadata,
         delivery_status=Message.DeliveryStatus.SENT,
     )
+    if reply_to is not None:
+        _lock_message_editing(reply_to, "message_has_replies")
+        message._edit_locked_reply_target = reply_to
 
     attached_any = False
     if uploads:
@@ -2614,6 +2618,7 @@ def forward_message(actor, source_message, target_conversation, client_temp_id="
     if existing_message is not None:
         existing_message._deduplicated_send = True
         return existing_message
+    source_message = Message.objects.select_for_update().select_related("conversation", "sender").get(pk=source_message.pk)
     if source_message.is_deleted:
         raise ValidationError({"message": "Deleted messages cannot be forwarded."})
     if (source_message.metadata or {}).get("encrypted"):
@@ -2631,6 +2636,8 @@ def forward_message(actor, source_message, target_conversation, client_temp_id="
         forwarded_from=source_message,
         client_temp_id=client_temp_id,
     )
+    _lock_message_editing(source_message, "message_was_forwarded")
+    forwarded._edit_locked_source = source_message
     _clone_message_attachments(source_message, forwarded)
     if forwarded.attachments.exists() and not forwarded.text and forwarded.type == Message.MessageType.TEXT:
         forwarded.type = Message.MessageType.FILE
@@ -2643,12 +2650,65 @@ def forward_message(actor, source_message, target_conversation, client_temp_id="
     return forwarded
 
 
+EDIT_LOCK_REASONS = {
+    "message_has_reactions": "This message can no longer be edited because someone reacted to it.",
+    "message_has_replies": "This message can no longer be edited because it has replies.",
+    "message_was_forwarded": "This message can no longer be edited because it was forwarded.",
+}
+
+
+def _lock_message_editing(message, reason):
+    if message.edit_locked_at:
+        return message
+    locked_at = timezone.now()
+    updated = Message.objects.filter(pk=message.pk, edit_locked_at__isnull=True).update(
+        edit_locked_at=locked_at,
+        edit_locked_reason=reason,
+    )
+    if updated:
+        message.edit_locked_at = locked_at
+        message.edit_locked_reason = reason
+    return message
+
+
+def get_message_edit_policy(message, actor=None, *, now=None):
+    """Return the authoritative edit decision used by both the API and UI."""
+    deadline = message.created_at + timedelta(seconds=MESSAGE_EDIT_WINDOW_SECONDS)
+    result = {"can_edit": False, "code": "not_editable", "reason": "This message cannot be edited.", "deadline": deadline}
+    if actor is None or message.sender_id != getattr(actor, "id", None):
+        result.update(code="not_owner", reason="You can edit only your own messages.")
+        return result
+    if message.is_deleted:
+        result.update(code="deleted", reason="Deleted messages cannot be edited.")
+        return result
+    if message.delivery_status == Message.DeliveryStatus.FAILED:
+        result.update(code="failed", reason="Failed messages cannot be edited. Retry or delete the message instead.")
+        return result
+    editable_types = {Message.MessageType.TEXT, Message.MessageType.IMAGE, Message.MessageType.VIDEO, Message.MessageType.FILE}
+    if message.type not in editable_types or (not message.text and not (message.metadata or {}).get("encrypted")):
+        result.update(code="unsupported_type", reason="Only text and attachment captions can be edited.")
+        return result
+    if message.edit_locked_at:
+        code = message.edit_locked_reason or "message_activity_locked"
+        result.update(code=code, reason=EDIT_LOCK_REASONS.get(code, "This message can no longer be edited because it has activity."))
+        return result
+    if MESSAGE_EDIT_WINDOW_SECONDS <= 0 or (now or timezone.now()) >= deadline:
+        result.update(code="edit_window_expired", reason="The editing window has expired.")
+        return result
+
+    result.update(can_edit=True, code="editable", reason="")
+    return result
+
+
 @transaction.atomic
 def edit_message(actor, message, text, entities=None, encryption=None):
-    if message.sender_id != actor.id:
-        raise PermissionDenied("You can edit only your own messages.")
-    if message.is_deleted:
-        raise ValidationError({"message": "Deleted messages cannot be edited."})
+    # Serialize edits against new activity so stale clients cannot bypass a lock.
+    message = Message.objects.select_for_update().select_related("conversation", "sender").get(pk=message.pk)
+    policy = get_message_edit_policy(message, actor)
+    if not policy["can_edit"]:
+        if policy["code"] == "not_owner":
+            raise PermissionDenied(policy["reason"])
+        raise ValidationError({"detail": policy["reason"], "code": policy["code"]})
 
     encryption_payload = _sanitize_encryption_payload(encryption) if encryption else None
     existing_metadata = dict(message.metadata or {})
@@ -2823,7 +2883,9 @@ def _is_valid_uuid(value):
 @transaction.atomic
 def add_reaction(actor, message, emoji):
     ensure_participant(message.conversation, actor)
+    message = Message.objects.select_for_update().select_related("conversation").get(pk=message.pk)
     MessageReaction.objects.update_or_create(message=message, user=actor, defaults={"emoji": emoji})
+    _lock_message_editing(message, "message_has_reactions")
     log_chat_event(ChatAuditLog.EventType.REACTION_ADDED, actor=actor, conversation=message.conversation, message=message, metadata={"emoji": emoji})
     return message
 

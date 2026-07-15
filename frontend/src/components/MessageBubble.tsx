@@ -204,7 +204,7 @@ export function MessageBubble({
         ) : null}
 
         <article
-          className="ms-message-card"
+          className={`ms-message-card ${hasCopySurface && hasRichContent ? "has-attachment-caption" : ""}`}
           onContextMenu={(event) => {
             event.preventDefault();
             setShowContextMenu(true);
@@ -256,37 +256,6 @@ export function MessageBubble({
             ) : null}
           />
 
-          {hasCopySurface ? (
-            <div className="ms-message-copy">
-              <ReplyPreview message={message} onJumpToReply={onJumpToReply} />
-              {hasText ? (
-                <MessageText
-                  text={message.text || ""}
-                  deleted={message.is_deleted}
-                  encrypted={isEncrypted}
-                  decryptionState={message.decryption_state}
-                  decryptionMessage={message.decryption_message}
-                  searchQuery={searchQuery}
-                />
-              ) : null}
-              {message.transcript?.text ? <div className="ms-message-transcript">{message.transcript.text}</div> : null}
-              {message.links?.length ? (
-                <div className="ms-message-links">
-                  {message.links.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}
-                </div>
-              ) : null}
-              <MessageMeta
-                message={message}
-                own={own}
-                receiptStatus={receiptStatus}
-                receiptSummary={receiptSummary}
-                onRetry={onRetry}
-                actionError={actionError}
-                actionPending={actionPending}
-              />
-            </div>
-          ) : null}
-
           {message.voice_note?.is_voice_note && !audio.length ? (
             <div className="ms-voice-message-fallback">
               <strong>{reactedWithHeart ? "Voice note · liked" : "Voice note"}</strong>
@@ -323,6 +292,37 @@ export function MessageBubble({
           })}
 
           <AttachmentMessage attachments={files} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} />
+
+          {hasCopySurface ? (
+            <div className="ms-message-copy">
+              <ReplyPreview message={message} onJumpToReply={onJumpToReply} />
+              {hasText ? (
+                <MessageText
+                  text={message.text || ""}
+                  deleted={message.is_deleted}
+                  encrypted={isEncrypted}
+                  decryptionState={message.decryption_state}
+                  decryptionMessage={message.decryption_message}
+                  searchQuery={searchQuery}
+                />
+              ) : null}
+              {message.transcript?.text ? <div className="ms-message-transcript">{message.transcript.text}</div> : null}
+              {message.links?.length ? (
+                <div className="ms-message-links">
+                  {message.links.map((link) => <a key={link} href={link} target="_blank" rel="noreferrer">{link}</a>)}
+                </div>
+              ) : null}
+              <MessageMeta
+                message={message}
+                own={own}
+                receiptStatus={receiptStatus}
+                receiptSummary={receiptSummary}
+                onRetry={onRetry}
+                actionError={actionError}
+                actionPending={actionPending}
+              />
+            </div>
+          ) : null}
 
           {!hasCopySurface && !audio.length && (!media.length || files.length > 0) ? (
             <MessageMeta
