@@ -277,6 +277,10 @@
   box-shadow: var(--ms-focus-ring);
 }
 
+.ms-field-stack .ms-success-text {
+  color: var(--ms-color-success);
+}
+
 .ms-group-modal {
   width: min(37.5rem, 100%);
 }

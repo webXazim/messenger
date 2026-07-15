@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { UserSearchResult } from "../types/auth";
-import { dedupeUsers, GROUP_TITLE_MAX_LENGTH, validateGroupDraft } from "../lib/groupUsability";
+import { dedupeUsers, GROUP_TITLE_MAX_LENGTH, GROUP_UNIQUE_NAME_MAX_LENGTH, groupUniqueNameError, normalizeGroupUniqueName, validateGroupDraft } from "../lib/groupUsability";
+import { chatApi } from "../api/chat";
 import { useModalAccessibility } from "../hooks/useModalAccessibility";
 import { UserAvatar } from "./UserAvatar";
 import { personPresenceText } from "../lib/personPresentation";
@@ -22,12 +23,16 @@ export function GroupChatModal({
   busy?: boolean;
   error?: string | null;
   onClose: () => void;
-  onCreate: (title: string, participantIds: string[]) => void;
+  onCreate: (title: string, uniqueName: string, participantIds: string[]) => void;
 }) {
   const [title, setTitle] = useState("");
+  const [uniqueName, setUniqueName] = useState("");
+  const [uniqueNameCustomized, setUniqueNameCustomized] = useState(false);
+  const [availability, setAvailability] = useState<"idle" | "checking" | "available" | "unavailable">("idle");
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [fieldErrors, setFieldErrors] = useState<{ title?: string; participants?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ title?: string; slug?: string; participants?: string }>({});
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const titleId = useId();
   const descriptionId = useId();
@@ -41,6 +46,32 @@ export function GroupChatModal({
   useEffect(() => {
     if (!busy) submittingRef.current = false;
   }, [busy, error]);
+
+  useEffect(() => {
+    const localError = groupUniqueNameError(uniqueName);
+    if (localError) {
+      setAvailability("idle");
+      setAvailabilityMessage(localError);
+      return;
+    }
+    const controller = new AbortController();
+    setAvailability("checking");
+    setAvailabilityMessage("Checking availability…");
+    const timer = window.setTimeout(() => {
+      void chatApi.checkGroupNameAvailability(uniqueName, controller.signal).then((result) => {
+        setAvailability(result.available ? "available" : "unavailable");
+        setAvailabilityMessage(result.available ? "Available" : result.message || "This unique name is unavailable.");
+      }).catch((reason: unknown) => {
+        if ((reason as { name?: string })?.name === "CanceledError") return;
+        setAvailability("unavailable");
+        setAvailabilityMessage("Could not check availability. Try again.");
+      });
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [uniqueName]);
 
   const uniqueFriends = useMemo(() => dedupeUsers(friends, currentUserId), [friends, currentUserId]);
 
@@ -57,11 +88,15 @@ export function GroupChatModal({
 
   const submit = () => {
     if (busy || submittingRef.current) return;
-    const draft = validateGroupDraft(title, selectedIds);
-    setFieldErrors(draft.errors);
-    if (!draft.valid) return;
+    const draft = validateGroupDraft(title, uniqueName, selectedIds);
+    const errors = { ...draft.errors };
+    if (availability !== "available") errors.slug = availabilityMessage || "Choose an available unique name.";
+    setFieldErrors(errors);
+    if (!draft.valid || availability !== "available") {
+      return;
+    }
     submittingRef.current = true;
-    onCreate(draft.title, draft.participantIds);
+    onCreate(draft.title, draft.uniqueName, draft.participantIds);
   };
 
   return (
@@ -88,7 +123,9 @@ export function GroupChatModal({
             value={title}
             maxLength={GROUP_TITLE_MAX_LENGTH}
             onChange={(event) => {
-              setTitle(event.target.value);
+              const nextTitle = event.target.value;
+              setTitle(nextTitle);
+              if (!uniqueNameCustomized) setUniqueName(normalizeGroupUniqueName(nextTitle));
               setFieldErrors((current) => ({ ...current, title: undefined }));
             }}
             placeholder="Project team"
@@ -97,6 +134,27 @@ export function GroupChatModal({
           />
           <small id="group-name-help" className="ms-muted">{title.length}/{GROUP_TITLE_MAX_LENGTH}</small>
           {fieldErrors.title ? <span id="group-name-error" className="ms-error-text">{fieldErrors.title}</span> : null}
+        </label>
+
+        <label className="ms-field-stack">
+          <span>Unique name</span>
+          <input
+            value={uniqueName}
+            maxLength={GROUP_UNIQUE_NAME_MAX_LENGTH}
+            onChange={(event) => {
+              setUniqueNameCustomized(true);
+              setUniqueName(normalizeGroupUniqueName(event.target.value));
+              setFieldErrors((current) => ({ ...current, slug: undefined }));
+            }}
+            placeholder="project-team"
+            autoCapitalize="none"
+            spellCheck={false}
+            aria-invalid={Boolean(fieldErrors.slug) || availability === "unavailable"}
+            aria-describedby="group-unique-name-status"
+          />
+          <small id="group-unique-name-status" className={availability === "available" ? "ms-success-text" : availability === "unavailable" || fieldErrors.slug ? "ms-error-text" : "ms-muted"}>
+            /chat/{uniqueName || "unique-name"} · {fieldErrors.slug || availabilityMessage || "Generated from the group name; you can customize it."}
+          </small>
         </label>
 
         <label className="ms-field-stack">

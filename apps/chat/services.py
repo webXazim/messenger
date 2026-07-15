@@ -27,6 +27,7 @@ from django.core.files.base import File
 from django.db import IntegrityError, connection, transaction
 from django.db.models import F, Q
 from django.utils import timezone
+from django.utils.text import slugify
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
 
@@ -58,6 +59,19 @@ from .models import (
 logger = logging.getLogger(__name__)
 User = get_user_model()
 MEDIA_TOKEN_SALT = "chat-media-access"
+GROUP_ROUTE_NAME_MAX_LENGTH = 80
+
+
+def normalize_group_route_name(value):
+    return slugify(str(value or ""), allow_unicode=True).replace("_", "-")[:GROUP_ROUTE_NAME_MAX_LENGTH]
+
+
+def group_route_name_is_available(value):
+    normalized = normalize_group_route_name(value)
+    if len(normalized) < 3:
+        return False, normalized, "Use at least three letters or numbers."
+    unavailable = Conversation.objects.filter(slug__iexact=normalized).exists() or User.objects.filter(username__iexact=normalized).exists()
+    return (not unavailable), normalized, "This unique name is already in use." if unavailable else ""
 CALL_SIGNAL_QUEUE_TTL_SECONDS = int(getattr(settings, "CALL_SIGNAL_QUEUE_TTL_SECONDS", 180) or 180)
 CALL_SIGNAL_DEDUP_TTL_SECONDS = int(getattr(settings, "CALL_SIGNAL_DEDUP_TTL_SECONDS", max(CALL_SIGNAL_QUEUE_TTL_SECONDS * 2, 300)) or max(CALL_SIGNAL_QUEUE_TTL_SECONDS * 2, 300))
 ACTIVE_CALL_STATUSES = (CallSession.Status.INITIATED, CallSession.Status.RINGING, CallSession.Status.ONGOING)
@@ -2176,7 +2190,7 @@ def create_direct_conversation(actor, other_user_id):
 
 
 @transaction.atomic
-def create_group_conversation(actor, title, participant_ids):
+def create_group_conversation(actor, title, participant_ids, route_name=""):
     title = sanitize_chat_text(title, max_length=255)
     if not title.strip():
         raise ValidationError({"title": "Group title is required."})
@@ -2193,7 +2207,17 @@ def create_group_conversation(actor, title, participant_ids):
         raise PermissionDenied(
             f"Group creation is blocked for one or more selected users: {', '.join(blocked_usernames[:5])}."
         )
-    conversation = Conversation.objects.create(type=Conversation.ConversationType.GROUP, title=title.strip(), created_by=actor)
+    requested_route_name = bool(str(route_name or "").strip())
+    base_slug = normalize_group_route_name(route_name or title) or f"group-{uuid4().hex[:8]}"
+    candidate = base_slug
+    suffix = 2
+    while Conversation.objects.filter(slug__iexact=candidate).exists() or User.objects.filter(username__iexact=candidate).exists():
+        if requested_route_name:
+            raise ValidationError({"slug": "This unique group name is already in use."})
+        tail = f"-{suffix}"
+        candidate = f"{base_slug[:GROUP_ROUTE_NAME_MAX_LENGTH - len(tail)]}{tail}"
+        suffix += 1
+    conversation = Conversation.objects.create(type=Conversation.ConversationType.GROUP, title=title.strip(), slug=candidate, created_by=actor)
     participants = [ConversationParticipant(conversation=conversation, user=actor, role=ConversationParticipant.Role.OWNER)]
     for user in users:
         if user.id == actor.id:

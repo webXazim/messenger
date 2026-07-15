@@ -189,6 +189,7 @@ export type Conversation = {
   id: string;
   type: "direct" | "group";
   title: string;
+  slug?: string | null;
   unread_count: number;
   e2ee_key_version?: number;
   e2ee_rekey_required?: boolean;

@@ -1,4 +1,5 @@
 import type { MessageAttachment } from "../types/chat";
+import { loadPdfRuntime } from "./pdfRuntime";
 
 const DB_NAME = "crescentsphere-private-media";
 const STORE_NAME = "previews";
@@ -239,11 +240,7 @@ async function videoPreview(source: Blob, maxEdge = PREVIEW_MAX_EDGE, quality = 
 }
 
 async function pdfPreview(source: Blob, maxEdge = PREVIEW_MAX_EDGE, quality = 0.78) {
-  const [{ getDocument, GlobalWorkerOptions }, workerModule] = await Promise.all([
-    import("pdfjs-dist"),
-    import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
-  ]);
-  GlobalWorkerOptions.workerSrc = workerModule.default;
+  const { getDocument } = await loadPdfRuntime();
   const loadingTask = getDocument({ data: new Uint8Array(await source.arrayBuffer()) });
   const pdfDocument = await loadingTask.promise;
   try {

@@ -20,6 +20,7 @@ class Conversation(BaseUUIDModel):
 
     type = models.CharField(max_length=20, choices=ConversationType.choices)
     title = models.CharField(max_length=255, blank=True)
+    slug = models.SlugField(max_length=120, unique=True, null=True, blank=True, allow_unicode=True)
     avatar = models.ImageField(upload_to="chat/conversation_avatars/", blank=True, null=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="created_conversations")
     is_active = models.BooleanField(default=True)

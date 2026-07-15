@@ -87,8 +87,8 @@ export function ConversationsPage() {
   }, [friendsQuery.data, user?.id]);
 
   const createGroupMutation = useMutation({
-    mutationFn: ({ title, participantIds }: { title: string; participantIds: string[] }) =>
-      chatApi.createGroupConversation(title, participantIds),
+    mutationFn: ({ title, uniqueName, participantIds }: { title: string; uniqueName: string; participantIds: string[] }) =>
+      chatApi.createGroupConversation(title, uniqueName, participantIds),
     onMutate: () => setGroupError(null),
     onSuccess: async (conversation) => {
       setShowGroupModal(false);
@@ -210,7 +210,7 @@ export function ConversationsPage() {
           busy={createGroupMutation.isPending}
           error={groupError}
           onClose={() => setShowGroupModal(false)}
-          onCreate={(title, participantIds) => createGroupMutation.mutate({ title, participantIds })}
+          onCreate={(title, uniqueName, participantIds) => createGroupMutation.mutate({ title, uniqueName, participantIds })}
         />
       ) : null}
     </div>

@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import {
   dedupeUsers,
   isMeaningfulGroupTitle,
+  normalizeGroupUniqueName,
   normalizeGroupTitle,
   validateGroupDraft,
 } from "../.contacts-groups-test-build/lib/groupUsability.js";
@@ -11,15 +12,17 @@ assert.equal(normalizeGroupTitle("  Product   team  "), "Product team");
 assert.equal(isMeaningfulGroupTitle("--"), false);
 assert.equal(isMeaningfulGroupTitle("A"), false);
 assert.equal(isMeaningfulGroupTitle("Ops 2"), true);
+assert.equal(normalizeGroupUniqueName(" Design__Team! "), "design-team");
 
-const invalid = validateGroupDraft("--", []);
+const invalid = validateGroupDraft("--", "x", []);
 assert.equal(invalid.valid, false);
 assert.ok(invalid.errors.title);
 assert.ok(invalid.errors.participants);
 
-const valid = validateGroupDraft("  Design   Team ", ["2", "2", "3"]);
+const valid = validateGroupDraft("  Design   Team ", "design-team", ["2", "2", "3"]);
 assert.equal(valid.valid, true);
 assert.equal(valid.title, "Design Team");
+assert.equal(valid.uniqueName, "design-team");
 assert.deepEqual(valid.participantIds, ["2", "3"]);
 
 const users = [

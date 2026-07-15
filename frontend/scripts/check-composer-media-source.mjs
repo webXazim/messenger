@@ -5,6 +5,8 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const composer = read("src/components/MessageComposer.tsx");
 const uploadQueue = read("src/components/composer/UploadQueue.tsx");
 const pdfDocumentPreview = read("src/components/composer/PdfDocumentPreview.tsx");
+const pdfRuntime = read("src/lib/pdfRuntime.ts");
+const pdfWorkerFactory = read("src/lib/pdfWorkerFactory.ts");
 const uploadPolicy = read("src/components/composer/uploadPolicy.ts");
 const drafts = read("src/lib/conversationDrafts.ts");
 const conversation = read("src/pages/ConversationPage.tsx");
@@ -31,8 +33,10 @@ for (const required of [
 }
 assert.ok(uploadQueue.includes("Uploading ${progress}%"), "Upload progress is not exposed to users.");
 assert.ok(uploadQueue.includes("<PdfDocumentPreview"), "PDF staging does not use the interactive document viewer.");
-assert.ok(pdfDocumentPreview.includes('import("pdfjs-dist")'), "The staged PDF viewer does not render documents in-app.");
+assert.ok(pdfDocumentPreview.includes("loadPdfRuntime"), "The staged PDF viewer does not render documents in-app.");
 assert.ok(pdfDocumentPreview.includes("document.numPages"), "The staged PDF viewer only exposes a thumbnail instead of all pages.");
+assert.ok(pdfRuntime.includes("pdfWorkerFactory"), "PDF previews do not load their deployment-safe worker factory.");
+assert.ok(pdfWorkerFactory.includes("?worker&inline"), "PDF previews still depend on a separately deployed .mjs worker asset.");
 assert.ok(uploadQueue.includes("Cancel upload"), "Active uploads cannot be cancelled clearly.");
 assert.ok(uploadPolicy.includes("max_upload_bytes"), "Composer does not use backend upload limits.");
 assert.ok(drafts.includes("messenger:draft:v1"), "Drafts are not scoped to account and conversation.");
@@ -69,7 +73,7 @@ assert.ok(mediaMessage.includes("useState(!thumbnailSrc)"), "Images without thum
 assert.ok(mediaMessage.includes("has-playing-video"), "Video metadata overlays do not react to active playback.");
 assert.ok(mediaMessage.includes("currentUserId={currentUserId} autoPlay"), "The poster play action does not start video playback directly.");
 assert.equal(mediaMessage.includes("ms-message-media__actions"), false, "Inline media still renders duplicate download or expand controls.");
-assert.ok(mediaPreviewCache.includes('import("pdfjs-dist")'), "PDF previews are not rendered privately in the browser.");
+assert.ok(mediaPreviewCache.includes("loadPdfRuntime"), "PDF previews are not rendered privately in the browser.");
 assert.ok(attachmentMessage.includes("ms-pdf-message__preview"), "PDF attachments do not expose their first-page preview inline.");
 assert.ok(mediaModal.includes("ms-image-viewer__stage") && mediaModal.includes('aria-label="Download image"'), "The fullscreen image viewer or its image-only download action is missing.");
 assert.ok(mediaModal.includes("setImageControlsVisible((visible) => !visible)"), "Fullscreen image controls cannot be toggled from the image canvas.");

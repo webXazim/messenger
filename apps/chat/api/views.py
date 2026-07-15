@@ -74,6 +74,7 @@ from apps.chat.services import (
     get_conversation_notification_setting,
     ensure_participant,
     get_notification_preference,
+    group_route_name_is_available,
     leave_conversation,
     list_message_reports,
     list_recent_calls_for_user,
@@ -426,7 +427,7 @@ class ConversationListCreateView(generics.ListCreateAPIView):
                 idempotency_key=str(request.headers.get("Idempotency-Key") or ""),
                 metadata={"participant_count": len(payload["participant_ids"])},
             )
-            conversation = create_group_conversation(request.user, payload.get("title", ""), payload["participant_ids"])
+            conversation = create_group_conversation(request.user, payload.get("title", ""), payload["participant_ids"], payload.get("slug", ""))
             status_code = status.HTTP_201_CREATED
         output = ConversationDetailSerializer(conversation, context={"request": request}).data
         return Response(output, status=status_code)
@@ -443,6 +444,14 @@ class ConversationSearchView(generics.ListAPIView):
         if not query:
             return user_conversations_qs(self.request.user, lightweight=True).none()
         return searchable_conversations_qs(self.request.user, query)
+
+
+class GroupRouteNameAvailabilityView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        available, normalized, message = group_route_name_is_available(request.query_params.get("name", ""))
+        return Response({"available": available, "normalized": normalized, "message": message})
 
 
 class ConversationDetailView(generics.RetrieveDestroyAPIView):
@@ -477,6 +486,28 @@ class DirectConversationByUsernameView(generics.RetrieveAPIView):
             participants__user__username__iexact=username,
         ).distinct()
         return get_object_or_404(queryset)
+
+
+class ConversationByRouteView(generics.RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ConversationDetailSerializer
+
+    def get_object(self):
+        route_key = str(self.kwargs.get("route_key") or "").lstrip("@").strip()
+        if not route_key:
+            raise Http404
+        queryset = user_conversations_qs(self.request.user)
+        group = queryset.filter(type=Conversation.ConversationType.GROUP, slug__iexact=route_key).first()
+        if group:
+            return group
+        if route_key.lower() == str(self.request.user.username or "").lower():
+            raise Http404
+        direct = queryset.filter(
+            type=Conversation.ConversationType.DIRECT,
+            participants__left_at__isnull=True,
+            participants__user__username__iexact=route_key,
+        ).distinct()
+        return get_object_or_404(direct)
 
 
 class ConversationDraftView(views.APIView):

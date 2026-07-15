@@ -36,7 +36,7 @@ from apps.chat.models import (
     UserDevice,
 )
 from apps.chat.services import conversation_has_e2ee_enabled_participants, create_media_access_payload, get_calling_config, get_presence_snapshot, is_user_online
-from apps.chat.services import sanitize_chat_text
+from apps.chat.services import group_route_name_is_available, sanitize_chat_text
 from apps.chat.services import MEDIA_THUMBNAIL_MAX_BYTES, public_media_metadata, sanitize_media_metadata
 
 User = get_user_model()
@@ -974,6 +974,7 @@ class ConversationListSerializer(serializers.ModelSerializer):
             "id",
             "type",
             "title",
+            "slug",
             "avatar",
             "e2ee_key_version",
             "e2ee_rekey_required",
@@ -1010,6 +1011,7 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
             "id",
             "type",
             "title",
+            "slug",
             "avatar",
             "created_by",
             "is_active",
@@ -1039,6 +1041,7 @@ class ConversationDetailSerializer(serializers.ModelSerializer):
 class ConversationCreateSerializer(serializers.Serializer):
     type = serializers.ChoiceField(choices=Conversation.ConversationType.choices)
     title = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    slug = serializers.CharField(required=False, allow_blank=True, max_length=80)
     participant_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
 
     def validate(self, attrs):
@@ -1056,6 +1059,12 @@ class ConversationCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"title": "Group title is required."})
             if len(title) < 2 or not any(character.isalnum() for character in title):
                 raise serializers.ValidationError({"title": "Use at least two letters or numbers in the group title."})
+            requested_route_name = str(attrs.get("slug") or "").strip()
+            if requested_route_name:
+                available, route_name, message = group_route_name_is_available(requested_route_name)
+                if not available:
+                    raise serializers.ValidationError({"slug": message})
+                attrs["slug"] = route_name
         return attrs
 
 

@@ -477,6 +477,7 @@ export function normalizeConversation(value: unknown): Conversation {
     id: firstString(item.id),
     type: firstString(item.type, item.conversation_type) === "group" ? "group" : "direct",
     title: firstString(item.type, item.conversation_type) === "group" ? buildConversationTitle(item, participants) : firstString(item.title, item.name),
+    slug: firstString(item.slug, item.route_name) || null,
     unread_count: firstNumber(item.unread_count, item.unread_messages) ?? 0,
     e2ee_key_version: firstNumber(item.e2ee_key_version) ?? undefined,
     e2ee_rekey_required: firstBoolean(item.e2ee_rekey_required),
@@ -762,13 +763,19 @@ export const chatApi = {
     });
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
-  async createGroupConversation(title: string, participantIds: string[]) {
+  async createGroupConversation(title: string, uniqueName: string, participantIds: string[]) {
     const response = await http.post("/chat/conversations/", {
       type: "group",
       title,
+      slug: uniqueName,
       participant_ids: participantIds.map((id) => (Number.isFinite(Number(id)) ? Number(id) : id)),
     });
     return normalizeConversation(unwrapData<unknown>(response.data));
+  },
+  async checkGroupNameAvailability(name: string, signal?: AbortSignal) {
+    const response = await http.get("/chat/conversations/group-name-availability/", { params: { name }, signal });
+    const payload = unwrapObject<{ available?: boolean; normalized?: string; message?: string }>(response.data, {});
+    return { available: Boolean(payload.available), normalized: String(payload.normalized || ""), message: String(payload.message || "") };
   },
   async getConversation(id: string) {
     const response = await http.get(`/chat/conversations/${id}/`);
@@ -776,6 +783,11 @@ export const chatApi = {
   },
   async getDirectConversationByUsername(username: string) {
     const response = await http.get(`/chat/conversations/by-username/${encodeURIComponent(username.replace(/^@/, ""))}/`);
+    return normalizeConversation(unwrapData<unknown>(response.data));
+  },
+  async getConversationByRoute(routeKey: string) {
+    const normalized = routeKey.replace(/^@/, "").trim();
+    const response = await http.get(`/chat/conversations/by-route/${encodeURIComponent(normalized)}/`);
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
   async deleteConversation(conversationId: string) {

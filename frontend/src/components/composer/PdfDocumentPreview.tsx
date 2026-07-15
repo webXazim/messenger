@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
+import { loadPdfRuntime } from "../../lib/pdfRuntime";
 
 function PdfPage({ document, pageNumber, availableWidth }: { document: PDFDocumentProxy; pageNumber: number; availableWidth: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -69,12 +70,7 @@ export function PdfDocumentPreview({ file, title }: { file: File; title: string 
     setDocument(null);
     setError("");
 
-    void Promise.all([
-      import("pdfjs-dist"),
-      import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
-      file.arrayBuffer(),
-    ]).then(async ([{ getDocument, GlobalWorkerOptions }, workerModule, bytes]) => {
-      GlobalWorkerOptions.workerSrc = workerModule.default;
+    void Promise.all([loadPdfRuntime(), file.arrayBuffer()]).then(async ([{ getDocument }, bytes]) => {
       const loadingTask = getDocument({ data: new Uint8Array(bytes) });
       destroy = () => loadingTask.destroy();
       const loadedDocument = await loadingTask.promise;

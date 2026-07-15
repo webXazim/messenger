@@ -7,6 +7,7 @@ import { GroupChatModal } from "../components/GroupChatModal";
 import { MessengerPageHeader } from "../components/pages/MessengerPageHeader";
 import { useAuth } from "../contexts/AuthContext";
 import { parseApiError } from "../lib/apiErrors";
+import { conversationPath } from "../lib/conversationRoute";
 
 function initials(value: string) {
   return value.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "G";
@@ -69,7 +70,7 @@ export function GroupsPage() {
   }, [friendsQuery.data, user?.id]);
 
   const createGroupMutation = useMutation({
-    mutationFn: ({ title, participantIds }: { title: string; participantIds: string[] }) => chatApi.createGroupConversation(title, participantIds),
+    mutationFn: ({ title, uniqueName, participantIds }: { title: string; uniqueName: string; participantIds: string[] }) => chatApi.createGroupConversation(title, uniqueName, participantIds),
     onMutate: () => setGroupError(null),
     onSuccess: async (conversation) => {
       queryClient.setQueryData(["conversations"], (current: unknown) => {
@@ -78,7 +79,7 @@ export function GroupsPage() {
       });
       setShowGroupModal(false);
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      navigate(`/chat/${conversation.id}`);
+      navigate(conversationPath(conversation, user));
     },
     onError: (error) => setGroupError(parseApiError(error, "Could not create this group.").message),
   });
@@ -136,7 +137,7 @@ export function GroupsPage() {
           const activeMembers = group.participants.filter((participant) => !participant.left_at && !participant.banned_at);
           const preview = messagePreview(group.last_message?.text);
           return (
-            <Link key={group.id} to={`/chat/${group.id}`} className={`ms-group-row ${group.unread_count > 0 ? "has-unread" : ""}`}>
+            <Link key={group.id} to={conversationPath(group, user)} className={`ms-group-row ${group.unread_count > 0 ? "has-unread" : ""}`}>
               <span className="ms-group-row__avatar" aria-hidden="true">{initials(title)}</span>
               <span className="ms-group-row__main">
                 <span className="ms-group-row__heading">
@@ -166,7 +167,7 @@ export function GroupsPage() {
           onClose={() => {
             if (!createGroupMutation.isPending) setShowGroupModal(false);
           }}
-          onCreate={(title, participantIds) => createGroupMutation.mutate({ title, participantIds })}
+          onCreate={(title, uniqueName, participantIds) => createGroupMutation.mutate({ title, uniqueName, participantIds })}
         />
       ) : null}
     </div>

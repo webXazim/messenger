@@ -41,7 +41,7 @@ import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
 import { patchCallCaches } from "../lib/realtimeCache";
-import { conversationPath, isUsernameConversationRoute } from "../lib/conversationRoute";
+import { conversationPath, isNamedConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
 import { createLocalAttachmentPreview, generateAndStoreLocalPreview, storeLocalPreview, transferLocalPreview } from "../lib/mediaPreviewCache";
 import type { UserSearchResult } from "../types/auth";
@@ -247,23 +247,24 @@ export function ConversationPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const usernameRoute = isUsernameConversationRoute(routeConversationKey);
+  const namedRoute = isNamedConversationRoute(routeConversationKey);
   const routeConversationQuery = useQuery({
     queryKey: ["conversation-route", routeConversationKey.toLowerCase()],
-    queryFn: () => chatApi.getDirectConversationByUsername(routeConversationKey.slice(1)),
-    enabled: usernameRoute,
+    queryFn: () => chatApi.getConversationByRoute(routeConversationKey),
+    enabled: namedRoute,
     initialData: () => {
-      if (!usernameRoute) return undefined;
-      const username = routeConversationKey.slice(1).toLowerCase();
+      if (!namedRoute) return undefined;
+      const routeName = routeConversationKey.replace(/^@/, "").toLowerCase();
       return (queryClient.getQueryData<Conversation[]>(["conversations"]) ?? []).find(
-        (conversation) => conversation.type === "direct"
-          && conversation.participants.some((participant) => participant.user.username?.toLowerCase() === username),
+        (conversation) => conversation.type === "group"
+          ? conversation.slug?.toLowerCase() === routeName
+          : conversation.participants.some((participant) => !isSameUserIdentity(participant.user, user) && participant.user.username?.toLowerCase() === routeName),
       );
     },
     staleTime: 5 * 60_000,
     retry: 1,
   });
-  const conversationId = usernameRoute ? routeConversationQuery.data?.id || "" : routeConversationKey;
+  const conversationId = namedRoute ? routeConversationQuery.data?.id || "" : routeConversationKey;
   const { socket, socketStatus } = useChatSocket();
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -371,7 +372,7 @@ export function ConversationPage() {
   });
   useEffect(() => {
     const conversation = conversationQuery.data || routeConversationQuery.data;
-    if (!conversation || conversation.type !== "direct") return;
+    if (!conversation) return;
     const canonicalPath = conversationPath(conversation, user);
     if (window.location.pathname !== canonicalPath) {
       queryClient.setQueryData(["conversation-route", canonicalPath.slice("/chat/".length).toLowerCase()], conversation);
@@ -1537,7 +1538,7 @@ export function ConversationPage() {
     "--chat-details-width": `${detailsWidth}px`,
   } as CSSProperties;
   const conversationError = routeConversationQuery.isError
-    ? getErrorMessage(routeConversationQuery.error, "This username does not have a conversation with you.")
+    ? getErrorMessage(routeConversationQuery.error, "This conversation link is unavailable.")
     : conversationQuery.isError ? getErrorMessage(conversationQuery.error, "Could not load this conversation.") : null;
   const messagesError = messagesQuery.isError ? getErrorMessage(messagesQuery.error, "Could not load messages.") : null;
   const blockingConversationError = conversationError && messages.length === 0 ? conversationError : null;
@@ -1655,7 +1656,7 @@ export function ConversationPage() {
               <strong>Chat could not load</strong>
               <span>{chatError}</span>
               <div className="button-row">
-                {blockingConversationError ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => void conversationQuery.refetch()}>Retry conversation</button> : null}
+                {blockingConversationError ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => void (namedRoute ? routeConversationQuery.refetch() : conversationQuery.refetch())}>Retry conversation</button> : null}
                 {messagesError ? <button type="button" className="ms-button ms-button--ghost ms-button--compact" onClick={() => void messagesQuery.refetch()}>Retry messages</button> : null}
               </div>
             </div>

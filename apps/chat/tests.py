@@ -245,6 +245,41 @@ class ChatApiTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(Conversation.objects.count(), 0)
 
+    def test_clean_route_resolves_direct_conversation_without_at_sign(self):
+        conversation = self.create_direct_conversation()
+
+        response = self.client.get(reverse("conversation-by-route", kwargs={"route_key": "other"}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.data["id"]), str(conversation["id"]))
+
+    def test_group_receives_unique_name_route(self):
+        first = self.create_group_conversation()
+        second = self.create_group_conversation()
+
+        self.assertEqual(first["slug"], "builders")
+        self.assertEqual(second["slug"], "builders-2")
+        response = self.client.get(reverse("conversation-by-route", kwargs={"route_key": first["slug"]}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(response.data["id"]), str(first["id"]))
+
+    def test_group_unique_name_availability_and_custom_name(self):
+        availability_url = reverse("group-name-availability")
+        available = self.client.get(availability_url, {"name": "Core Team"})
+        self.assertEqual(available.status_code, 200)
+        self.assertTrue(available.data["available"])
+        self.assertEqual(available.data["normalized"], "core-team")
+
+        created = self.client.post(
+            reverse("conversation-list-create"),
+            {"type": "group", "title": "Builders", "slug": "core-team", "participant_ids": [str(self.other.id)]},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["slug"], "core-team")
+        unavailable = self.client.get(availability_url, {"name": "core-team"})
+        self.assertFalse(unavailable.data["available"])
+
     def test_safe_requests_do_not_consume_global_write_throttle(self):
         cache.clear()
 
