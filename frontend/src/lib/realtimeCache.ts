@@ -28,12 +28,13 @@ export function upsertConversationList(current: Conversation[] | undefined, inco
 }
 
 export function patchConversationCaches(queryClient: QueryClient, incoming: Conversation) {
-  queryClient.setQueryData<Conversation[]>(["conversations"], (current) => upsertConversationList(current, incoming));
+  const reconciledIncoming = reconcileConversationPresence(queryClient, incoming);
+  queryClient.setQueryData<Conversation[]>(["conversations"], (current) => upsertConversationList(current, reconciledIncoming));
   queryClient.setQueryData<Conversation>(["conversation", incoming.id], (current) =>
-    current ? mergeConversationPreservingPresence(current, incoming) : incoming,
+    current ? mergeConversationPreservingPresence(current, reconciledIncoming) : reconciledIncoming,
   );
   queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, (current) =>
-    current?.id === incoming.id ? mergeConversationPreservingPresence(current, incoming) : current,
+    current?.id === incoming.id ? mergeConversationPreservingPresence(current, reconciledIncoming) : current,
   );
 }
 
@@ -106,13 +107,49 @@ type PresenceFriendRequest = {
 
 function preservePresence<T extends PresenceUser>(current: T | undefined, incoming: T): T {
   if (!current) return incoming;
+  const source = current.is_online ? current : incoming.is_online ? incoming : current;
   return {
     ...incoming,
-    ...(current.is_online !== undefined ? { is_online: current.is_online } : {}),
-    ...(current.active_devices !== undefined ? { active_devices: current.active_devices } : {}),
-    ...(current.last_seen_at !== undefined ? { last_seen_at: current.last_seen_at } : {}),
-    ...(current.presence_label !== undefined ? { presence_label: current.presence_label } : {}),
-    ...(current.presence_visibility !== undefined ? { presence_visibility: current.presence_visibility } : {}),
+    ...(source.is_online !== undefined ? { is_online: source.is_online } : {}),
+    ...(source.active_devices !== undefined ? { active_devices: source.active_devices } : {}),
+    ...(source.last_seen_at !== undefined ? { last_seen_at: source.last_seen_at } : {}),
+    ...(source.presence_label !== undefined ? { presence_label: source.presence_label } : {}),
+    ...(source.presence_visibility !== undefined ? { presence_visibility: source.presence_visibility } : {}),
+  };
+}
+
+function reconcileConversationPresence(queryClient: QueryClient, incoming: Conversation): Conversation {
+  const knownOnlineUsers = new Map<string, PresenceUser>();
+  const rememberOnline = (user: PresenceUser | undefined) => {
+    if (user?.is_online && user.presence_visibility !== "hidden") knownOnlineUsers.set(String(user.id), user);
+  };
+
+  queryClient.getQueriesData<PresenceFriendRequest[]>({ queryKey: ["friend-requests"] }).forEach(([, requests]) => {
+    requests?.forEach((request) => {
+      rememberOnline(request.from_user);
+      rememberOnline(request.to_user);
+    });
+  });
+  queryClient.getQueryData<Conversation[]>(["conversations"])?.forEach((conversation) => {
+    conversation.participants.forEach((participant) => rememberOnline(participant.user));
+  });
+
+  return {
+    ...incoming,
+    participants: incoming.participants.map((participant) => {
+      const known = knownOnlineUsers.get(String(participant.user.id));
+      return known ? {
+        ...participant,
+        user: {
+          ...participant.user,
+          is_online: true,
+          active_devices: Math.max(1, Number(known.active_devices || 0)),
+          last_seen_at: known.last_seen_at ?? participant.user.last_seen_at,
+          presence_label: "online",
+          presence_visibility: "public",
+        },
+      } : participant;
+    }),
   };
 }
 
