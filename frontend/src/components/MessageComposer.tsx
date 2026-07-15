@@ -162,7 +162,7 @@ export function MessageComposer({
 
   const buildPreviewUrl = (file: File) => {
     const mime = file.type.toLowerCase();
-    if (mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/")) {
+    if (mime.startsWith("image/") || mime.startsWith("video/") || mime.startsWith("audio/") || mime === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
       return URL.createObjectURL(file);
     }
     return undefined;

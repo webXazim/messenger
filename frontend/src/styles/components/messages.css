@@ -806,12 +806,18 @@ button.ms-message-reply:hover {
 }
 
 .ms-pdf-message__preview img,
-.ms-pdf-message__preview .ms-auth-media-shell {
+.ms-pdf-message__preview .ms-auth-media-shell,
+.ms-pdf-message__preview iframe {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
   object-position: top center;
+}
+
+.ms-pdf-message__preview iframe {
+  border: 0;
+  pointer-events: none;
 }
 
 .ms-pdf-message__copy {

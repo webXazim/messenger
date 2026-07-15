@@ -29,6 +29,7 @@ for (const required of [
   assert.ok(composer.includes(required), `Missing composer reliability behavior: ${required}`);
 }
 assert.ok(uploadQueue.includes("Uploading ${progress}%"), "Upload progress is not exposed to users.");
+assert.ok(uploadQueue.includes("#page=1&toolbar=0"), "PDF upload previews have no native first-page fallback.");
 assert.ok(uploadQueue.includes("Cancel upload"), "Active uploads cannot be cancelled clearly.");
 assert.ok(uploadPolicy.includes("max_upload_bytes"), "Composer does not use backend upload limits.");
 assert.ok(drafts.includes("messenger:draft:v1"), "Drafts are not scoped to account and conversation.");

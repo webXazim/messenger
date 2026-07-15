@@ -80,7 +80,14 @@ export function UploadQueue({
                 />
               ) : null}
               {isPdf && upload.thumbnailUrl ? <img src={upload.thumbnailUrl} alt={`First page of ${upload.fileName}`} /> : null}
-              {isPdf && !upload.thumbnailUrl ? <span className="ms-upload-card__pdf-pending">Preparing first page…</span> : null}
+              {isPdf && !upload.thumbnailUrl && upload.previewUrl ? (
+                <iframe
+                  src={`${upload.previewUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
+                  title={`First page of ${upload.fileName}`}
+                  aria-label={`First page of ${upload.fileName}`}
+                />
+              ) : null}
+              {isPdf && !upload.thumbnailUrl && !upload.previewUrl ? <span className="ms-upload-card__pdf-pending">Preparing first page…</span> : null}
               {!upload.previewUrl || mime.startsWith("audio/") ? <span>{kind.slice(0, 3).toUpperCase()}</span> : null}
             </div>
             <div className="ms-upload-card__copy">

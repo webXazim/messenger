@@ -352,6 +352,12 @@
   border: 0;
 }
 
+.ms-upload-card__preview.is-visual-media iframe {
+  height: 12rem;
+  min-height: 12rem;
+  pointer-events: none;
+}
+
 .ms-upload-card.is-visual-media .ms-upload-card__copy {
   padding: 0.5rem 0 0.5rem 0.625rem;
 }
