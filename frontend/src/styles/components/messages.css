@@ -225,17 +225,17 @@
 /* Text-only messages reserve the end of their last line for metadata, then
    pin the timestamp and receipt to the bubble's lower-right corner. */
 .ms-message-copy.is-text-only {
-  --ms-text-meta-reserve: 3.75rem;
+  --ms-text-meta-reserve: 3rem;
   position: relative;
 }
 
 .ms-message-row--own .ms-message-copy.is-text-only {
-  --ms-text-meta-reserve: 5.25rem;
+  --ms-text-meta-reserve: 4.125rem;
 }
 
 .ms-message-card.is-action-pending .ms-message-copy.is-text-only,
 .ms-message-row.is-optimistic .ms-message-copy.is-text-only {
-  --ms-text-meta-reserve: 7.25rem;
+  --ms-text-meta-reserve: 6.5rem;
 }
 
 .ms-message-copy.is-text-only
@@ -248,8 +248,8 @@
 
 .ms-message-copy.is-text-only > .ms-message-meta {
   position: absolute;
-  right: 0.68rem;
-  bottom: 0.52rem;
+  right: 0.62rem;
+  bottom: 0.48rem;
   margin: 0;
   white-space: nowrap;
 }

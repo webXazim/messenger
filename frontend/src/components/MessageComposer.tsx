@@ -64,6 +64,7 @@ export function MessageComposer({
   uploadPolicy = uploadPolicyFromCapabilities(),
   onTyping,
   onSendVoiceNote,
+  disabled = false,
   disabledReason,
 }: {
   onUpload: (file: File, options: ComposerUploadRequestOptions) => Promise<ComposerUploadResult>;
@@ -78,6 +79,7 @@ export function MessageComposer({
   legacyDraftKey?: string;
   uploadPolicy?: ComposerUploadPolicy;
   onTyping?: () => void;
+  disabled?: boolean;
   disabledReason?: string | null;
 }) {
   const [text, setText] = useState("");
@@ -151,7 +153,7 @@ export function MessageComposer({
   const hasPendingUpload = pendingUploads.some((item) => item.status === "queued" || item.status === "uploading");
   const hasFailedUpload = pendingUploads.some((item) => item.status === "failed");
   const hasBlockingUpload = hasPendingUpload || hasFailedUpload;
-  const composerDisabled = Boolean(disabledReason);
+  const composerDisabled = disabled || Boolean(disabledReason);
   const canSend = useMemo(
     () => !composerDisabled && !isSubmitting && !hasBlockingUpload && (text.trim().length > 0 || uploadedAttachmentIds.length > 0),
     [composerDisabled, hasBlockingUpload, isSubmitting, text, uploadedAttachmentIds],

@@ -286,6 +286,7 @@ export function ConversationPage() {
   const [startingCallType, setStartingCallType] = useState<"voice" | "video" | null>(null);
   const [decryptedTexts, setDecryptedTexts] = useState<Record<string, string>>({});
   const [decryptionStates, setDecryptionStates] = useState<Record<string, { status: "pending" | "ready" | "unavailable" | "error"; message?: string }>>({});
+  const [initiallyReadyConversationId, setInitiallyReadyConversationId] = useState("");
   const [reportedMessageIds, setReportedMessageIds] = useState<Record<string, boolean>>({});
   const [inboxWidth, setInboxWidth] = useState(readStoredInboxWidth);
   const [isResizingInbox, setIsResizingInbox] = useState(false);
@@ -875,12 +876,31 @@ export function ConversationPage() {
     };
   }, [e2eeIdentityQuery.data, pagedMessages, user?.id]);
 
+  const hasEncryptedMessagesPending = useMemo(
+    () => pagedMessages.some((message) => {
+      if (!message.is_encrypted || !message.encryption) return false;
+      const state = decryptionStates[message.id];
+      return !e2eeIdentityQuery.isError && (!state || state.status === "pending");
+    }),
+    [decryptionStates, e2eeIdentityQuery.isError, pagedMessages],
+  );
+
+  useEffect(() => {
+    if (!conversationId || messagesQuery.isLoading || conversationQuery.isLoading || routeConversationQuery.isLoading) return;
+    if (encryptionReadiness.status === "preparing" || hasEncryptedMessagesPending) return;
+    setInitiallyReadyConversationId(conversationId);
+  }, [conversationId, conversationQuery.isLoading, encryptionReadiness.status, hasEncryptedMessagesPending, messagesQuery.isLoading, routeConversationQuery.isLoading]);
+
   const messages = useMemo(
-    () =>
-      [...pagedMessages]
+    () => {
+      if (initiallyReadyConversationId !== conversationId) return [];
+      return [...pagedMessages]
         .map((message) => {
           if (!message.is_encrypted) return message;
-          const state = decryptionStates[message.id] ?? { status: "pending" as const };
+          const state = decryptionStates[message.id]
+            ?? (!message.encryption || e2eeIdentityQuery.isError
+              ? { status: "error" as const, message: "This encrypted message could not be opened on this device." }
+              : { status: "pending" as const });
           return {
             ...message,
             text: decryptedTexts[message.id] ?? "",
@@ -888,11 +908,13 @@ export function ConversationPage() {
             decryption_message: state.message,
           };
         })
+        .filter((message) => message.decryption_state !== "pending")
         .sort((a, b) => {
           const timestampDelta = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
           return timestampDelta || String(a.id).localeCompare(String(b.id));
-        }),
-    [decryptedTexts, decryptionStates, pagedMessages],
+        });
+    },
+    [conversationId, decryptedTexts, decryptionStates, e2eeIdentityQuery.isError, initiallyReadyConversationId, pagedMessages],
   );
   const latestMessageId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -951,7 +973,7 @@ export function ConversationPage() {
     if (missingNames.length === 1) return `${missingNames[0]} needs to finish secure-device setup before messages can be sent.`;
     return `${missingNames.slice(0, 2).join(" and ")} need to finish secure-device setup before messages can be sent.`;
   }, [conversationQuery.data?.participants, encryptionReadiness]);
-  const composerDisabledReason = encryptionReadiness.canEncrypt ? null : encryptionReadinessMessage;
+  const composerDisabledReason = encryptionReadiness.status === "blocked" ? encryptionReadinessMessage : null;
   const previewAttachments = useMemo(() => messages.flatMap((message) => message.attachments || []).filter((attachment) => !attachment.view_once), [messages]);
   const previewAttachmentIndex = useMemo(() => previewAttachments.findIndex((attachment) => attachment.id === previewAttachmentId), [previewAttachments, previewAttachmentId]);
   const previewAttachment = previewAttachmentIndex >= 0 ? previewAttachments[previewAttachmentIndex] : null;
@@ -1201,48 +1223,86 @@ export function ConversationPage() {
     }
 
     const attachmentIds = Array.isArray(payload.attachment_ids) ? payload.attachment_ids.map((entry) => String(entry)) : [];
-    const attachmentEncryption = await Promise.all(attachmentIds.map(async (attachmentId) => {
-      const storedEnvelope = encryptedAttachmentUploadsRef.current[attachmentId];
-      if (!storedEnvelope) throw new Error("A secure attachment is not ready. Remove it and upload it again.");
-      const envelope = await rewrapAttachmentEncryptionForConversation({
-        userId: String(user.id),
-        conversationId,
-        envelope: storedEnvelope,
-        participantUserIds: conversationParticipantIds,
-      });
-      encryptedAttachmentUploadsRef.current[attachmentId] = envelope;
-      return { upload_id: attachmentId, ...envelope };
-    }));
     const plaintext = typeof payload.text === "string" ? String(payload.text) : "";
-    const nextPayload: Record<string, unknown> = {
-      ...payload,
-      attachment_encryption: attachmentEncryption.length ? attachmentEncryption : undefined,
-      _optimistic_attachments: attachmentIds.map((attachmentId, index) => {
-        const source = (Array.isArray(payload._optimistic_attachments) ? payload._optimistic_attachments : [])
-          .find((item) => item && typeof item === "object" && String((item as Record<string, unknown>).id || "") === attachmentId) as MessageAttachment | undefined;
-        return {
-          ...(source || { id: attachmentId, original_name: "Attachment", mime_type: "application/octet-stream", size: 0 }),
-          id: attachmentId,
-          // The optimistic URL is the sender's local plaintext Blob URL. The
-          // authoritative server response replaces this with the encrypted
-          // attachment before it can be persisted or shared.
-          is_encrypted: false,
-          encryption: encryptedAttachmentUploadsRef.current[attachmentId] || attachmentEncryption[index],
-        } satisfies MessageAttachment;
-      }),
-    };
+    const clientTempId = String(payload.client_temp_id || safeId("message"));
+    const currentData = queryClient.getQueryData<InfiniteData<MessagePage>>(["messages", conversationId]);
+    const optimisticAttachments = Array.isArray(payload._optimistic_attachments) ? payload._optimistic_attachments as MessageAttachment[] : [];
+    const optimistic = buildOptimisticMessage(
+      String(user.id),
+      user.username || "You",
+      plaintext,
+      attachmentIds,
+      payload.reply_to_id ? findMessageInPages(currentData, String(payload.reply_to_id)) ?? null : null,
+      clientTempId,
+      optimisticAttachments,
+      { isEncrypted: Boolean(plaintext.trim()), type: String(payload.type || (attachmentIds.length ? "file" : "text")) },
+    );
+    queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => upsertMessagePages(current, optimistic));
     if (plaintext.trim()) {
-      nextPayload.text = "";
-      nextPayload.is_encrypted = true;
-      nextPayload.encryption = await encryptMessageForConversation({
-        userId: String(user.id),
-        conversationId,
-        plaintext,
-        participantUserIds: conversationParticipantIds,
-      });
-      nextPayload._optimistic_text = plaintext;
+      setDecryptedTexts((current) => ({ ...current, [optimistic.id]: plaintext }));
+      setDecryptionStates((current) => ({ ...current, [optimistic.id]: { status: "ready" } }));
     }
-    await sendMutation.mutateAsync(nextPayload);
+
+    let mutationStarted = false;
+    try {
+      const attachmentEncryption = await Promise.all(attachmentIds.map(async (attachmentId) => {
+        const storedEnvelope = encryptedAttachmentUploadsRef.current[attachmentId];
+        if (!storedEnvelope) throw new Error("A secure attachment is not ready. Remove it and upload it again.");
+        const envelope = await rewrapAttachmentEncryptionForConversation({
+          userId: String(user.id),
+          conversationId,
+          envelope: storedEnvelope,
+          participantUserIds: conversationParticipantIds,
+        });
+        encryptedAttachmentUploadsRef.current[attachmentId] = envelope;
+        return { upload_id: attachmentId, ...envelope };
+      }));
+      const nextPayload: Record<string, unknown> = {
+        ...payload,
+        client_temp_id: clientTempId,
+        attachment_encryption: attachmentEncryption.length ? attachmentEncryption : undefined,
+        _optimistic_attachments: attachmentIds.map((attachmentId, index) => {
+          const source = optimisticAttachments.find((item) => String(item.id || "") === attachmentId);
+          return {
+            ...(source || { id: attachmentId, original_name: "Attachment", mime_type: "application/octet-stream", size: 0 }),
+            id: attachmentId,
+            is_encrypted: false,
+            encryption: encryptedAttachmentUploadsRef.current[attachmentId] || attachmentEncryption[index],
+          } satisfies MessageAttachment;
+        }),
+      };
+      if (plaintext.trim()) {
+        nextPayload.text = "";
+        nextPayload.is_encrypted = true;
+        nextPayload.encryption = await encryptMessageForConversation({
+          userId: String(user.id),
+          conversationId,
+          plaintext,
+          participantUserIds: conversationParticipantIds,
+        });
+        nextPayload._optimistic_text = plaintext;
+      }
+      mutationStarted = true;
+      await sendMutation.mutateAsync(nextPayload);
+    } catch (error) {
+      if (!mutationStarted) {
+        queryClient.setQueryData<InfiniteData<MessagePage>>(
+          ["messages", conversationId],
+          (current) => removeMessagePages(current, (message) => message.id === optimistic.id),
+        );
+        setDecryptedTexts((current) => {
+          const next = { ...current };
+          delete next[optimistic.id];
+          return next;
+        });
+        setDecryptionStates((current) => {
+          const next = { ...current };
+          delete next[optimistic.id];
+          return next;
+        });
+      }
+      throw error;
+    }
   };
 
   const uploadConversationAttachment = async (
@@ -1624,7 +1684,10 @@ export function ConversationPage() {
   const messagesError = messagesQuery.isError ? getErrorMessage(messagesQuery.error, "Could not load messages.") : null;
   const blockingConversationError = conversationError && messages.length === 0 ? conversationError : null;
   const chatError = messagesError || blockingConversationError;
-  const isInitialChatLoading = routeConversationQuery.isLoading || conversationQuery.isLoading || messagesQuery.isLoading;
+  const isInitialChatLoading = routeConversationQuery.isLoading
+    || conversationQuery.isLoading
+    || messagesQuery.isLoading
+    || initiallyReadyConversationId !== conversationId;
   const showEmptyConversation = !isInitialChatLoading && !chatError && messages.length === 0;
 
   const headerNotices = useMemo<ChatHeaderNotice[]>(() => {
@@ -1642,7 +1705,7 @@ export function ConversationPage() {
         message: "Conversation details could not refresh. Messages are still available.",
       });
     }
-    if (!encryptionReadiness.canEncrypt) {
+    if (encryptionReadiness.status === "blocked") {
       notices.push({
         id: "e2ee-readiness",
         tone: encryptionReadiness.status === "blocked" ? "danger" : "neutral",
@@ -1656,7 +1719,7 @@ export function ConversationPage() {
       notices.push({ id: "conversation-state-error", tone: "danger", message: conversationStateError });
     }
     return notices;
-  }, [callError, conversationError, conversationStateError, encryptionReadiness.canEncrypt, encryptionReadiness.status, encryptionReadinessMessage, messages.length, showRealtimeNotice, socketStatus]);
+  }, [callError, conversationError, conversationStateError, encryptionReadiness.status, encryptionReadinessMessage, messages.length, showRealtimeNotice, socketStatus]);
 
   return (
     <div ref={conversationViewRef} className={`ms-conversation-view ${showDetails ? "ms-conversation-view--details-open" : ""}`} style={shellStyle}>
@@ -1856,6 +1919,7 @@ export function ConversationPage() {
             editingMessage={editingMessage}
             onCancelEdit={() => setEditingMessage(null)}
             onTyping={sendTyping}
+            disabled={!encryptionReadiness.canEncrypt}
             disabledReason={composerDisabledReason}
             onSendVoiceNote={async ({ file, previewUrl, fileName, mimeType, durationSeconds, clientTempId, waveform, waveformPromise }) => {
               let normalizedWaveform = waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));

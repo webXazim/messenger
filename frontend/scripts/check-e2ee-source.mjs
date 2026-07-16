@@ -5,6 +5,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const e2ee = read("src/lib/e2ee.ts");
 const conversation = read("src/pages/ConversationPage.tsx");
 const composer = read("src/components/MessageComposer.tsx");
+const messageText = read("src/components/messages/MessageText.tsx");
 const security = read("src/components/conversation/details/ConversationSecuritySection.tsx");
 const authContext = read("src/contexts/AuthContext.tsx");
 const settings = read("src/pages/SettingsPage.tsx");
@@ -57,6 +58,9 @@ assert.ok(views.includes('output["security_changed"] = security_changed'), "Devi
 assert.ok(authContext.includes("identity.registrationChanged"), "Login/focus reconciliation still refreshes every conversation when no device changed.");
 assert.ok(settings.includes('["e2ee-identity", String(user?.id || "")]'), "Settings uses a duplicate E2EE identity cache key.");
 assert.ok(composer.includes("Secure messaging unavailable"), "Composer does not explain blocked secure messaging.");
+assert.ok(conversation.includes('.filter((message) => message.decryption_state !== "pending")'), "Pending ciphertext can leak into the visible timeline.");
+assert.ok(conversation.includes('encryptionReadiness.status === "blocked"'), "Secure preparation is still exposed as a user-facing notice.");
+assert.ok(!messageText.includes("Decrypting message"), "Encrypted message placeholders are still exposed before background decryption finishes.");
 assert.ok(security.includes("Protected automatically"), "Security panel does not expose the automatic protection state.");
 assert.ok(api.includes("security_changed: firstBoolean"), "E2EE device change state is discarded by API normalization.");
 

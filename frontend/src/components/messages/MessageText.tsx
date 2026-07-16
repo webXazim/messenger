@@ -30,7 +30,7 @@ export function MessageText({
     ? (decryptionMessage || "This message was not encrypted for this device.")
     : decryptionState === "error"
       ? (decryptionMessage || "This encrypted message could not be opened.")
-      : "Decrypting message…";
+      : "";
   const content = deleted
     ? "Message deleted"
     : text
