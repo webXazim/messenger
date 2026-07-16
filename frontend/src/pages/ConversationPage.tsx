@@ -303,6 +303,7 @@ export function ConversationPage() {
   const decryptionCiphertextRef = useRef<Record<string, string>>({});
   const lastReadReceiptMessageRef = useRef("");
   const lastDeliveredReceiptMessageRef = useRef("");
+  const timelineAtLatestRef = useRef(true);
   const conversationViewRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -649,6 +650,18 @@ export function ConversationPage() {
     },
   });
 
+  const acknowledgeConversationRead = useCallback((targetConversationId: string, messageId: string) => {
+    if (!targetConversationId || !messageId) return;
+    const receiptKey = `${targetConversationId}:${messageId}`;
+    if (lastReadReceiptMessageRef.current === receiptKey) return;
+    lastReadReceiptMessageRef.current = receiptKey;
+    void chatApi.markConversationRead(targetConversationId, { message_id: messageId }).then(() => {
+      markConversationReadInCache(targetConversationId, queryClient);
+    }).catch(() => {
+      if (lastReadReceiptMessageRef.current === receiptKey) lastReadReceiptMessageRef.current = "";
+    });
+  }, [queryClient]);
+
   useEffect(() => {
     if (!conversationId) return;
     socket.subscribeToConversation(conversationId);
@@ -691,6 +704,14 @@ export function ConversationPage() {
               }))
             : next;
         });
+        if (
+          payload.event === "message.created"
+          && document.visibilityState === "visible"
+          && timelineAtLatestRef.current
+          && !isSameUserIdentity(normalized.sender, localCurrentUser)
+        ) {
+          acknowledgeConversationRead(conversationId, normalized.id);
+        }
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
         return;
       }
@@ -790,7 +811,7 @@ export function ConversationPage() {
       socket.unsubscribeFromConversation(conversationId);
       unsubscribe();
     };
-  }, [conversationId, socket, queryClient, user?.id, localCurrentUser]);
+  }, [acknowledgeConversationRead, conversationId, socket, queryClient, user?.id, localCurrentUser]);
 
   const pagedMessages = useMemo(() => flattenMessagePages(messagesQuery.data), [messagesQuery.data]);
 
@@ -902,6 +923,7 @@ export function ConversationPage() {
     fetchNextPage: () => messagesQuery.fetchNextPage(),
     getErrorMessage,
   });
+  timelineAtLatestRef.current = timelineAtLatest;
 
   useEffect(() => {
     if (!conversationId || !latestMessageId) return;
@@ -915,15 +937,8 @@ export function ConversationPage() {
 
   useEffect(() => {
     if (!conversationId || !latestMessageId || !pageVisible || !timelineAtLatest) return;
-    const receiptKey = `${conversationId}:${latestMessageId}`;
-    if (lastReadReceiptMessageRef.current === receiptKey) return;
-    lastReadReceiptMessageRef.current = receiptKey;
-    void chatApi.markConversationRead(conversationId, { message_id: latestMessageId }).then(() => {
-      markConversationReadInCache(conversationId, queryClient);
-    }).catch(() => {
-      if (lastReadReceiptMessageRef.current === receiptKey) lastReadReceiptMessageRef.current = "";
-    });
-  }, [conversationId, latestMessageId, pageVisible, queryClient, timelineAtLatest]);
+    acknowledgeConversationRead(conversationId, latestMessageId);
+  }, [acknowledgeConversationRead, conversationId, latestMessageId, pageVisible, timelineAtLatest]);
   const encryptionReadinessMessage = useMemo(() => {
     if (encryptionReadiness.code !== "participant_device_missing" || !encryptionReadiness.missingParticipantIds.length) {
       return encryptionReadiness.message;

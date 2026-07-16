@@ -48,6 +48,8 @@ for (const required of [
   "expires_at",
   "setTypingUsers({})",
   'payload.event === "message.reaction_updated"',
+  "acknowledgeConversationRead(conversationId, normalized.id)",
+  "timelineAtLatestRef.current",
 ]) {
   assert.ok(conversation.includes(required), `Missing typing/realtime UI protection: ${required}`);
 }
