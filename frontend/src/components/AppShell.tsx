@@ -13,7 +13,7 @@ import { isSameUserIdentity } from "../lib/userIdentity";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
 import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
-import { getRealtimeSyncMarker, mergeChatSync, patchCallCaches, patchConversationCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
+import { getRealtimeSyncMarker, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
 
 
 function getCallActionError(error: unknown, fallback: string) {
@@ -304,6 +304,13 @@ export function AppShell() {
         if (conversation.id) patchConversationCaches(queryClient, conversation);
         return;
       }
+      if (payload.event === "message.read" || payload.event === "message.delivered") {
+        const conversationId = String(payload.data?.conversation_id || payload.data?.conversation || "");
+        if (conversationId) {
+          patchConversationReceiptCaches(queryClient, conversationId, payload.event, payload.data || {});
+        }
+        return;
+      }
       if (payload.event === "conversation.deleted") {
         const conversationId = String(payload.data?.conversation_id || payload.data?.id || "");
         if (!conversationId) return;
@@ -320,15 +327,22 @@ export function AppShell() {
       }
       if (payload.event === "message.created") {
         const message = normalizeMessage(payload.data || {});
+        const sender = payload.data?.sender && typeof payload.data.sender === "object" ? (payload.data.sender as Record<string, unknown>) : null;
+        const conversationId = String(message.conversation_id || payload.data?.conversation_id || payload.data?.conversation || "");
+        const messageId = String(message.id || payload.data?.message_id || "");
+        if (sender && !isSameUserIdentity(sender, user) && conversationId && messageId) {
+          socket.send({ event: "message.delivered", data: { conversation_id: conversationId, message_id: messageId } });
+          void chatApi.markConversationDelivered(conversationId, { message_id: messageId }).then((receipt) => {
+            patchConversationReceiptCaches(queryClient, conversationId, "message.delivered", receipt);
+          }).catch(() => undefined);
+        }
+
         const isCallTimelineMessage = message.type === "system" && message.metadata?.system_event === "call";
         if (isCallTimelineMessage) return;
-        const sender = payload.data?.sender && typeof payload.data.sender === "object" ? (payload.data.sender as Record<string, unknown>) : null;
         const senderName =
           sender
             ? String(sender.display_name || sender.username || "New message")
             : "New message";
-        const conversationId = String(payload.data?.conversation_id || "");
-        const messageId = String(payload.data?.id || payload.data?.message_id || "");
         const chatIsOpen = conversationId && location.pathname.startsWith(`/chat/${conversationId}`) && document.visibilityState === "visible";
         if (sender && !isSameUserIdentity(sender, user)) {
           if (chatIsOpen) return;

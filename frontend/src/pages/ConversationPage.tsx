@@ -88,9 +88,9 @@ function buildOptimisticMessage(
   replyTo: Message | null,
   clientTempId: string,
   optimisticAttachments: MessageAttachment[] = [],
-  options: { isEncrypted?: boolean; type?: string; isVoiceNote?: boolean; durationSeconds?: number | string | null; waveform?: number[] } = {},
+  options: { isEncrypted?: boolean; type?: string; isVoiceNote?: boolean; durationSeconds?: number | string | null; waveform?: number[]; createdAt?: string } = {},
 ) {
-  const now = new Date().toISOString();
+  const now = options.createdAt || new Date().toISOString();
   return {
     id: `temp-${clientTempId}`,
     client_temp_id: clientTempId,
@@ -307,7 +307,18 @@ export function ConversationPage() {
   const lastReadReceiptMessageRef = useRef("");
   const lastDeliveredReceiptMessageRef = useRef("");
   const timelineAtLatestRef = useRef(true);
+  const lastOptimisticCreatedAtRef = useRef(0);
   const conversationViewRef = useRef<HTMLDivElement | null>(null);
+
+  const nextOptimisticCreatedAt = (data: InfiniteData<MessagePage> | undefined) => {
+    const latestMessageTime = flattenMessagePages(data).reduce((latest, message) => {
+      const timestamp = Date.parse(message.created_at);
+      return Number.isFinite(timestamp) ? Math.max(latest, timestamp) : latest;
+    }, 0);
+    const timestamp = Math.max(Date.now(), latestMessageTime + 1, lastOptimisticCreatedAtRef.current + 1);
+    lastOptimisticCreatedAtRef.current = timestamp;
+    return new Date(timestamp).toISOString();
+  };
 
   useEffect(() => {
     const node = conversationViewRef.current;
@@ -342,6 +353,7 @@ export function ConversationPage() {
   useEffect(() => {
     lastReadReceiptMessageRef.current = "";
     lastDeliveredReceiptMessageRef.current = "";
+    lastOptimisticCreatedAtRef.current = 0;
     setMessageActionErrors({});
     setMessageActionPending({});
     setConfirmation(null);
@@ -578,6 +590,7 @@ export function ConversationPage() {
             isVoiceNote: Boolean(payload.is_voice_note),
             durationSeconds: typeof payload.duration_seconds === "number" || typeof payload.duration_seconds === "string" ? payload.duration_seconds : null,
             waveform: Array.isArray(payload.waveform) ? payload.waveform.map(Number).filter(Number.isFinite) : [],
+            createdAt: String(payload._optimistic_created_at || "") || nextOptimisticCreatedAt(currentData),
           },
         );
         queryClient.setQueryData<InfiniteData<MessagePage>>(
@@ -1277,7 +1290,11 @@ export function ConversationPage() {
       payload.reply_to_id ? findMessageInPages(currentData, String(payload.reply_to_id)) ?? null : null,
       clientTempId,
       optimisticAttachments,
-      { isEncrypted: Boolean(plaintext.trim()), type: String(payload.type || (attachmentIds.length ? "file" : "text")) },
+      {
+        isEncrypted: Boolean(plaintext.trim()),
+        type: String(payload.type || (attachmentIds.length ? "file" : "text")),
+        createdAt: nextOptimisticCreatedAt(currentData),
+      },
     );
     queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => upsertMessagePages(current, optimistic));
     if (plaintext.trim()) {
@@ -1302,6 +1319,7 @@ export function ConversationPage() {
       const nextPayload: Record<string, unknown> = {
         ...payload,
         client_temp_id: clientTempId,
+        _optimistic_created_at: optimistic.created_at,
         attachment_encryption: attachmentEncryption.length ? attachmentEncryption : undefined,
         _optimistic_attachments: attachmentIds.map((attachmentId, index) => {
           const source = optimisticAttachments.find((item) => String(item.id || "") === attachmentId);
@@ -1965,6 +1983,7 @@ export function ConversationPage() {
             disabledReason={composerDisabledReason}
             onSendVoiceNote={async ({ file, previewUrl, fileName, mimeType, durationSeconds, clientTempId, waveform, waveformPromise }) => {
               let normalizedWaveform = waveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
+              let optimisticCreatedAt = "";
               const optimisticAttachment: MessageAttachment = {
                   id: `voice-${clientTempId}`,
                   original_name: fileName,
@@ -1977,6 +1996,8 @@ export function ConversationPage() {
                   is_encrypted: false,
               };
               if (user?.id) {
+                const currentData = queryClient.getQueryData<InfiniteData<MessagePage>>(["messages", conversationId]);
+                optimisticCreatedAt = nextOptimisticCreatedAt(currentData);
                 const optimistic = buildOptimisticMessage(
                   String(user.id),
                   user.username || "You",
@@ -1985,7 +2006,7 @@ export function ConversationPage() {
                   null,
                   clientTempId,
                   [optimisticAttachment],
-                  { type: "audio", isVoiceNote: true, durationSeconds, waveform: normalizedWaveform },
+                  { type: "audio", isVoiceNote: true, durationSeconds, waveform: normalizedWaveform, createdAt: optimisticCreatedAt },
                 );
                 queryClient.setQueryData<InfiniteData<MessagePage>>(
                   ["messages", conversationId],
@@ -2022,6 +2043,7 @@ export function ConversationPage() {
                   duration_seconds: durationSeconds,
                   waveform: normalizedWaveform,
                   _optimistic_attachments: [{ ...optimisticAttachment, id: upload.id, encryption: envelope }],
+                  _optimistic_created_at: optimisticCreatedAt,
                   client_temp_id: clientTempId,
                 });
               } catch (error) {

@@ -38,6 +38,7 @@ for (const required of [
   "mergeChatSync",
   "getRealtimeSyncMarker",
   "patchConversationCaches",
+  "patchConversationReceiptCaches",
   "patchMessageCache",
 ]) {
   assert.ok(`${appShell}\n${cache}`.includes(required), `Missing reconnect reconciliation: ${required}`);
@@ -82,6 +83,8 @@ assert.ok(cache.includes("mergeConversationReceipts(current, incoming)"), "Conve
 assert.ok(cache.includes("reconcileConversationPresence"), "Conversation updates do not reconcile a peer already known to be online.");
 assert.ok(cache.includes('{ queryKey: ["conversation-route"] }'), "Named conversation routes do not receive presence updates.");
 assert.ok(appShell.includes('["call.heartbeat", "call.media_state", "call.quality_report"]'), "Active call traffic does not reconcile global user presence.");
+assert.match(appShell, /payload\.event === "message\.created"[\s\S]*socket\.send\(\{ event: "message\.delivered"/, "Messages received outside the open chat are not acknowledged as delivered.");
+assert.ok(appShell.includes('message.conversation_id || payload.data?.conversation_id || payload.data?.conversation'), "Global delivery acknowledgement can lose the conversation id.");
 assert.ok(serializers.includes("return getattr(obj, \"last_seen_at\", None) if self._presence_is_visible(obj) else None"), "Private last-seen data is still exposed.");
 assert.ok(views.includes('if getattr(participant, "_read_changed", False)'), "Unchanged read receipts are still broadcast repeatedly.");
 assert.ok(services.includes("effective_read_message"), "Duplicate read acknowledgements do not repair their delivered cursor.");

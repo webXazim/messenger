@@ -37,6 +37,10 @@ export function mergeTimelineMessage(existing: Message, incoming: Message): Mess
   return {
     ...existing,
     ...incoming,
+    // A message's creation position is immutable. In particular, keep the
+    // optimistic timestamp when the server replaces the temporary id so the
+    // bubble does not jump between neighbouring rapid sends.
+    created_at: existing.created_at || incoming.created_at,
     delivery_status: mergeDeliveryStatus(existing.delivery_status, incoming.delivery_status),
     attachments: incoming.attachments ?? existing.attachments,
     reactions: incoming.reactions ?? existing.reactions,

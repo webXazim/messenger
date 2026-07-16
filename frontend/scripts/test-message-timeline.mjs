@@ -38,7 +38,7 @@ const data = {
   pageParams: [null, "/messages/?cursor=older"],
 };
 
-const confirmed = makeMessage("server-1", "2026-07-13T10:00:00Z", {
+const confirmed = makeMessage("server-1", "2026-07-13T10:00:05Z", {
   client_temp_id: "client-1",
   delivery_status: "sent",
 });
@@ -46,6 +46,7 @@ const confirmedData = upsertMessagePages(data, confirmed);
 assert.equal(confirmedData.pages.length, 2, "Realtime updates must preserve page boundaries.");
 assert.equal(confirmedData.pages[0].results.length, 2, "Optimistic replacement must not add a duplicate.");
 assert.equal(confirmedData.pages[0].results[0].id, "server-1");
+assert.equal(confirmedData.pages[0].results[0].created_at, optimistic.created_at, "Server confirmation must preserve the optimistic timeline position.");
 assert.equal(confirmedData.pages[1].results[0].id, "oldest");
 assert.equal(flattenMessagePages(confirmedData).filter((message) => message.client_temp_id === "client-1").length, 1);
 

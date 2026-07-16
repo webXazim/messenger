@@ -1,7 +1,7 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { MessagePage } from "../api/chat";
 import type { Call, Conversation, Message } from "../types/chat";
-import { mergeConversationReceipts } from "./messageReceipts";
+import { mergeConversationReceipts, mergeParticipantReceipts } from "./messageReceipts";
 
 export type ChatSyncPayload = {
   conversations: Conversation[];
@@ -37,6 +37,36 @@ export function patchConversationCaches(queryClient: QueryClient, incoming: Conv
   queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, (current) =>
     current?.id === incoming.id ? mergeConversationPreservingPresence(current, reconciledIncoming) : current,
   );
+}
+
+export function patchConversationReceiptCaches(
+  queryClient: QueryClient,
+  conversationId: string,
+  eventName: "message.read" | "message.delivered",
+  data: Record<string, unknown>,
+) {
+  const receiptUserId = String(data.user_id || "");
+  if (!conversationId || !receiptUserId) return;
+
+  const patchConversation = (conversation: Conversation | undefined) => {
+    if (!conversation || String(conversation.id) !== conversationId) return conversation;
+    return {
+      ...conversation,
+      participants: conversation.participants.map((participant) => {
+        if (String(participant.user.id) !== receiptUserId) return participant;
+        return mergeParticipantReceipts(participant, {
+          last_delivered_message: String(data.last_delivered_message_id || "") || undefined,
+          last_delivered_at: String(data.last_delivered_at || "") || undefined,
+          last_read_message: eventName === "message.read" ? String(data.last_read_message_id || "") || undefined : undefined,
+          last_read_at: eventName === "message.read" ? String(data.last_read_at || "") || undefined : undefined,
+        });
+      }),
+    };
+  };
+
+  queryClient.setQueryData<Conversation>(["conversation", conversationId], patchConversation);
+  queryClient.setQueryData<Conversation[]>(["conversations"], (current) => current?.map((conversation) => patchConversation(conversation) ?? conversation));
+  queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, (current) => patchConversation(current));
 }
 
 export function patchMessageCache(queryClient: QueryClient, conversationId: string, incoming: Message) {
