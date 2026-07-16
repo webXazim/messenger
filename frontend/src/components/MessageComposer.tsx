@@ -9,6 +9,8 @@ import { uploadPolicyFromCapabilities, validateComposerUpload, type ComposerUplo
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
 import type { VoiceNotePayload } from "./VoiceNoteRecorder";
 
+const COMPOSER_MAX_HEIGHT = 160;
+
 function extractEntities(text: string) {
   const entities: Array<Record<string, unknown>> = [];
   const linkRegex = /https?:\/\/\S+/g;
@@ -100,7 +102,7 @@ export function MessageComposer({
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
   };
 
   const focusTextarea = () => {
@@ -387,13 +389,6 @@ export function MessageComposer({
       ) : null}
 
       <div className={`ms-message-composer__surface ${voiceActive ? "is-voice-active" : ""} ${text.trim() || pendingUploads.length || editingMessage ? "has-draft" : ""}`}>
-        <VoiceNoteRecorder
-          onSendVoiceNote={onSendVoiceNote}
-          variant="inline"
-          disabled={composerDisabled || Boolean(editingMessage) || Boolean(text.trim()) || pendingUploads.length > 0}
-          onActiveChange={setVoiceActive}
-        />
-
         {!voiceActive ? <>
         <label className={`ms-composer-icon-button ms-message-composer__attach ${editingMessage || composerDisabled ? "is-disabled" : ""}`} aria-label="Attach files" title={disabledReason || "Attach files"}>
           <input type="file" multiple onChange={handleFileChange} disabled={composerDisabled || Boolean(editingMessage)} />
@@ -401,31 +396,42 @@ export function MessageComposer({
         </label>
 
         <span id={keyboardHelpId} className="ms-visually-hidden">Press Enter to send. Press Shift and Enter for a new line.</span>
-        <textarea
-          ref={textareaRef}
-          className="ms-message-composer__input"
-          rows={1}
-          value={text}
-          onChange={(event) => {
-            if (isSubmitting) return;
-            setText(event.target.value);
-            setSubmitError(null);
-            onTyping?.();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          placeholder={disabledReason ? "Secure messaging unavailable" : editingMessage ? "Edit message" : "Message"}
-          aria-label={editingMessage ? "Edit message" : "Write a message"}
-          aria-describedby={`${keyboardHelpId}${submitError ? ` ${submitErrorId}` : ""}`}
-          aria-keyshortcuts="Enter"
-          aria-busy={isSubmitting}
-          disabled={composerDisabled}
+        <div className="ms-message-composer__input-shell">
+          <textarea
+            ref={textareaRef}
+            className="ms-message-composer__input"
+            rows={1}
+            value={text}
+            onChange={(event) => {
+              if (isSubmitting) return;
+              setText(event.target.value);
+              setSubmitError(null);
+              onTyping?.();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder={disabledReason ? "Secure messaging unavailable" : editingMessage ? "Edit message" : "Write a message…"}
+            aria-label={editingMessage ? "Edit message" : "Write a message"}
+            aria-describedby={`${keyboardHelpId}${submitError ? ` ${submitErrorId}` : ""}`}
+            aria-keyshortcuts="Enter"
+            aria-busy={isSubmitting}
+            disabled={composerDisabled}
+          />
+        </div>
+        </> : null}
+
+        <VoiceNoteRecorder
+          onSendVoiceNote={onSendVoiceNote}
+          variant="inline"
+          disabled={composerDisabled || Boolean(editingMessage) || Boolean(text.trim()) || pendingUploads.length > 0}
+          onActiveChange={setVoiceActive}
         />
 
+        {!voiceActive ? (
         <button
           className="ms-message-composer__send"
           type="submit"
@@ -452,7 +458,7 @@ export function MessageComposer({
         >
           <SendIcon editing={Boolean(editingMessage)} />
         </button>
-        </> : null}
+        ) : null}
 
         {draggingFiles ? <div className="ms-message-composer__drop-zone">Drop files to attach</div> : null}
       </div>

@@ -18,7 +18,7 @@
 }
 
 .ms-message-composer.is-disabled .ms-message-composer__surface {
-  background: var(--ms-color-surface-subtle);
+  background: transparent;
   box-shadow: none;
 }
 
@@ -26,13 +26,13 @@
   position: relative;
   min-width: 0;
   display: grid;
-  grid-template-columns: 2.5rem 2.5rem minmax(0, 1fr) 2.625rem;
-  align-items: end;
-  gap: 0.25rem;
-  padding: 0.3125rem;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0;
   border: 0;
-  border-radius: 1.5rem;
-  background: var(--ms-color-surface-subtle);
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
   transition:
     border-color var(--ms-transition-fast),
@@ -40,8 +40,29 @@
 }
 
 .ms-message-composer__surface:focus-within {
-  background: var(--ms-color-surface-subtle);
+  background: transparent;
   box-shadow: none;
+}
+
+.ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__attach {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__input-shell {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.ms-message-composer__surface:not(.is-voice-active) .ms-voice-recorder,
+.ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__send {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.ms-message-composer__surface.has-draft:not(.is-voice-active) .ms-voice-recorder,
+.ms-message-composer__surface:not(.has-draft):not(.is-voice-active) .ms-message-composer__send {
+  display: none;
 }
 
 .ms-message-composer.is-dragging .ms-message-composer__disabled-note {
@@ -55,7 +76,7 @@
 }
 
 .ms-message-composer.is-disabled .ms-message-composer__surface {
-  background: var(--ms-color-surface-subtle);
+  background: transparent;
   box-shadow: none;
 }
 
@@ -117,6 +138,13 @@
 }
 
 .ms-message-composer__attach {
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-surface);
   cursor: pointer;
 }
 
@@ -130,14 +158,30 @@
   white-space: nowrap;
 }
 
+.ms-message-composer__input-shell {
+  min-width: 0;
+  min-height: 2.875rem;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--ms-color-line-strong);
+  border-radius: 1.5rem;
+  background: var(--ms-color-surface);
+  transition: border-color var(--ms-transition-fast);
+}
+
+.ms-message-composer__input-shell:focus-within {
+  border-color: #bdbdbd;
+}
+
 .ms-message-composer__input {
   width: 100%;
   min-width: 0;
   min-height: 2.5rem;
-  max-height: 8rem;
+  max-height: 10rem;
   resize: none;
   overflow-y: auto;
-  padding: 0.59375rem 0.5rem;
+  padding: 0.6875rem 0.9rem;
   border: 0;
   outline: 0;
   background: transparent;
@@ -146,6 +190,21 @@
   font-size: var(--ms-font-size-md);
   line-height: 1.45;
   scrollbar-width: thin;
+  scrollbar-color: #bcbcbc transparent;
+  scrollbar-gutter: auto;
+}
+
+.ms-message-composer__input::-webkit-scrollbar {
+  width: 0.25rem;
+}
+
+.ms-message-composer__input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ms-message-composer__input::-webkit-scrollbar-thumb {
+  border-radius: var(--ms-radius-pill);
+  background: #bcbcbc;
 }
 
 .ms-message-composer__input::placeholder {
@@ -161,11 +220,11 @@
 
 
 .ms-message-composer__send {
-  width: 2.625rem;
-  height: 2.625rem;
-  min-width: 2.625rem;
-  min-height: 2.625rem;
-  border-radius: 0.8125rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: var(--ms-radius-pill);
   background: var(--ms-color-ink);
   color: var(--ms-color-inverse);
 }
@@ -183,6 +242,20 @@
   background: var(--ms-color-surface-strong);
   color: var(--ms-color-ink-faint);
   cursor: not-allowed;
+}
+
+.ms-message-composer__surface:not(.is-voice-active) .ms-voice-recorder__trigger {
+  width: 2.75rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
+}
+
+.ms-message-composer.is-disabled .ms-message-composer__input-shell {
+  background: var(--ms-color-surface-subtle);
 }
 
 .ms-message-composer__drop-zone {
@@ -715,17 +788,17 @@
 }
 
 .ms-message-composer.is-disabled .ms-message-composer__surface {
-  background: var(--ms-color-surface-subtle);
+  background: transparent;
   box-shadow: none;
 }
 
   .ms-message-composer__surface {
     grid-template-columns: 2.75rem minmax(0, 1fr) 2.875rem;
-    align-items: end;
-    gap: 0;
+    align-items: center;
+    gap: 0.5rem;
     min-height: 2.875rem;
-    padding: 0.0625rem 0.125rem;
-    border-radius: 1.5rem;
+    padding: 0;
+    border-radius: 0;
     box-shadow: none;
   }
 
@@ -734,7 +807,7 @@
     grid-row: 1;
   }
 
-  .ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__input {
+  .ms-message-composer__surface:not(.is-voice-active) .ms-message-composer__input-shell {
     grid-column: 2;
     grid-row: 1;
   }
@@ -756,10 +829,10 @@
 
   .ms-composer-icon-button,
   .ms-message-composer__send {
-    width: 2.5rem;
-    height: 2.5rem;
-    min-width: 2.5rem;
-    min-height: 2.5rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
     border-radius: 999px;
   }
 
@@ -770,8 +843,8 @@
 
   .ms-message-composer__input {
     min-height: 2.5rem;
-    max-height: 8rem;
-    padding: 0.5625rem 0.25rem;
+    max-height: 10rem;
+    padding: 0.625rem 0.875rem;
     font-size: 1rem;
     line-height: 1.375;
   }
@@ -838,19 +911,19 @@
 }
 
 .ms-message-composer.is-disabled .ms-message-composer__surface {
-  background: var(--ms-color-surface-subtle);
+  background: transparent;
   box-shadow: none;
 }
 
 .ms-message-composer__surface {
-    grid-template-columns: 2.625rem minmax(0, 1fr) 2.75rem;
+    grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
   }
 
   .ms-composer-icon-button {
-    width: 2.625rem;
-    height: 2.625rem;
-    min-width: 2.625rem;
-    min-height: 2.625rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 
   .ms-composer-context {
