@@ -477,6 +477,7 @@ export function ConversationPage() {
       username: localCurrentUser?.username ?? user?.username,
       email: localCurrentUser?.email ?? user?.email,
       display_name: localCurrentUser?.display_name ?? user?.profile?.display_name ?? user?.display_name,
+      avatar: localCurrentUser && "avatar" in localCurrentUser ? localCurrentUser.avatar : user?.profile?.avatar,
     }),
     [localCurrentUser, user],
   );

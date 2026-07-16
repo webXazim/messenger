@@ -31,6 +31,7 @@ from apps.chat.models import (
     ModerationAction,
     NotificationPreference,
     PendingUpload,
+    UserStatus,
     UserE2EEDeviceKey,
     UserBlock,
     UserDevice,
@@ -603,6 +604,94 @@ class PendingUploadSerializer(serializers.ModelSerializer):
         if not actor:
             return None
         return create_media_access_payload(actor=actor, resource_type="pending_upload", resource_id=obj.id, request=request, disposition="inline")
+
+
+class UserStatusCreateSerializer(serializers.Serializer):
+    text = serializers.CharField(required=False, allow_blank=True, trim_whitespace=False, max_length=800)
+    upload_id = serializers.UUIDField(required=False, allow_null=True)
+    background_color = serializers.RegexField(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$", required=False, default="#111111")
+    text_color = serializers.RegexField(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$", required=False, default="#ffffff")
+
+
+class UserStatusSerializer(serializers.ModelSerializer):
+    author = UserLiteSerializer(read_only=True)
+    media = serializers.SerializerMethodField()
+    is_viewed = serializers.SerializerMethodField()
+    is_own = serializers.SerializerMethodField()
+    view_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserStatus
+        fields = (
+            "id",
+            "author",
+            "content_type",
+            "text",
+            "background_color",
+            "text_color",
+            "media",
+            "is_viewed",
+            "is_own",
+            "view_count",
+            "created_at",
+            "expires_at",
+        )
+        read_only_fields = fields
+
+    def _viewer(self):
+        request = self.context.get("request")
+        viewer = self.context.get("viewer") or getattr(request, "user", None)
+        return viewer if getattr(viewer, "is_authenticated", False) else None
+
+    def get_media(self, obj) -> dict[str, Any] | None:
+        upload = obj.upload
+        viewer = self._viewer()
+        if not upload or not viewer:
+            return None
+        request = self.context.get("request")
+        signed = create_media_access_payload(
+            actor=viewer,
+            resource_type="pending_upload",
+            resource_id=upload.id,
+            request=request,
+            disposition="inline",
+            purpose="user_status",
+        )
+        thumbnail_url = None
+        if upload.thumbnail:
+            path = reverse("pending-upload-thumbnail", kwargs={"upload_id": upload.id})
+            path = f"{path}?token={signed['token']}"
+            thumbnail_url = request.build_absolute_uri(path) if request else path
+        return {
+            "upload_id": str(upload.id),
+            "media_kind": upload.media_kind,
+            "mime_type": upload.mime_type,
+            "preview_url": signed["preview_url"],
+            "thumbnail_url": thumbnail_url,
+            "width": upload.width,
+            "height": upload.height,
+            "duration_seconds": upload.duration_seconds,
+        }
+
+    def get_is_viewed(self, obj) -> bool:
+        viewer = self._viewer()
+        if viewer is None:
+            return False
+        if obj.author_id == viewer.id:
+            return True
+        annotated = getattr(obj, "viewer_has_seen", None)
+        return bool(annotated) if annotated is not None else obj.view_receipts.filter(viewer=viewer).exists()
+
+    def get_is_own(self, obj) -> bool:
+        viewer = self._viewer()
+        return bool(viewer and obj.author_id == viewer.id)
+
+    def get_view_count(self, obj) -> int:
+        viewer = self._viewer()
+        if not viewer or viewer.id != obj.author_id:
+            return 0
+        annotated = getattr(obj, "view_count_value", None)
+        return int(annotated) if annotated is not None else obj.view_receipts.count()
 
 
 class MessageReactionSerializer(serializers.ModelSerializer):

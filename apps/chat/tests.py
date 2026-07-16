@@ -35,6 +35,8 @@ from apps.chat.models import (
     ConversationDraft,
     NotificationPreference,
     PendingUpload,
+    UserStatus,
+    UserStatusView,
     UserE2EEDeviceKey,
     UserBlock,
     UserDevice,
@@ -42,6 +44,88 @@ from apps.chat.models import (
 from apps.chat.services import accept_call, clear_presence, create_direct_conversation, get_presence_snapshot, presence_recipient_ids, send_call_signal, send_message, set_presence, start_call
 
 User = get_user_model()
+
+
+class UserStatusApiTests(APITestCase):
+    def setUp(self):
+        self.author = User.objects.create_user(username="status_author", email="status-author@example.com", password="StrongPass123!")
+        self.friend = User.objects.create_user(username="status_friend", email="status-friend@example.com", password="StrongPass123!")
+        self.stranger = User.objects.create_user(username="status_stranger", email="status-stranger@example.com", password="StrongPass123!")
+        FriendRequest.objects.create(sender=self.author, receiver=self.friend, status=FriendRequest.Status.ACCEPTED)
+
+    def test_text_status_is_friend_visible_and_expires_from_list(self):
+        self.client.force_authenticate(self.author)
+        created = self.client.post(
+            reverse("user-status-list-create"),
+            {"text": "A calm evening", "background_color": "#1d4ed8", "text_color": "#ffffff"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        status_id = created.data["id"]
+        self.assertEqual(created.data["content_type"], UserStatus.ContentType.TEXT)
+
+        self.client.force_authenticate(self.friend)
+        friend_list = self.client.get(reverse("user-status-list-create"))
+        self.assertEqual(friend_list.status_code, 200)
+        self.assertEqual([item["id"] for item in friend_list.data], [status_id])
+
+        self.client.force_authenticate(self.stranger)
+        stranger_list = self.client.get(reverse("user-status-list-create"))
+        self.assertEqual(stranger_list.status_code, 200)
+        self.assertEqual(stranger_list.data, [])
+
+        UserStatus.objects.filter(id=status_id).update(expires_at=timezone.now() - timedelta(seconds=1))
+        self.client.force_authenticate(self.friend)
+        expired_list = self.client.get(reverse("user-status-list-create"))
+        self.assertEqual(expired_list.data, [])
+
+    def test_photo_status_consumes_clean_upload_and_returns_signed_preview(self):
+        upload = PendingUpload.objects.create(
+            user=self.author,
+            file=SimpleUploadedFile("status.jpg", b"safe-image-content", content_type="image/jpeg"),
+            original_name="status.jpg",
+            media_kind=PendingUpload.MediaKind.IMAGE,
+            mime_type="image/jpeg",
+            size=18,
+            extension="jpg",
+            scan_status=PendingUpload.ScanStatus.CLEAN,
+        )
+        self.client.force_authenticate(self.author)
+        created = self.client.post(
+            reverse("user-status-list-create"),
+            {"upload_id": str(upload.id), "text": "Photo caption"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.data["content_type"], UserStatus.ContentType.IMAGE)
+        self.assertIn("token=", created.data["media"]["preview_url"])
+        upload.refresh_from_db()
+        self.assertEqual(upload.status, PendingUpload.UploadStatus.ATTACHED)
+
+    def test_view_receipt_is_idempotent_and_visible_to_author(self):
+        status_item = UserStatus.objects.create(author=self.author, content_type=UserStatus.ContentType.TEXT, text="Seen once")
+        self.client.force_authenticate(self.friend)
+        url = reverse("user-status-view", kwargs={"status_id": status_item.id})
+        first = self.client.post(url, format="json")
+        second = self.client.post(url, format="json")
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(first.data["created"])
+        self.assertFalse(second.data["created"])
+        self.assertEqual(UserStatusView.objects.filter(status=status_item, viewer=self.friend).count(), 1)
+
+        self.client.force_authenticate(self.author)
+        author_list = self.client.get(reverse("user-status-list-create"))
+        self.assertEqual(author_list.data[0]["view_count"], 1)
+
+    def test_only_author_can_delete_status(self):
+        status_item = UserStatus.objects.create(author=self.author, content_type=UserStatus.ContentType.TEXT, text="Temporary")
+        delete_url = reverse("user-status-delete", kwargs={"status_id": status_item.id})
+        self.client.force_authenticate(self.friend)
+        self.assertEqual(self.client.delete(delete_url).status_code, 404)
+        self.client.force_authenticate(self.author)
+        self.assertEqual(self.client.delete(delete_url).status_code, 204)
+        status_item.refresh_from_db()
+        self.assertTrue(status_item.is_deleted)
 
 
 class PushConfigurationTests(TestCase):

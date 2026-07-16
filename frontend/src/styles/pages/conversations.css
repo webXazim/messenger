@@ -660,3 +660,445 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.ms-status-tray {
+  min-width: 0;
+  display: grid;
+  gap: 0.5rem;
+  margin-inline: calc(var(--ms-space-4) * -1);
+  padding: 0.125rem var(--ms-space-4) 0.25rem;
+}
+
+.ms-status-tray__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ms-space-2);
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-2xs);
+  font-weight: 720;
+}
+
+.ms-status-tray__heading strong {
+  color: var(--ms-color-ink);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.ms-status-tray__scroll {
+  min-width: 0;
+  display: flex;
+  gap: 0.625rem;
+  margin-inline: calc(var(--ms-space-4) * -1);
+  padding: 0.125rem var(--ms-space-4) 0.375rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+  scrollbar-width: none;
+}
+
+.ms-status-tray__scroll::-webkit-scrollbar { display: none; }
+
+.ms-status-tray__item {
+  position: relative;
+  width: 4.75rem;
+  min-width: 4.75rem;
+  scroll-snap-align: start;
+}
+
+.ms-status-tray__person {
+  width: 4.75rem;
+  min-width: 4.75rem;
+  display: grid;
+  justify-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.125rem 0.25rem;
+  border: 0;
+  border-radius: var(--ms-radius-sm);
+  background: transparent;
+  color: var(--ms-color-ink-muted);
+  scroll-snap-align: start;
+}
+
+.ms-status-tray__person:hover:not(:disabled) {
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-status-tray__person:focus-visible,
+.ms-status-tray__add:focus-visible {
+  outline: none;
+  box-shadow: var(--ms-focus-ring);
+}
+
+.ms-status-tray__person:disabled { opacity: 0.62; }
+
+.ms-status-tray__person > span:last-child {
+  width: 100%;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  font-weight: 720;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-status-tray__ring {
+  width: 3.75rem;
+  height: 3.75rem;
+  display: grid;
+  place-items: center;
+  padding: 0.1875rem;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.ms-status-tray__person.has-status .ms-status-tray__ring { background: #b9b9b9; }
+.ms-status-tray__person.has-unseen .ms-status-tray__ring {
+  background: linear-gradient(145deg, #28a8ff 2%, #186bff 48%, #7b4dff 100%);
+}
+
+.ms-status-tray__ring .ms-user-avatar--md {
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 0.15625rem solid var(--ms-color-surface);
+}
+
+.ms-status-tray__add {
+  position: absolute;
+  right: 0.3125rem;
+  top: 2.75rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: grid;
+  place-items: center;
+  padding: 0.1875rem;
+  border: 0.125rem solid var(--ms-color-surface);
+  border-radius: 50%;
+  background: #151515;
+  color: #ffffff;
+}
+
+.ms-status-tray__add svg,
+.ms-status-icon-button svg,
+.ms-status-composer__modes svg,
+.ms-status-viewer__actions svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-status-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.68);
+  backdrop-filter: blur(0.45rem);
+}
+
+.ms-status-composer {
+  width: min(35rem, 100%);
+  max-height: min(48rem, calc(100dvh - 2rem));
+  display: grid;
+  gap: 1rem;
+  padding: 1.125rem;
+  overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 1.5rem;
+  background: var(--ms-color-surface);
+  color: var(--ms-color-ink);
+  box-shadow: 0 1.5rem 5rem rgb(0 0 0 / 0.28);
+}
+
+.ms-status-composer > header,
+.ms-status-composer > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ms-status-composer > header span {
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-2xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ms-status-composer h2 {
+  margin: 0.125rem 0 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.025em;
+}
+
+.ms-status-icon-button,
+.ms-status-viewer__actions button {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0.6875rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+}
+
+.ms-status-composer__modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.ms-status-composer__modes button {
+  min-height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.875rem;
+  background: var(--ms-color-surface);
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-sm);
+  font-weight: 750;
+}
+
+.ms-status-composer__modes button[aria-selected="true"] {
+  border-color: var(--ms-color-ink);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
+}
+
+.ms-status-composer__modes button > span,
+.ms-status-composer__modes svg { width: 1.25rem; height: 1.25rem; }
+.ms-status-composer__modes button > span { font-weight: 850; }
+
+.ms-status-composer__text-preview,
+.ms-status-composer__media {
+  position: relative;
+  min-height: 20rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 1.25rem;
+}
+
+.ms-status-composer__text-preview textarea {
+  width: 100%;
+  min-height: 20rem;
+  padding: 2rem;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: 750 clamp(1.5rem, 5vw, 2.15rem)/1.25 inherit;
+  text-align: center;
+}
+
+.ms-status-composer__text-preview textarea::placeholder { color: rgb(255 255 255 / 0.65); }
+.ms-status-composer__media { background: #090909; }
+.ms-status-composer__media img,
+.ms-status-composer__media video { width: 100%; max-height: 25rem; object-fit: contain; }
+
+.ms-status-composer__media > button {
+  position: absolute;
+  right: 0.75rem;
+  top: 0.75rem;
+  min-height: 2.25rem;
+  padding: 0 0.875rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.68);
+  color: #ffffff;
+  font-weight: 750;
+}
+
+.ms-status-composer__caption { display: grid; gap: 0.4rem; }
+.ms-status-composer__caption span { color: var(--ms-color-ink-muted); font-size: var(--ms-font-size-xs); font-weight: 720; }
+.ms-status-composer__caption textarea {
+  min-height: 5rem;
+  padding: 0.75rem;
+  resize: vertical;
+  border: 1px solid var(--ms-color-line);
+  border-radius: 0.75rem;
+  outline: 0;
+  background: var(--ms-color-surface-subtle);
+  color: var(--ms-color-ink);
+  font: inherit;
+}
+
+.ms-status-palette { display: flex; flex-wrap: wrap; gap: 0.625rem; }
+.ms-status-palette button {
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0.1875rem solid var(--ms-color-surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--ms-color-line-strong);
+}
+.ms-status-palette button[aria-pressed="true"] { box-shadow: 0 0 0 0.1875rem var(--ms-color-ink); }
+
+.ms-status-composer__error { margin: 0; color: #c82132; font-size: var(--ms-font-size-xs); }
+.ms-status-composer__progress { height: 0.25rem; overflow: hidden; border-radius: 999px; background: var(--ms-color-surface-strong); }
+.ms-status-composer__progress span { height: 100%; display: block; border-radius: inherit; background: var(--ms-color-ink); transition: width 120ms ease; }
+.ms-status-composer > footer > span { color: var(--ms-color-ink-faint); font-size: var(--ms-font-size-xs); }
+
+.ms-status-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1450;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #050505;
+  color: #ffffff;
+}
+
+.ms-status-viewer__backdrop {
+  position: absolute;
+  inset: -2rem;
+  background: radial-gradient(circle at center, #343434, #050505 72%);
+  filter: blur(2rem);
+  opacity: 0.6;
+}
+
+.ms-status-viewer__stage {
+  position: relative;
+  z-index: 1;
+  width: min(35rem, 100vw);
+  height: 100dvh;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #111111;
+  box-shadow: 0 0 4rem rgb(0 0 0 / 0.5);
+}
+
+.ms-status-viewer__stage > img,
+.ms-status-viewer__stage > video { width: 100%; height: 100%; object-fit: contain; background: #050505; }
+.ms-status-viewer__stage > p {
+  max-width: 92%;
+  margin: 0;
+  padding: 2rem;
+  font-size: clamp(1.85rem, 6vw, 3rem);
+  font-weight: 760;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.ms-status-viewer__caption {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 6.5rem;
+  padding: 0.875rem 1rem;
+  border-radius: 1rem;
+  background: rgb(0 0 0 / 0.58);
+  color: #ffffff;
+  font-size: var(--ms-font-size-sm);
+  text-align: center;
+  backdrop-filter: blur(0.5rem);
+}
+
+.ms-status-viewer__header {
+  position: absolute;
+  z-index: 5;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: 50%;
+  width: min(35rem, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  transform: translateX(-50%);
+  filter: drop-shadow(0 0.125rem 0.25rem rgb(0 0 0 / 0.65));
+}
+
+.ms-status-viewer__segments {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.25rem;
+}
+.ms-status-viewer__segments > span { height: 0.1875rem; flex: 1 1 0; overflow: hidden; border-radius: 999px; background: rgb(255 255 255 / 0.4); }
+.ms-status-viewer__segments i { height: 100%; display: block; background: #ffffff; }
+
+.ms-status-viewer__identity { min-width: 0; display: flex; align-items: center; gap: 0.625rem; }
+.ms-status-viewer__identity .ms-user-avatar { border: 1px solid rgb(255 255 255 / 0.72); }
+.ms-status-viewer__identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ms-font-size-sm); }
+.ms-status-viewer__identity > span:last-child { color: rgb(255 255 255 / 0.72); font-size: var(--ms-font-size-xs); }
+.ms-status-viewer__actions { display: flex; gap: 0.375rem; }
+.ms-status-viewer__actions button { width: 2.25rem; height: 2.25rem; padding: 0.55rem; background: rgb(0 0 0 / 0.42); color: #ffffff; }
+
+.ms-status-viewer__nav { position: absolute; z-index: 3; top: 6rem; bottom: 5.5rem; width: min(20vw, 12rem); border: 0; background: transparent; }
+.ms-status-viewer__nav--previous { left: 0; }
+.ms-status-viewer__nav--next { right: 0; }
+
+.ms-status-viewer__footer {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  width: min(35rem, 100%);
+  min-height: 3.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0 1rem;
+  transform: translateX(-50%);
+}
+
+.ms-status-viewer__footer > span { color: rgb(255 255 255 / 0.76); font-size: var(--ms-font-size-sm); }
+.ms-status-viewer__footer > button {
+  min-height: 2.75rem;
+  padding: 0 1.125rem;
+  border: 1px solid rgb(255 255 255 / 0.32);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.52);
+  color: #ffffff;
+  font-weight: 750;
+  backdrop-filter: blur(0.5rem);
+}
+.ms-status-viewer__message { width: min(24rem, 100%); }
+
+@media (max-width: 900px) {
+  .ms-status-tray { margin-inline: calc(var(--ms-space-3) * -1); padding-inline: var(--ms-space-3); }
+  .ms-status-tray__scroll { margin-inline: calc(var(--ms-space-3) * -1); padding-inline: var(--ms-space-3); }
+}
+
+@media (max-width: 600px) {
+  .ms-status-modal { padding: 0; align-items: end; }
+  .ms-status-composer {
+    width: 100%;
+    max-height: 94dvh;
+    padding: 1rem;
+    border: 0;
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .ms-status-composer__text-preview,
+  .ms-status-composer__text-preview textarea { min-height: 18rem; }
+  .ms-status-composer > footer { align-items: stretch; flex-direction: column; }
+  .ms-status-composer > footer .ms-button { width: 100%; }
+  .ms-status-viewer__stage { width: 100vw; }
+  .ms-status-viewer__nav { width: 28vw; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-status-composer__progress span { transition: none; }
+}

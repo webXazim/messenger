@@ -4,7 +4,7 @@ import { resolveMediaUrl } from "../lib/mediaUrl";
 import { API_BASE_URL } from "../lib/config";
 import { safeId } from "../lib/safeId";
 import { collectCursorPages, type CursorPage } from "../lib/pagination";
-import type { Call, CallConfig, Conversation, ConversationE2EEKeyMaterial, ConversationInviteLink, E2EEDeviceKey, Message, NotificationPreferences, TurnCredentials } from "../types/chat";
+import type { Call, CallConfig, Conversation, ConversationE2EEKeyMaterial, ConversationInviteLink, E2EEDeviceKey, Message, NotificationPreferences, TurnCredentials, UserStatus } from "../types/chat";
 
 export type ConversationNotificationSettings = {
   message_notifications_enabled?: boolean;
@@ -313,6 +313,36 @@ function normalizeAttachment(value: unknown): import("../types/chat").MessageAtt
       preview_mime_type: firstString(encryption.preview_mime_type) || undefined,
       aad: asRecord(encryption.aad),
     } : null,
+  };
+}
+
+function normalizeUserStatus(value: unknown): UserStatus {
+  const item = asRecord(value);
+  const media = asRecord(item.media);
+  const contentType = firstString(item.content_type);
+  const mediaKind = firstString(media.media_kind);
+  return {
+    id: firstString(item.id),
+    author: normalizeUserLite(item.author),
+    content_type: (["text", "image", "video"].includes(contentType) ? contentType : "text") as UserStatus["content_type"],
+    text: firstString(item.text),
+    background_color: firstString(item.background_color) || "#111111",
+    text_color: firstString(item.text_color) || "#ffffff",
+    media: Object.keys(media).length ? {
+      upload_id: firstString(media.upload_id),
+      media_kind: (mediaKind === "video" ? "video" : "image"),
+      mime_type: firstString(media.mime_type) || undefined,
+      preview_url: resolveMediaUrl(firstString(media.preview_url)) || "",
+      thumbnail_url: resolveMediaUrl(firstString(media.thumbnail_url)) || null,
+      width: firstNumber(media.width) ?? null,
+      height: firstNumber(media.height) ?? null,
+      duration_seconds: firstNumber(media.duration_seconds) ?? null,
+    } : null,
+    is_viewed: Boolean(item.is_viewed),
+    is_own: Boolean(item.is_own),
+    view_count: firstNumber(item.view_count) ?? 0,
+    created_at: firstString(item.created_at),
+    expires_at: firstString(item.expires_at),
   };
 }
 
@@ -1005,6 +1035,24 @@ export const chatApi = {
       rotation: extracted.rotation,
       durationSeconds: extracted.duration_seconds ? Number(extracted.duration_seconds) : undefined,
     };
+  },
+  async listStatuses(signal?: AbortSignal) {
+    const response = await http.get("/chat/statuses/", { signal });
+    const payload = unwrapData<unknown>(response.data);
+    const record = asRecord(payload);
+    const items = Array.isArray(payload) ? payload : Array.isArray(record.results) ? record.results : [];
+    return items.map(normalizeUserStatus).filter((item) => Boolean(item.id));
+  },
+  async createStatus(payload: { text?: string; upload_id?: string; background_color?: string; text_color?: string }) {
+    const response = await http.post("/chat/statuses/", payload);
+    return normalizeUserStatus(unwrapData<unknown>(response.data));
+  },
+  async markStatusViewed(statusId: string) {
+    const response = await http.post(`/chat/statuses/${statusId}/view/`);
+    return unwrapObject<Record<string, unknown>>(response.data, {});
+  },
+  async deleteStatus(statusId: string) {
+    await http.delete(`/chat/statuses/${statusId}/`);
   },
   async listCalls(status?: string, signal?: AbortSignal) {
     const items = await collectChatPages("/chat/calls/recent/", normalizeCall, {

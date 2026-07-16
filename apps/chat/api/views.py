@@ -29,6 +29,7 @@ from apps.chat.models import (
     MessageEditHistory,
     MessageReport,
     PendingUpload,
+    UserStatus,
     UserBlock,
     UserDevice,
     UserE2EEDeviceKey,
@@ -120,6 +121,11 @@ from apps.chat.services import (
     get_public_presence_snapshot,
     presence_recipient_ids,
     dispatch_pending_upload_scan,
+    create_user_status,
+    delete_user_status,
+    mark_user_status_viewed,
+    status_friend_ids,
+    visible_user_statuses,
 )
 from apps.chat.tasks import integration_health_snapshot
 from .serializers import (
@@ -174,6 +180,8 @@ from .serializers import (
     GroupParticipantBanSerializer,
     IntegrationHealthSerializer,
     PendingUploadSerializer,
+    UserStatusCreateSerializer,
+    UserStatusSerializer,
     ReactionSerializer,
     SyncQuerySerializer,
     TurnCredentialsSerializer,
@@ -1206,6 +1214,62 @@ class UploadCreateView(views.APIView):
                 pending, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+def _broadcast_status_change(author, status_id, action):
+    recipient_ids = status_friend_ids(author)
+    recipient_ids.add(author.id)
+    payload = {"author_id": str(author.id), "status_id": str(status_id), "action": action}
+    for recipient_id in recipient_ids:
+        _broadcast_to_user(str(recipient_id), "status.changed", payload)
+
+
+class UserStatusListCreateView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        queryset = visible_user_statuses(request.user)
+        return Response(UserStatusSerializer(queryset, many=True, context={"request": request}).data)
+
+    def post(self, request):
+        serializer = UserStatusCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_status = create_user_status(request.user, **serializer.validated_data)
+        user_status = UserStatus.objects.select_related("author", "author__profile", "upload").get(id=user_status.id)
+        _broadcast_status_change(request.user, user_status.id, "created")
+        return Response(
+            UserStatusSerializer(user_status, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class UserStatusDeleteView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, status_id):
+        user_status = get_object_or_404(UserStatus.objects.select_related("author", "upload"), id=status_id, author=request.user)
+        delete_user_status(request.user, user_status)
+        _broadcast_status_change(request.user, user_status.id, "deleted")
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserStatusViewReceiptView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, status_id):
+        user_status = get_object_or_404(visible_user_statuses(request.user), id=status_id)
+        receipt, created = mark_user_status_viewed(request.user, user_status)
+        if receipt is not None and created:
+            _broadcast_to_user(
+                str(user_status.author_id),
+                "status.viewed",
+                {
+                    "status_id": str(user_status.id),
+                    "viewer_id": str(request.user.id),
+                    "viewed_at": receipt.viewed_at.isoformat(),
+                },
+            )
+        return Response({"status_id": str(user_status.id), "viewed": True, "created": created})
 
 
 class PendingUploadDownloadView(views.APIView):

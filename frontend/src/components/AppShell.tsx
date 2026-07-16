@@ -399,6 +399,10 @@ export function AppShell() {
         }
         return;
       }
+      if (payload.event === "status.changed" || payload.event === "status.viewed") {
+        void queryClient.invalidateQueries({ queryKey: ["user-statuses"] });
+        return;
+      }
       const eventKey = payload.event_id || `${payload.event}:${String(payload.data?.conversation_id || "")}:${String(payload.data?.message_id || payload.data?.id || payload.data?.call_id || "")}:${String(payload.occurred_at || "")}`;
       if (seenNotificationKeys.has(eventKey)) return;
       seenNotificationKeys.add(eventKey);

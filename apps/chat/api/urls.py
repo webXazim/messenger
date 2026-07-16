@@ -87,6 +87,9 @@ from .views import (
     ReactionCreateDeleteView,
     SyncView,
     UploadCreateView,
+    UserStatusDeleteView,
+    UserStatusListCreateView,
+    UserStatusViewReceiptView,
 )
 
 urlpatterns = [
@@ -146,6 +149,9 @@ urlpatterns = [
     path("conversations/<uuid:conversation_id>/transfer-ownership/", GroupOwnershipTransferView.as_view(), name="group-ownership-transfer"),
     path("conversations/<uuid:conversation_id>/leave/", LeaveConversationView.as_view(), name="conversation-leave"),
     path("uploads/", UploadCreateView.as_view(), name="upload-create"),
+    path("statuses/", UserStatusListCreateView.as_view(), name="user-status-list-create"),
+    path("statuses/<uuid:status_id>/", UserStatusDeleteView.as_view(), name="user-status-delete"),
+    path("statuses/<uuid:status_id>/view/", UserStatusViewReceiptView.as_view(), name="user-status-view"),
     path("uploads/<uuid:upload_id>/download/", PendingUploadDownloadView.as_view(), name="pending-upload-download"),
     path("uploads/<uuid:upload_id>/preview/", PendingUploadPreviewView.as_view(), name="pending-upload-preview"),
     path("uploads/<uuid:upload_id>/thumbnail/", PendingUploadThumbnailView.as_view(), name="pending-upload-thumbnail"),

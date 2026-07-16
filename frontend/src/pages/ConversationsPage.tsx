@@ -52,6 +52,7 @@ export function ConversationsPage() {
       username: user?.username,
       email: user?.email,
       display_name: user?.profile?.display_name || user?.display_name,
+      avatar: user?.profile?.avatar,
     }),
     [user],
   );

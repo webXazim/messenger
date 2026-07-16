@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useConversationListPreferences } from "../../hooks/useConversationListPreferences";
 import { ConversationListControls } from "./ConversationListControls";
-import { OnlineFriendsStrip } from "./OnlineFriendsStrip";
+import { StatusTray } from "./StatusTray";
 import { ConversationRow } from "./ConversationRow";
 import { conversationListEmptyCopy, filterConversationsForInbox } from "./conversationFiltering";
 import { applyKnownOnlinePresence } from "./conversationPresentation";
@@ -42,14 +42,13 @@ export function ConversationSidebarList({
         {unreadCount ? <strong aria-label={`${unreadCount} unread chats`}>{unreadCount > 99 ? "99+" : unreadCount}</strong> : null}
       </header>
 
-      <OnlineFriendsStrip friends={onlineFriends} busyUserId={openingFriendId} onOpenFriend={onOpenFriend} />
-
       <ConversationListControls
         search={search}
         filter={filter}
         searchInputId={searchInputId}
         onSearchChange={setSearch}
         onFilterChange={setFilter}
+        middleContent={<StatusTray currentUser={currentUser} friends={onlineFriends} busyUserId={openingFriendId} onOpenFriend={onOpenFriend} />}
       />
 
       <div className="ms-inbox-list__scroll ms-scroll-region">

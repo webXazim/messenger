@@ -14,6 +14,32 @@ export type UserLite = {
   presence_visibility?: "public" | "hidden";
 };
 
+export type UserStatusMedia = {
+  upload_id: string;
+  media_kind: "image" | "video";
+  mime_type?: string;
+  preview_url: string;
+  thumbnail_url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  duration_seconds?: number | null;
+};
+
+export type UserStatus = {
+  id: string;
+  author: UserLite;
+  content_type: "text" | "image" | "video";
+  text: string;
+  background_color: string;
+  text_color: string;
+  media?: UserStatusMedia | null;
+  is_viewed: boolean;
+  is_own: boolean;
+  view_count: number;
+  created_at: string;
+  expires_at: string;
+};
+
 export type MessageAttachment = {
   id: string;
   original_name: string;

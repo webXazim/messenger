@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ConversationFilter } from "./types";
 
 function SearchIcon() {
@@ -21,12 +22,14 @@ export function ConversationListControls({
   searchInputId,
   onSearchChange,
   onFilterChange,
+  middleContent,
 }: {
   search: string;
   filter: ConversationFilter;
   searchInputId?: string;
   onSearchChange: (value: string) => void;
   onFilterChange: (value: ConversationFilter) => void;
+  middleContent?: ReactNode;
 }) {
   return (
     <div className="ms-inbox-list__tools">
@@ -46,6 +49,8 @@ export function ConversationListControls({
           </button>
         ) : null}
       </label>
+
+      {middleContent}
 
       <div className="ms-inbox-filters" role="group" aria-label="Chat filters">
         {FILTERS.map((item) => (

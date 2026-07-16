@@ -13,6 +13,10 @@ def pending_upload_expiry_default():
     return timezone.now() + timedelta(seconds=ttl)
 
 
+def user_status_expiry_default():
+    return timezone.now() + timedelta(hours=24)
+
+
 class Conversation(BaseUUIDModel):
     class ConversationType(models.TextChoices):
         DIRECT = "direct", "Direct"
@@ -118,6 +122,45 @@ class PendingUpload(BaseUUIDModel):
             models.Index(fields=["user", "status", "created_at"]),
             models.Index(fields=["user", "expires_at"]),
         ]
+
+
+class UserStatus(BaseUUIDModel):
+    class ContentType(models.TextChoices):
+        TEXT = "text", "Text"
+        IMAGE = "image", "Image"
+        VIDEO = "video", "Video"
+
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_statuses")
+    content_type = models.CharField(max_length=12, choices=ContentType.choices)
+    text = models.TextField(blank=True)
+    upload = models.OneToOneField(
+        PendingUpload,
+        on_delete=models.CASCADE,
+        related_name="user_status",
+        null=True,
+        blank=True,
+    )
+    background_color = models.CharField(max_length=9, default="#111111")
+    text_color = models.CharField(max_length=9, default="#ffffff")
+    expires_at = models.DateTimeField(default=user_status_expiry_default)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["author", "expires_at"]),
+            models.Index(fields=["is_deleted", "expires_at"]),
+        ]
+
+
+class UserStatusView(BaseUUIDModel):
+    status = models.ForeignKey(UserStatus, on_delete=models.CASCADE, related_name="view_receipts")
+    viewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="viewed_chat_statuses")
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["status", "viewer"], name="uniq_status_viewer")]
+        indexes = [models.Index(fields=["status", "viewed_at"]), models.Index(fields=["viewer", "viewed_at"])]
 
 
 class UserE2EEDeviceKey(BaseUUIDModel):

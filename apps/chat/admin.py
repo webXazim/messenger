@@ -20,6 +20,8 @@ from .models import (
     ModerationAction,
     NotificationPreference,
     PendingUpload,
+    UserStatus,
+    UserStatusView,
     UserBlock,
     UserDevice,
     UserE2EEDeviceKey,
@@ -140,6 +142,23 @@ class PendingUploadAdmin(UUIDAdminMixin, admin.ModelAdmin):
     list_filter = ("media_kind", "status", "scan_status", "expires_at", "created_at")
     search_fields = ("original_name", "mime_type", "extension", "user__username", "user__email", "scan_notes")
     raw_id_fields = ("user",)
+
+
+class UserStatusViewInline(admin.TabularInline):
+    model = UserStatusView
+    extra = 0
+    raw_id_fields = ("viewer",)
+    readonly_fields = ("id", "viewer", "viewed_at", "created_at", "updated_at")
+    can_delete = False
+
+
+@admin.register(UserStatus)
+class UserStatusAdmin(UUIDAdminMixin, admin.ModelAdmin):
+    list_display = ("author", "content_type", "is_deleted", "expires_at", "created_at")
+    list_filter = ("content_type", "is_deleted", "expires_at", "created_at")
+    search_fields = ("author__username", "author__email", "text")
+    raw_id_fields = ("author", "upload")
+    inlines = (UserStatusViewInline,)
 
 
 @admin.register(MessageReport)

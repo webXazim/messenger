@@ -51,6 +51,8 @@ from .models import (
     ModerationAction,
     NotificationPreference,
     PendingUpload,
+    UserStatus,
+    UserStatusView,
     UserE2EEDeviceKey,
     UserBlock,
     UserDevice,
@@ -92,6 +94,8 @@ MEDIA_SERVER_THUMBNAIL_JPEG_QUALITY = int(getattr(settings, "MEDIA_SERVER_THUMBN
 MEDIA_PROBE_TIMEOUT_SECONDS = float(getattr(settings, "MEDIA_PROBE_TIMEOUT_SECONDS", 4.0) or 4.0)
 MEDIA_THUMBNAIL_GENERATION_TIMEOUT_SECONDS = float(getattr(settings, "MEDIA_THUMBNAIL_GENERATION_TIMEOUT_SECONDS", 6.0) or 6.0)
 MEDIA_VIDEO_THUMBNAIL_OFFSET_SECONDS = float(getattr(settings, "MEDIA_VIDEO_THUMBNAIL_OFFSET_SECONDS", 0.25) or 0.25)
+USER_STATUS_MAX_ACTIVE = max(1, int(getattr(settings, "USER_STATUS_MAX_ACTIVE", 50) or 50))
+USER_STATUS_TTL_SECONDS = max(300, int(getattr(settings, "USER_STATUS_TTL_SECONDS", 24 * 60 * 60) or 24 * 60 * 60))
 CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 MEDIA_METADATA_RESERVED_KEYS = {"encrypted_attachment", "encryption"}
 
@@ -1971,6 +1975,122 @@ def presence_recipient_ids(user):
     blocked_ids = set(UserBlock.objects.filter(blocker=user).values_list("blocked_id", flat=True))
     blocked_ids.update(UserBlock.objects.filter(blocked=user).values_list("blocker_id", flat=True))
     return sorted(str(user_id) for user_id in user_ids if user_id not in blocked_ids)
+
+
+def status_friend_ids(user):
+    """Return accepted, active and unblocked friends allowed to see a status."""
+    from apps.accounts.models import FriendRequest
+
+    friendships = FriendRequest.objects.filter(status=FriendRequest.Status.ACCEPTED).filter(
+        Q(sender=user) | Q(receiver=user)
+    ).values_list("sender_id", "receiver_id")
+    friend_ids = {
+        receiver_id if sender_id == user.id else sender_id
+        for sender_id, receiver_id in friendships
+    }
+    blocked_ids = set(UserBlock.objects.filter(blocker=user).values_list("blocked_id", flat=True))
+    blocked_ids.update(UserBlock.objects.filter(blocked=user).values_list("blocker_id", flat=True))
+    return {friend_id for friend_id in friend_ids if friend_id not in blocked_ids}
+
+
+def visible_user_statuses(actor):
+    from django.db.models import Count, Exists, OuterRef
+
+    author_ids = status_friend_ids(actor)
+    author_ids.add(actor.id)
+    viewer_receipts = UserStatusView.objects.filter(status_id=OuterRef("pk"), viewer=actor)
+    return (
+        UserStatus.objects.filter(
+            author_id__in=author_ids,
+            author__is_active=True,
+            is_deleted=False,
+            expires_at__gt=timezone.now(),
+        )
+        .filter(
+            Q(content_type=UserStatus.ContentType.TEXT)
+            | Q(upload__scan_status=PendingUpload.ScanStatus.CLEAN, upload__status=PendingUpload.UploadStatus.ATTACHED)
+        )
+        .select_related("author", "author__profile", "upload")
+        .annotate(view_count_value=Count("view_receipts", distinct=True), viewer_has_seen=Exists(viewer_receipts))
+        .order_by("author_id", "created_at")
+    )
+
+
+@transaction.atomic
+def create_user_status(actor, *, text="", upload_id=None, background_color="#111111", text_color="#ffffff"):
+    now = timezone.now()
+    active_count = UserStatus.objects.filter(author=actor, is_deleted=False, expires_at__gt=now).count()
+    if active_count >= USER_STATUS_MAX_ACTIVE:
+        raise ValidationError({"status": f"You can have up to {USER_STATUS_MAX_ACTIVE} active status updates."})
+
+    expires_at = now + timedelta(seconds=USER_STATUS_TTL_SECONDS)
+    upload = None
+    content_type = UserStatus.ContentType.TEXT
+    max_text_length = 800
+    if upload_id:
+        upload = PendingUpload.objects.select_for_update().filter(
+            id=upload_id,
+            user=actor,
+            status=PendingUpload.UploadStatus.PENDING,
+        ).first()
+        if upload is None:
+            raise ValidationError({"upload_id": "This upload is unavailable or already in use."})
+        expire_pending_upload_if_needed(upload)
+        if upload.status == PendingUpload.UploadStatus.EXPIRED:
+            raise ValidationError({"upload_id": "This upload has expired."})
+        if upload.scan_status == PendingUpload.ScanStatus.PENDING:
+            upload = scan_upload_file(upload)
+        if upload.scan_status != PendingUpload.ScanStatus.CLEAN:
+            raise ValidationError({"upload_id": "Only clean scanned media can be shared as a status."})
+        media_kind = upload.media_kind or media_kind_from_mime(upload.mime_type)
+        if media_kind not in {PendingUpload.MediaKind.IMAGE, PendingUpload.MediaKind.VIDEO}:
+            raise ValidationError({"upload_id": "Status media must be a photo or video."})
+        content_type = UserStatus.ContentType.IMAGE if media_kind == PendingUpload.MediaKind.IMAGE else UserStatus.ContentType.VIDEO
+        max_text_length = 500
+
+    cleaned_text = sanitize_chat_text(text, max_length=max_text_length, multiline=True)
+    if upload is None and not cleaned_text:
+        raise ValidationError({"text": "Write something or choose a photo or video."})
+
+    user_status = UserStatus.objects.create(
+        author=actor,
+        content_type=content_type,
+        text=cleaned_text,
+        upload=upload,
+        background_color=background_color,
+        text_color=text_color,
+        expires_at=expires_at,
+    )
+    if upload is not None:
+        upload.status = PendingUpload.UploadStatus.ATTACHED
+        upload.expires_at = expires_at
+        upload.save(update_fields=["status", "expires_at", "updated_at"])
+    return user_status
+
+
+@transaction.atomic
+def delete_user_status(actor, user_status):
+    if user_status.author_id != actor.id:
+        raise PermissionDenied("Only the author can delete this status.")
+    if user_status.is_deleted:
+        return user_status
+    now = timezone.now()
+    user_status.is_deleted = True
+    user_status.expires_at = now
+    user_status.save(update_fields=["is_deleted", "expires_at", "updated_at"])
+    if user_status.upload_id:
+        PendingUpload.objects.filter(id=user_status.upload_id).update(
+            status=PendingUpload.UploadStatus.EXPIRED,
+            expires_at=now,
+            updated_at=now,
+        )
+    return user_status
+
+
+def mark_user_status_viewed(actor, user_status):
+    if user_status.author_id == actor.id:
+        return None, False
+    return UserStatusView.objects.get_or_create(status=user_status, viewer=actor)
 
 
 def request_user_devices(user):
