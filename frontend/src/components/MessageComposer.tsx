@@ -99,12 +99,12 @@ export function MessageComposer({
   const resizeTextarea = () => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    if (window.matchMedia("(max-width: 720px)").matches) {
-      textarea.style.height = "";
-      return;
-    }
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  };
+
+  const focusTextarea = () => {
+    window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
   };
 
   useEffect(() => {
@@ -321,6 +321,7 @@ export function MessageComposer({
         pendingUploadsRef.current = [];
         setPendingUploads([]);
         setText("");
+        focusTextarea();
         try {
           setSubmitError(null);
           setIsSubmitting(true);
@@ -346,6 +347,7 @@ export function MessageComposer({
           setSubmitError(error instanceof Error ? error.message : "Could not send this message. Your draft and attachments are still here.");
         } finally {
           setIsSubmitting(false);
+          focusTextarea();
         }
       }}
     >
@@ -415,7 +417,9 @@ export function MessageComposer({
           aria-label={editingMessage ? "Edit message" : "Write a message"}
           aria-describedby={`${keyboardHelpId}${submitError ? ` ${submitErrorId}` : ""}`}
           aria-keyshortcuts="Enter"
-          disabled={composerDisabled || isSubmitting}
+          aria-busy={isSubmitting}
+          readOnly={isSubmitting}
+          disabled={composerDisabled}
         />
 
         <button
