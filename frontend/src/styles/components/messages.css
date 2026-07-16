@@ -222,6 +222,38 @@
   vertical-align: baseline;
 }
 
+/* Text-only messages reserve the end of their last line for metadata, then
+   pin the timestamp and receipt to the bubble's lower-right corner. */
+.ms-message-copy.is-text-only {
+  --ms-text-meta-reserve: 3.75rem;
+  position: relative;
+}
+
+.ms-message-row--own .ms-message-copy.is-text-only {
+  --ms-text-meta-reserve: 5.25rem;
+}
+
+.ms-message-card.is-action-pending .ms-message-copy.is-text-only,
+.ms-message-row.is-optimistic .ms-message-copy.is-text-only {
+  --ms-text-meta-reserve: 7.25rem;
+}
+
+.ms-message-copy.is-text-only
+  > :is(.ms-message-text, .ms-reply-preview, .ms-message-transcript, .ms-message-links):nth-last-child(2)::after {
+  width: var(--ms-text-meta-reserve);
+  height: 0.7em;
+  display: inline-block;
+  content: "";
+}
+
+.ms-message-copy.is-text-only > .ms-message-meta {
+  position: absolute;
+  right: 0.68rem;
+  bottom: 0.52rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
 .ms-message-text.is-encryption-status {
   color: var(--ms-color-ink-muted);
   font-style: italic;
@@ -1458,6 +1490,12 @@ button.ms-message-reply:hover {
     margin-left: 0.3rem;
     font-size: 0.575rem;
     line-height: 1;
+  }
+
+  .ms-message-copy.is-text-only > .ms-message-meta {
+    right: 0.58rem;
+    bottom: 0.4rem;
+    margin: 0;
   }
 
   .ms-message-copy .ms-message-receipt,

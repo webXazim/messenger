@@ -446,7 +446,8 @@
   .ms-conversation-view--details-open {
     display: block;
     width: 100%;
-    height: 100%;
+    height: var(--ms-chat-visual-viewport-height, 100%);
+    max-height: var(--ms-chat-visual-viewport-height, 100%);
   }
 
   .ms-conversation-view__inbox,

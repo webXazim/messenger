@@ -303,6 +303,37 @@ export function ConversationPage() {
   const decryptionCiphertextRef = useRef<Record<string, string>>({});
   const lastReadReceiptMessageRef = useRef("");
   const lastDeliveredReceiptMessageRef = useRef("");
+  const conversationViewRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = conversationViewRef.current;
+    const viewport = window.visualViewport;
+    if (!node || !viewport) return;
+
+    let frame = 0;
+    const syncVisualViewport = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        if (window.matchMedia("(max-width: 900px)").matches) {
+          node.style.setProperty("--ms-chat-visual-viewport-height", `${Math.round(viewport.height)}px`);
+        } else {
+          node.style.removeProperty("--ms-chat-visual-viewport-height");
+        }
+      });
+    };
+
+    syncVisualViewport();
+    viewport.addEventListener("resize", syncVisualViewport);
+    viewport.addEventListener("scroll", syncVisualViewport);
+    window.addEventListener("orientationchange", syncVisualViewport);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      viewport.removeEventListener("resize", syncVisualViewport);
+      viewport.removeEventListener("scroll", syncVisualViewport);
+      window.removeEventListener("orientationchange", syncVisualViewport);
+      node.style.removeProperty("--ms-chat-visual-viewport-height");
+    };
+  }, []);
 
   useEffect(() => {
     lastReadReceiptMessageRef.current = "";
@@ -1611,7 +1642,7 @@ export function ConversationPage() {
   }, [callError, conversationError, conversationStateError, encryptionReadiness.canEncrypt, encryptionReadiness.status, encryptionReadinessMessage, messages.length, showRealtimeNotice, socketStatus]);
 
   return (
-    <div className={`ms-conversation-view ${showDetails ? "ms-conversation-view--details-open" : ""}`} style={shellStyle}>
+    <div ref={conversationViewRef} className={`ms-conversation-view ${showDetails ? "ms-conversation-view--details-open" : ""}`} style={shellStyle}>
       <aside className="ms-conversation-view__inbox" aria-label="Conversations">
         {conversationsQuery.isLoading ? (
           <div className="ms-conversations-state" role="status" aria-live="polite">

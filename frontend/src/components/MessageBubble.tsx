@@ -309,7 +309,7 @@ export function MessageBubble({
           <AttachmentMessage attachments={files} currentUserId={currentUserId} onPreviewAttachment={onPreviewAttachment} />
 
           {hasCopySurface ? (
-            <div className="ms-message-copy">
+            <div className={`ms-message-copy ${!hasRichContent ? "is-text-only" : ""}`}>
               <ReplyPreview message={message} onJumpToReply={onJumpToReply} />
               {hasText ? (
                 <MessageText

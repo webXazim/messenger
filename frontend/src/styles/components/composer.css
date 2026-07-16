@@ -31,16 +31,17 @@
   gap: 0.25rem;
   padding: 0.3125rem;
   border: 0;
-  border-radius: 1.125rem;
-  background: var(--ms-color-surface);
-  box-shadow: 0 0.375rem 1.5rem rgb(0 0 0 / 0.045);
+  border-radius: 1.5rem;
+  background: var(--ms-color-surface-subtle);
+  box-shadow: none;
   transition:
     border-color var(--ms-transition-fast),
     box-shadow var(--ms-transition-fast);
 }
 
 .ms-message-composer__surface:focus-within {
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.06);
+  background: var(--ms-color-surface-subtle);
+  box-shadow: none;
 }
 
 .ms-message-composer.is-dragging .ms-message-composer__disabled-note {
@@ -149,6 +150,13 @@
 
 .ms-message-composer__input::placeholder {
   color: var(--ms-color-ink-faint);
+}
+
+.ms-message-composer__input:focus,
+.ms-message-composer__input:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
 }
 
 
@@ -743,7 +751,7 @@
   }
 
   .ms-message-composer__surface:focus-within {
-    box-shadow: 0 0.375rem 1rem rgb(0 0 0 / 0.05);
+    box-shadow: none;
   }
 
   .ms-composer-icon-button,

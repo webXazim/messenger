@@ -127,6 +127,24 @@ export function useConversationTimeline({
     return () => node.removeEventListener("scroll", handleScroll);
   }, [fetchNextPage, hasNextPage, isFetchingNextPage, messages]);
 
+  useEffect(() => {
+    const node = scrollerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (!stickToBottomRef.current) return;
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        node.scrollTop = node.scrollHeight;
+      });
+    });
+    observer.observe(node);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [conversationId]);
+
   const revealMessage = useCallback((messageId: string) => {
     const node = messageRefs.current[messageId];
     if (!node) return false;
