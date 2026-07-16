@@ -16,6 +16,8 @@ const services = read("../apps/chat/services.py");
 const consumers = read("../apps/chat/consumers.py");
 const serializers = read("../apps/chat/api/serializers.py");
 const views = read("../apps/chat/api/views.py");
+const devicePresence = read("src/lib/devicePresence.ts");
+const personPresentation = read("src/lib/personPresentation.ts");
 
 for (const required of [
   "event_id?: string",
@@ -110,5 +112,9 @@ assert.ok(views.includes('if getattr(participant, "_read_changed", False)'), "Un
 assert.ok(services.includes("effective_read_message"), "Duplicate read acknowledgements do not repair their delivered cursor.");
 assert.ok(views.includes("_broadcast_presence_update(request.user, snapshot)"), "REST presence changes are not propagated to peers.");
 assert.match(consumers, /_subscribe[\s\S]*group_send\(group_name, self\._event_payload\("message\.delivered"/, "Subscription delivery receipts are not broadcast to the sender.");
+assert.ok(devicePresence.includes("PRESENCE_IDLE_AFTER_MS") && devicePresence.includes("detectPresenceDeviceType"), "The client does not classify broad device type or define an idle threshold.");
+assert.ok(socket.includes("presence_status") && socket.includes("device_type") && socket.includes("visibilitychange"), "Socket heartbeats do not report activity and device presence.");
+assert.ok(services.includes("_presence_snapshot_from_devices") && services.includes('presence_status = "active" if actively_used else "idle"'), "Multi-device presence does not aggregate active and idle sessions.");
+assert.ok(personPresentation.includes('"Idle"') && personPresentation.includes("deviceLabel"), "Presence labels do not display idle state and device type.");
 
 console.log("Realtime source regression checks passed.");

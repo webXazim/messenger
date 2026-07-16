@@ -1,4 +1,5 @@
 import { WS_BASE_URL } from "./config";
+import { detectPresenceDeviceType, PRESENCE_IDLE_AFTER_MS, type PresenceActivityStatus } from "./devicePresence";
 
 export type SocketEvent = {
   event: string;
@@ -14,11 +15,13 @@ type StatusListener = (status: SocketStatus) => void;
 
 export const SOCKET_AUTH_FAILED_EVENT = "messenger-socket-auth-failed";
 
-function buildSocketUrl(baseUrl: string, token: string, deviceId: string) {
+function buildSocketUrl(baseUrl: string, token: string, deviceId: string, presenceStatus: PresenceActivityStatus) {
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const url = new URL(normalizedBase);
   url.searchParams.set("token", token);
   url.searchParams.set("device_id", deviceId);
+  url.searchParams.set("device_type", detectPresenceDeviceType());
+  url.searchParams.set("presence_status", presenceStatus);
   return url.toString();
 }
 
@@ -63,7 +66,84 @@ export class ChatSocket {
   private subscriptions = new Map<string, number>();
   private pendingQueue: SocketEvent[] = [];
   private heartbeatTimer: number | null = null;
+  private idleTimer: number | null = null;
+  private lastActivityAt = Date.now();
+  private lastSentPresenceStatus: PresenceActivityStatus | null = null;
+  private activityTracking = false;
   private seenEvents = new Map<string, number>();
+
+  private currentPresenceStatus(): PresenceActivityStatus {
+    if (document.visibilityState === "hidden") return "idle";
+    return Date.now() - this.lastActivityAt >= PRESENCE_IDLE_AFTER_MS ? "idle" : "active";
+  }
+
+  private presenceData() {
+    return {
+      device_type: detectPresenceDeviceType(),
+      presence_status: this.currentPresenceStatus(),
+    };
+  }
+
+  private sendPresencePing() {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    const data = this.presenceData();
+    this.socket.send(JSON.stringify({ event: "presence.ping", data }));
+    this.lastSentPresenceStatus = data.presence_status;
+    return true;
+  }
+
+  private scheduleIdleTransition() {
+    if (this.idleTimer) window.clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    if (document.visibilityState === "hidden" || this.currentPresenceStatus() === "idle") return;
+    const remaining = Math.max(250, PRESENCE_IDLE_AFTER_MS - (Date.now() - this.lastActivityAt));
+    this.idleTimer = window.setTimeout(() => {
+      this.idleTimer = null;
+      this.syncPresenceTransition();
+    }, remaining);
+  }
+
+  private syncPresenceTransition() {
+    const nextStatus = this.currentPresenceStatus();
+    if (nextStatus !== this.lastSentPresenceStatus) this.sendPresencePing();
+    this.scheduleIdleTransition();
+  }
+
+  private handleUserActivity = () => {
+    if (document.visibilityState === "hidden") return;
+    this.lastActivityAt = Date.now();
+    this.syncPresenceTransition();
+  };
+
+  private handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") this.lastActivityAt = Date.now();
+    this.syncPresenceTransition();
+  };
+
+  private startActivityTracking() {
+    if (this.activityTracking) return;
+    this.activityTracking = true;
+    window.addEventListener("focus", this.handleUserActivity);
+    window.addEventListener("pointerdown", this.handleUserActivity, { passive: true });
+    window.addEventListener("keydown", this.handleUserActivity);
+    window.addEventListener("touchstart", this.handleUserActivity, { passive: true });
+    window.addEventListener("wheel", this.handleUserActivity, { passive: true });
+    document.addEventListener("visibilitychange", this.handleVisibilityChange);
+    this.scheduleIdleTransition();
+  }
+
+  private stopActivityTracking() {
+    if (!this.activityTracking) return;
+    this.activityTracking = false;
+    window.removeEventListener("focus", this.handleUserActivity);
+    window.removeEventListener("pointerdown", this.handleUserActivity);
+    window.removeEventListener("keydown", this.handleUserActivity);
+    window.removeEventListener("touchstart", this.handleUserActivity);
+    window.removeEventListener("wheel", this.handleUserActivity);
+    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    if (this.idleTimer) window.clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
 
   connect(token: string, deviceId: string) {
     const credentialsChanged = token !== this.token || deviceId !== this.deviceId;
@@ -111,7 +191,7 @@ export class ChatSocket {
     const deviceId = this.deviceId;
     let socket: WebSocket;
     try {
-      socket = new WebSocket(buildSocketUrl(WS_BASE_URL, token, deviceId));
+      socket = new WebSocket(buildSocketUrl(WS_BASE_URL, token, deviceId, this.currentPresenceStatus()));
     } catch {
       this.emitStatus("closed");
       this.scheduleReconnect();
@@ -184,11 +264,10 @@ export class ChatSocket {
 
   private startHeartbeat() {
     this.stopHeartbeat();
-    this.send({ event: "presence.ping", data: {} });
+    this.startActivityTracking();
+    this.sendPresencePing();
     this.heartbeatTimer = window.setInterval(() => {
-      if (this.socket?.readyState === WebSocket.OPEN) {
-        this.socket.send(JSON.stringify({ event: "presence.ping", data: {} }));
-      }
+      this.sendPresencePing();
     }, 25000);
   }
 
@@ -197,6 +276,7 @@ export class ChatSocket {
       window.clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    this.stopActivityTracking();
   }
 
   private clearReconnectTimer() {
@@ -238,6 +318,10 @@ export class ChatSocket {
 
   isOpen() {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  reportActivity() {
+    this.handleUserActivity();
   }
 
   send(payload: SocketEvent) {

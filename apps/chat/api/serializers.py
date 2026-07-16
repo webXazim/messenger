@@ -198,11 +198,14 @@ class UserLiteSerializer(serializers.ModelSerializer):
     active_devices = serializers.SerializerMethodField()
     last_seen_at = serializers.SerializerMethodField()
     presence_label = serializers.SerializerMethodField()
+    presence_status = serializers.SerializerMethodField()
+    device_type = serializers.SerializerMethodField()
+    device_types = serializers.SerializerMethodField()
     presence_visibility = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "username", "email", "display_name", "avatar", "is_online", "active_devices", "last_seen_at", "presence_label", "presence_visibility")
+        fields = ("id", "username", "email", "display_name", "avatar", "is_online", "active_devices", "last_seen_at", "presence_label", "presence_status", "device_type", "device_types", "presence_visibility")
 
     def get_display_name(self, obj) -> str:
         profile = getattr(obj, "profile", None)
@@ -259,7 +262,18 @@ class UserLiteSerializer(serializers.ModelSerializer):
     def get_presence_label(self, obj) -> str:
         if not self._presence_is_visible(obj):
             return "offline"
-        return "online" if self._presence_snapshot(obj)["is_online"] else "offline"
+        return str(self._presence_snapshot(obj).get("presence_label") or "offline")
+
+    def get_presence_status(self, obj) -> str:
+        if not self._presence_is_visible(obj):
+            return "offline"
+        return str(self._presence_snapshot(obj).get("presence_status") or "offline")
+
+    def get_device_type(self, obj):
+        return self._presence_snapshot(obj).get("device_type") if self._presence_is_visible(obj) else None
+
+    def get_device_types(self, obj) -> list[str]:
+        return list(self._presence_snapshot(obj).get("device_types") or []) if self._presence_is_visible(obj) else []
 
     def get_presence_visibility(self, obj) -> str:
         return "public" if self._presence_is_visible(obj) else "hidden"

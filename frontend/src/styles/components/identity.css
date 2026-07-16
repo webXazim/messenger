@@ -47,6 +47,7 @@
 }
 
 .ms-presence-badge.is-online { background: #25a56a; }
+.ms-presence-badge.is-idle { background: #d69a2d; }
 .ms-user-avatar--xs .ms-presence-badge { width: 0.55rem; height: 0.55rem; border-width: 0.1rem; }
 .ms-user-avatar--lg .ms-presence-badge,
 .ms-user-avatar--xl .ms-presence-badge { width: 0.85rem; height: 0.85rem; }

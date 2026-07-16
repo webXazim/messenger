@@ -51,6 +51,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         self.auth_token = ""
         self.device_id = "ws-default"
         self.presence_device_id = "ws-default"
+        self.device_type = "unknown"
+        self.presence_status = "active"
         self.joined_groups = set()
         self.typing_conversations = set()
 
@@ -60,7 +62,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             return
 
         query_string = self.scope.get("query_string", b"").decode()
-        self.device_id = parse_qs(query_string).get("device_id", ["ws-default"])[0]
+        query_params = parse_qs(query_string)
+        self.device_id = query_params.get("device_id", ["ws-default"])[0]
+        self.device_type = query_params.get("device_type", ["unknown"])[0]
+        self.presence_status = query_params.get("presence_status", ["active"])[0]
         # A browser device can briefly have overlapping sockets during token
         # refresh or reconnect. Track each connection separately so the old
         # socket cannot clear presence for the replacement socket.
@@ -131,6 +136,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         elif event == "call.speaker_state":
             await self._call_speaker_state(data)
         elif event == "presence.ping":
+            self.device_type = data.get("device_type") or self.device_type
+            self.presence_status = data.get("presence_status") or self.presence_status
             snapshot = await self._set_presence()
             await self._broadcast_presence_update(snapshot)
             await self.send_json(make_realtime_safe({
@@ -609,7 +616,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _set_presence(self):
-        return set_presence(self.user, device_id=self.presence_device_id)
+        return set_presence(
+            self.user,
+            device_id=self.presence_device_id,
+            device_type=self.device_type,
+            presence_status=self.presence_status,
+        )
 
     @database_sync_to_async
     def _presence_recipient_ids(self):

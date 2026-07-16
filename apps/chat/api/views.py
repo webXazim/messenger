@@ -332,6 +332,9 @@ def _broadcast_pair_presence_refresh(user_a, user_b):
         "active_devices": 0,
         "last_seen_at": None,
         "presence_label": "offline",
+        "presence_status": "offline",
+        "device_type": None,
+        "device_types": [],
         "visibility": "hidden",
     }
     for subject, recipient in ((user_a, user_b), (user_b, user_a)):
@@ -1741,7 +1744,12 @@ class PresencePingView(views.APIView):
 
     def post(self, request):
         device_id = request.data.get("device_id", "default")
-        snapshot = set_presence(request.user, device_id=device_id)
+        snapshot = set_presence(
+            request.user,
+            device_id=device_id,
+            device_type=request.data.get("device_type"),
+            presence_status=request.data.get("presence_status", "active"),
+        )
         _broadcast_presence_update(request.user, snapshot)
         return Response({"user_id": str(request.user.id), **snapshot, "server_time": timezone.now().isoformat()})
 
@@ -2055,7 +2063,14 @@ ToggleConversationStateResponseSerializer = inline_serializer(
     name="ToggleConversationStateResponse",
     fields={"conversation_id": serializers.UUIDField(), "is_muted": serializers.BooleanField(required=False), "is_archived": serializers.BooleanField(required=False), "is_pinned": serializers.BooleanField(required=False)},
 )
-PresenceRequestSerializer = inline_serializer(name="PresenceRequest", fields={"device_id": serializers.CharField(required=False)})
+PresenceRequestSerializer = inline_serializer(
+    name="PresenceRequest",
+    fields={
+        "device_id": serializers.CharField(required=False),
+        "device_type": serializers.ChoiceField(choices=("desktop", "mobile", "tablet"), required=False),
+        "presence_status": serializers.ChoiceField(choices=("active", "idle"), required=False),
+    },
+)
 PresenceResponseSerializer = inline_serializer(
     name="PresenceResponse",
     fields={
@@ -2063,6 +2078,10 @@ PresenceResponseSerializer = inline_serializer(
         "is_online": serializers.BooleanField(),
         "active_devices": serializers.IntegerField(),
         "last_seen_at": serializers.CharField(allow_null=True, required=False),
+        "presence_label": serializers.CharField(required=False),
+        "presence_status": serializers.CharField(required=False),
+        "device_type": serializers.CharField(allow_null=True, required=False),
+        "device_types": serializers.ListField(child=serializers.CharField(), required=False),
         "server_time": serializers.CharField(),
     },
 )

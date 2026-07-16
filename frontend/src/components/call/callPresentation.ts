@@ -1,4 +1,5 @@
 import type { Call, CallParticipant } from "../../types/chat";
+import { personPresenceText } from "../../lib/personPresentation";
 
 export type CallViewState = {
   label: string;
@@ -75,11 +76,6 @@ export function participantMediaLine(participant: CallParticipant, peerState: st
 }
 
 export function participantPresenceLine(participant: CallParticipant) {
-  if (participant.user.is_online) {
-    const devices = participant.user.active_devices
-      ? ` on ${participant.user.active_devices} device${participant.user.active_devices === 1 ? "" : "s"}`
-      : "";
-    return `Online${devices}`;
-  }
+  if (participant.user.is_online) return personPresenceText(participant.user);
   return participant.user.presence_label === "unknown" ? "Presence unknown" : "Offline";
 }

@@ -99,7 +99,7 @@ function handleSocketAuthFailure() {
 function handleConnectivityReturn() {
   if (activeHookCount <= 0) return;
   if (document.visibilityState === "hidden") return;
-  chatSocket.send({ event: "presence.ping", data: {} });
+  chatSocket.reportActivity();
   void ensureSocketConnection(false);
 }
 

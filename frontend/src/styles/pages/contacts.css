@@ -130,6 +130,10 @@
   color: var(--ms-color-success, #17834b);
 }
 
+.ms-contact-presence.is-idle {
+  color: #a66d10;
+}
+
 .ms-contact-card__main {
   min-width: 0;
 }

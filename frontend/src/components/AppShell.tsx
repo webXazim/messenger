@@ -267,6 +267,7 @@ export function AppShell() {
             is_online: true,
             active_devices: 1,
             presence_label: "online",
+            presence_status: "active",
           });
         }
       }
@@ -305,6 +306,7 @@ export function AppShell() {
                 is_online: true,
                 active_devices: Math.max(1, Number(participant.user.active_devices || 0)),
                 presence_label: "online",
+                presence_status: "active",
               }));
           }
         }

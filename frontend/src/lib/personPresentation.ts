@@ -9,6 +9,9 @@ export type PersonPresentation = {
   is_online?: boolean | null;
   last_seen_at?: string | null;
   presence_label?: string | null;
+  presence_status?: "active" | "idle" | "offline" | null;
+  device_type?: "desktop" | "mobile" | "tablet" | null;
+  device_types?: Array<"desktop" | "mobile" | "tablet"> | null;
   presence_visibility?: "public" | "hidden" | null;
 };
 
@@ -41,10 +44,21 @@ export function formatLastSeen(value?: string | null) {
 }
 
 export function personPresenceText(person?: PersonPresentation | null) {
-  if (person?.is_online) return "Active now";
+  if (person?.is_online) {
+    const idle = person.presence_status === "idle" || String(person.presence_label || "").toLowerCase() === "idle";
+    const deviceTypes = (person.device_types?.length ? person.device_types : person.device_type ? [person.device_type] : [])
+      .filter((value, index, values) => values.indexOf(value) === index);
+    const deviceLabel = deviceTypes.map((value) => value.charAt(0).toUpperCase() + value.slice(1)).join(" + ");
+    return `${idle ? "Idle" : "Active now"}${deviceLabel ? ` · ${deviceLabel}` : ""}`;
+  }
   if (person?.presence_visibility === "hidden") return "Offline";
   if (person?.last_seen_at) return formatLastSeen(person.last_seen_at);
   const label = String(person?.presence_label || "").trim().toLowerCase();
   if (label && label !== "online") return label.charAt(0).toUpperCase() + label.slice(1);
   return "Offline";
+}
+
+export function personPresenceToneClass(person?: PersonPresentation | null) {
+  if (!person?.is_online) return "";
+  return person.presence_status === "idle" || person.presence_label === "idle" ? "is-idle" : "is-online";
 }

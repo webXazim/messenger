@@ -2463,6 +2463,25 @@ class ChatApiTests(TestCase):
         self.assertEqual(snapshot["active_devices"], 1)
         clear_presence(self.other, device_id="desktop")
 
+    def test_presence_aggregates_idle_state_and_device_types(self):
+        set_presence(self.other, device_id="phone", device_type="mobile", presence_status="idle")
+        idle_snapshot = get_presence_snapshot(self.other.id)
+        self.assertTrue(idle_snapshot["is_online"])
+        self.assertEqual(idle_snapshot["presence_status"], "idle")
+        self.assertEqual(idle_snapshot["presence_label"], "idle")
+        self.assertEqual(idle_snapshot["device_type"], "mobile")
+        self.assertEqual(idle_snapshot["device_types"], ["mobile"])
+
+        set_presence(self.other, device_id="computer", device_type="desktop", presence_status="active")
+        active_snapshot = get_presence_snapshot(self.other.id)
+        self.assertEqual(active_snapshot["presence_status"], "active")
+        self.assertEqual(active_snapshot["device_type"], "desktop")
+        self.assertCountEqual(active_snapshot["device_types"], ["desktop", "mobile"])
+
+        clear_presence(self.other, device_id="computer")
+        self.assertEqual(get_presence_snapshot(self.other.id)["presence_status"], "idle")
+        clear_presence(self.other, device_id="phone")
+
     def test_explicit_device_disconnect_removes_its_websocket_connections(self):
         clear_presence(self.other, device_id="browser", include_device_connections=True)
         clear_presence(self.other, device_id="mobile", include_device_connections=True)
@@ -2493,6 +2512,9 @@ class ChatApiTests(TestCase):
         self.assertEqual(peer["active_devices"], 0)
         self.assertIsNone(peer["last_seen_at"])
         self.assertEqual(peer["presence_label"], "offline")
+        self.assertEqual(peer["presence_status"], "offline")
+        self.assertIsNone(peer["device_type"])
+        self.assertEqual(peer["device_types"], [])
 
     def test_profile_privacy_hides_discovery_presence_and_nearby_location(self):
         set_presence(self.other, device_id="mobile")

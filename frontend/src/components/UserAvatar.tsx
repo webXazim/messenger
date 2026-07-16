@@ -13,12 +13,12 @@ type UserAvatarProps = {
   decorative?: boolean;
 };
 
-export function PresenceBadge({ online, label }: { online?: boolean | null; label?: string }) {
+export function PresenceBadge({ online, idle = false, label }: { online?: boolean | null; idle?: boolean; label?: string }) {
   return (
     <span
-      className={`ms-presence-badge ${online ? "is-online" : "is-offline"}`}
-      aria-label={label || (online ? "Online" : "Offline")}
-      title={label || (online ? "Online" : "Offline")}
+      className={`ms-presence-badge ${online ? idle ? "is-idle" : "is-online" : "is-offline"}`}
+      aria-label={label || (online ? idle ? "Idle" : "Online" : "Offline")}
+      title={label || (online ? idle ? "Idle" : "Online" : "Offline")}
     />
   );
 }
@@ -49,7 +49,12 @@ export function UserAvatar({
       ) : (
         <span className="ms-user-avatar__fallback" aria-hidden="true">{personInitials(person)}</span>
       )}
-      {showPresence ? <PresenceBadge online={Boolean(person?.is_online)} /> : null}
+      {showPresence ? (
+        <PresenceBadge
+          online={Boolean(person?.is_online)}
+          idle={person?.presence_status === "idle" || person?.presence_label === "idle"}
+        />
+      ) : null}
     </span>
   );
 }

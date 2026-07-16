@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { UserAvatar } from "../UserAvatar";
-import { personDisplayName } from "../../lib/personPresentation";
+import { personDisplayName, personPresenceText } from "../../lib/personPresentation";
 import type { UserSearchResult } from "../../types/auth";
 
 export function OnlineFriendsStrip({
@@ -24,7 +24,7 @@ export function OnlineFriendsStrip({
   return (
     <section className="ms-online-friends" aria-label="Friends online now">
       <div className="ms-online-friends__heading">
-        <strong>Active now</strong>
+        <strong>Online now</strong>
         <span>{onlineFriends.length}</span>
       </div>
       <div className="ms-online-friends__scroll ms-scroll-region" role="list">
@@ -41,7 +41,7 @@ export function OnlineFriendsStrip({
               disabled={Boolean(busyUserId)}
               onClick={() => onOpenFriend(friend)}
               aria-label={`Message ${label}`}
-              title={`Message ${label}`}
+              title={`${personPresenceText(friend)} — Message ${label}`}
             >
               <UserAvatar person={friend} size="md" showPresence decorative />
               <span>{busy ? "Opening…" : label}</span>

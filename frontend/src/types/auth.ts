@@ -53,8 +53,12 @@ export type UserSearchResult = {
   is_friend?: boolean;
   request_status?: string | null;
   is_online?: boolean;
+  active_devices?: number;
   last_seen_at?: string | null;
   presence_label?: string;
+  presence_status?: "active" | "idle" | "offline";
+  device_type?: "desktop" | "mobile" | "tablet" | null;
+  device_types?: Array<"desktop" | "mobile" | "tablet">;
   presence_visibility?: "public" | "hidden";
 };
 

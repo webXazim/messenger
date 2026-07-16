@@ -242,6 +242,15 @@ function normalizeUserLite(value: unknown): import("../types/chat").UserLite {
     active_devices: firstNumber(item.active_devices),
     last_seen_at: firstString(item.last_seen_at) || null,
     presence_label: firstString(item.presence_label) || undefined,
+    presence_status: (["active", "idle", "offline"].includes(firstString(item.presence_status))
+      ? firstString(item.presence_status)
+      : undefined) as import("../types/chat").UserLite["presence_status"],
+    device_type: (["desktop", "mobile", "tablet"].includes(firstString(item.device_type))
+      ? firstString(item.device_type)
+      : null) as import("../types/chat").UserLite["device_type"],
+    device_types: (Array.isArray(item.device_types) ? item.device_types : [])
+      .map((entry) => String(entry))
+      .filter((entry): entry is "desktop" | "mobile" | "tablet" => ["desktop", "mobile", "tablet"].includes(entry)),
     presence_visibility: firstString(item.presence_visibility, item.visibility) === "hidden" ? "hidden" : "public",
   };
 }
@@ -1125,8 +1134,8 @@ export const chatApi = {
       participants,
     };
   },
-  async presencePing(deviceId = "web") {
-    const response = await http.post("/chat/presence/ping/", { device_id: deviceId });
+  async presencePing(deviceId = "web", presence?: { device_type?: "desktop" | "mobile" | "tablet"; presence_status?: "active" | "idle" }) {
+    const response = await http.post("/chat/presence/ping/", { device_id: deviceId, ...presence });
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async presenceDisconnect(deviceId = "web", accessToken?: string | null) {

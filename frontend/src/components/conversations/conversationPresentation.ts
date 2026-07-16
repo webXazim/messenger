@@ -25,7 +25,10 @@ export function applyKnownOnlinePresence(
           is_online: true,
           active_devices: Math.max(1, Number(onlinePerson.active_devices || 0)),
           last_seen_at: onlinePerson.last_seen_at ?? participant.user.last_seen_at,
-          presence_label: "online",
+          presence_label: onlinePerson.presence_label || "online",
+          presence_status: onlinePerson.presence_status || "active",
+          device_type: onlinePerson.device_type ?? participant.user.device_type,
+          device_types: onlinePerson.device_types ?? participant.user.device_types,
           presence_visibility: "public" as const,
         },
       };

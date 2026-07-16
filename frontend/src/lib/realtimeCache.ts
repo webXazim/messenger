@@ -143,6 +143,9 @@ type PresenceUser = {
   active_devices?: number;
   last_seen_at?: string | null;
   presence_label?: string;
+  presence_status?: "active" | "idle" | "offline";
+  device_type?: "desktop" | "mobile" | "tablet" | null;
+  device_types?: Array<"desktop" | "mobile" | "tablet">;
   presence_visibility?: "public" | "hidden";
 };
 
@@ -160,6 +163,15 @@ function preservePresence<T extends PresenceUser>(current: T | undefined, incomi
     ...(source.active_devices !== undefined ? { active_devices: source.active_devices } : {}),
     ...(source.last_seen_at !== undefined ? { last_seen_at: source.last_seen_at } : {}),
     ...(source.presence_label !== undefined ? { presence_label: source.presence_label } : {}),
+    ...(source.presence_status !== undefined || incoming.presence_status !== undefined
+      ? { presence_status: source.presence_status ?? incoming.presence_status }
+      : {}),
+    ...(source.device_type !== undefined || incoming.device_type !== undefined
+      ? { device_type: source.device_type ?? incoming.device_type }
+      : {}),
+    ...(source.device_types !== undefined || incoming.device_types !== undefined
+      ? { device_types: source.device_types ?? incoming.device_types }
+      : {}),
     ...(source.presence_visibility !== undefined ? { presence_visibility: source.presence_visibility } : {}),
   };
 }
@@ -191,7 +203,10 @@ function reconcileConversationPresence(queryClient: QueryClient, incoming: Conve
           is_online: true,
           active_devices: Math.max(1, Number(known.active_devices || 0)),
           last_seen_at: known.last_seen_at ?? participant.user.last_seen_at,
-          presence_label: "online",
+          presence_label: known.presence_label || "online",
+          presence_status: known.presence_status || "active",
+          device_type: known.device_type ?? participant.user.device_type,
+          device_types: known.device_types ?? participant.user.device_types,
           presence_visibility: "public",
         },
       } : participant;
@@ -220,11 +235,23 @@ function patchPresenceUser<T extends PresenceUser>(user: T, userId: string, payl
   const activeDevices = Number(payload.active_devices);
   const online = !hidden && Boolean(payload.is_online);
   const lastSeenAt = typeof payload.last_seen_at === "string" && payload.last_seen_at ? payload.last_seen_at : null;
+  const rawStatus = String(payload.presence_status ?? payload.presence_label ?? "").toLowerCase();
+  const presenceStatus: "active" | "idle" | "offline" = online ? rawStatus === "idle" ? "idle" : "active" : "offline";
+  const rawDeviceType = String(payload.device_type ?? "").toLowerCase();
+  const deviceType = ["desktop", "mobile", "tablet"].includes(rawDeviceType)
+    ? rawDeviceType as "desktop" | "mobile" | "tablet"
+    : null;
+  const deviceTypes = (Array.isArray(payload.device_types) ? payload.device_types : [])
+    .map((entry) => String(entry).toLowerCase())
+    .filter((entry): entry is "desktop" | "mobile" | "tablet" => ["desktop", "mobile", "tablet"].includes(entry));
   return {
     ...user,
     is_online: online,
     active_devices: hidden ? 0 : (Number.isFinite(activeDevices) ? activeDevices : user.active_devices),
-    presence_label: online ? "online" : "offline",
+    presence_label: presenceStatus === "idle" ? "idle" : online ? "online" : "offline",
+    presence_status: presenceStatus,
+    device_type: hidden || !online ? null : (deviceType ?? user.device_type ?? null),
+    device_types: hidden || !online ? [] : (deviceTypes.length ? deviceTypes : user.device_types),
     presence_visibility: hidden ? "hidden" : "public",
     last_seen_at: hidden ? null : (lastSeenAt || user.last_seen_at || null),
   };

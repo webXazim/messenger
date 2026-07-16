@@ -113,8 +113,18 @@ function normalizeUser(user: unknown): UserSearchResult {
     is_friend: Boolean(item.is_friend ?? isFriendStatus),
     request_status: normalizedStatus,
     is_online: firstBoolean(item.is_online, profile.is_online),
+    active_devices: firstNumberOrNull(item.active_devices) ?? undefined,
     last_seen_at: firstString(item.last_seen_at, profile.last_seen_at) || null,
     presence_label: firstString(item.presence_label, profile.presence_label) || undefined,
+    presence_status: (["active", "idle", "offline"].includes(firstString(item.presence_status, profile.presence_status))
+      ? firstString(item.presence_status, profile.presence_status)
+      : undefined) as UserSearchResult["presence_status"],
+    device_type: (["desktop", "mobile", "tablet"].includes(firstString(item.device_type, profile.device_type))
+      ? firstString(item.device_type, profile.device_type)
+      : null) as UserSearchResult["device_type"],
+    device_types: (Array.isArray(item.device_types) ? item.device_types : [])
+      .map((entry) => String(entry))
+      .filter((entry): entry is "desktop" | "mobile" | "tablet" => ["desktop", "mobile", "tablet"].includes(entry)),
     presence_visibility: firstString(item.presence_visibility, item.visibility, profile.presence_visibility) === "hidden" ? "hidden" : "public",
   };
 }

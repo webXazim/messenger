@@ -1740,6 +1740,67 @@ def _presence_lock_key(user_id):
     return f"presence:user:{user_id}:lock"
 
 
+def _normalize_presence_device_type(value):
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in {"desktop", "mobile", "tablet"} else "unknown"
+
+
+def _normalize_presence_status(value):
+    return "idle" if str(value or "").strip().lower() == "idle" else "active"
+
+
+def _normalize_presence_device_record(value):
+    # Accept the old numeric registry format during rolling deploys.
+    if isinstance(value, (int, float)):
+        return {
+            "last_seen": float(value),
+            "device_type": "unknown",
+            "presence_status": "active",
+        }
+    if not isinstance(value, dict):
+        return None
+    last_seen = value.get("last_seen")
+    if not isinstance(last_seen, (int, float)):
+        return None
+    return {
+        "last_seen": float(last_seen),
+        "device_type": _normalize_presence_device_type(value.get("device_type")),
+        "presence_status": _normalize_presence_status(value.get("presence_status")),
+    }
+
+
+def _presence_snapshot_from_devices(active_devices):
+    if not active_devices:
+        return {
+            "is_online": False,
+            "active_devices": 0,
+            "presence_status": "offline",
+            "presence_label": "offline",
+            "device_type": None,
+            "device_types": [],
+        }
+
+    records = sorted(active_devices.values(), key=lambda item: item["last_seen"], reverse=True)
+    actively_used = [item for item in records if item["presence_status"] == "active"]
+    presence_status = "active" if actively_used else "idle"
+    primary = (actively_used or records)[0]
+    device_types = []
+    if primary["device_type"] != "unknown":
+        device_types.append(primary["device_type"])
+    for record in records:
+        device_type = record["device_type"]
+        if device_type != "unknown" and device_type not in device_types:
+            device_types.append(device_type)
+    return {
+        "is_online": True,
+        "active_devices": len(active_devices),
+        "presence_status": presence_status,
+        "presence_label": "online" if presence_status == "active" else "idle",
+        "device_type": primary["device_type"] if primary["device_type"] != "unknown" else (device_types[0] if device_types else None),
+        "device_types": device_types,
+    }
+
+
 @contextmanager
 def _presence_cache_lock(user_id):
     """Best-effort cross-worker lock for multi-device presence registry updates."""
@@ -1763,11 +1824,11 @@ def _active_presence_devices(user_id, *, now_ts=None):
     now_ts = float(now_ts or timezone.now().timestamp())
     raw = cache.get(_presence_user_key(user_id)) or {}
     registry = raw if isinstance(raw, dict) else {}
-    active = {
-        str(device_id): float(last_seen)
-        for device_id, last_seen in registry.items()
-        if str(device_id) and isinstance(last_seen, (int, float)) and now_ts - float(last_seen) < ttl
-    }
+    active = {}
+    for device_id, value in registry.items():
+        record = _normalize_presence_device_record(value)
+        if str(device_id) and record and now_ts - record["last_seen"] < ttl:
+            active[str(device_id)] = record
     if active != registry:
         if active:
             cache.set(_presence_user_key(user_id), active, timeout=ttl * 2)
@@ -1778,46 +1839,60 @@ def _active_presence_devices(user_id, *, now_ts=None):
 
 def get_presence_snapshot(user_id):
     active_devices = _active_presence_devices(user_id)
-    return {"is_online": bool(active_devices), "active_devices": len(active_devices)}
+    return _presence_snapshot_from_devices(active_devices)
 
 
 def is_user_online(user_id):
     return get_presence_snapshot(user_id)["is_online"]
 
 
-def set_presence(user, device_id="default"):
+def set_presence(user, device_id="default", *, device_type=None, presence_status="active"):
     ttl = max(int(getattr(settings, "PRESENCE_TTL_SECONDS", 75) or 75), 15)
     device_id = str(device_id or "default")[:160]
+    normalized_status = _normalize_presence_status(presence_status)
     now = timezone.now()
     with _presence_cache_lock(user.id):
         registry = _active_presence_devices(user.id, now_ts=now.timestamp())
-        registry[device_id] = now.timestamp()
+        registry[device_id] = {
+            "last_seen": now.timestamp(),
+            "device_type": _normalize_presence_device_type(device_type),
+            "presence_status": normalized_status,
+        }
         cache.set(_presence_user_key(user.id), registry, timeout=ttl * 2)
-    type(user).objects.filter(id=user.id).update(last_seen_at=now)
-    return {"is_online": True, "active_devices": len(registry)}
+    if normalized_status == "active":
+        type(user).objects.filter(id=user.id).update(last_seen_at=now)
+    return _presence_snapshot_from_devices(registry)
 
 
 def clear_presence(user, device_id="default", *, include_device_connections=False):
     ttl = max(int(getattr(settings, "PRESENCE_TTL_SECONDS", 75) or 75), 15)
     device_id = str(device_id or "default")[:160]
     now = timezone.now()
+    removed_was_active = False
     with _presence_cache_lock(user.id):
         registry = _active_presence_devices(user.id, now_ts=now.timestamp())
         if include_device_connections:
             prefix = f"{device_id}:"
+            removed_was_active = any(
+                record.get("presence_status") == "active"
+                for registered_id, record in registry.items()
+                if registered_id == device_id or registered_id.startswith(prefix)
+            )
             registry = {
-                registered_id: last_seen
-                for registered_id, last_seen in registry.items()
+                registered_id: record
+                for registered_id, record in registry.items()
                 if registered_id != device_id and not registered_id.startswith(prefix)
             }
         else:
-            registry.pop(device_id, None)
+            removed = registry.pop(device_id, None)
+            removed_was_active = bool(removed and removed.get("presence_status") == "active")
         if registry:
             cache.set(_presence_user_key(user.id), registry, timeout=ttl * 2)
         else:
             cache.delete(_presence_user_key(user.id))
-    type(user).objects.filter(id=user.id).update(last_seen_at=now)
-    return {"is_online": bool(registry), "active_devices": len(registry)}
+    if removed_was_active:
+        type(user).objects.filter(id=user.id).update(last_seen_at=now)
+    return _presence_snapshot_from_devices(registry)
 
 
 def get_public_presence_snapshot(user, snapshot=None):
@@ -1834,6 +1909,9 @@ def get_public_presence_snapshot(user, snapshot=None):
             "active_devices": 0,
             "last_seen_at": None,
             "presence_label": "offline",
+            "presence_status": "offline",
+            "device_type": None,
+            "device_types": [],
             "visibility": "hidden",
         }
     profile = getattr(current, "profile", None)
@@ -1843,6 +1921,9 @@ def get_public_presence_snapshot(user, snapshot=None):
             "active_devices": 0,
             "last_seen_at": None,
             "presence_label": "offline",
+            "presence_status": "offline",
+            "device_type": None,
+            "device_types": [],
             "visibility": "hidden",
         }
     resolved = snapshot or get_presence_snapshot(current.id)
@@ -1851,7 +1932,10 @@ def get_public_presence_snapshot(user, snapshot=None):
         "is_online": online,
         "active_devices": int(resolved.get("active_devices") or 0),
         "last_seen_at": current.last_seen_at.isoformat() if current.last_seen_at else None,
-        "presence_label": "online" if online else "offline",
+        "presence_label": str(resolved.get("presence_label") or ("online" if online else "offline")),
+        "presence_status": str(resolved.get("presence_status") or ("active" if online else "offline")),
+        "device_type": resolved.get("device_type") if online else None,
+        "device_types": list(resolved.get("device_types") or []) if online else [],
         "visibility": "public",
     }
 

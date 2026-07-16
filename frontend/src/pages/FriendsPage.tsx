@@ -8,7 +8,7 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { parseApiError } from "../lib/apiErrors";
 import { MessengerPageHeader } from "../components/pages/MessengerPageHeader";
 import { UserAvatar } from "../components/UserAvatar";
-import { personPresenceText } from "../lib/personPresentation";
+import { personPresenceText, personPresenceToneClass } from "../lib/personPresentation";
 import { conversationPath } from "../lib/conversationRoute";
 import type { CurrentUser, FriendRequest, UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
@@ -332,7 +332,7 @@ export function FriendsPage() {
               {person.distance_km != null ? <span className="ms-page-badge">{person.distance_km.toFixed(1)} km away</span> : null}
             </div>
             <div className="muted">@{person.username}</div>
-            <div className={`ms-contact-presence ${person.is_online ? "is-online" : ""}`}>{personPresenceText(person)}</div>
+            <div className={`ms-contact-presence ${personPresenceToneClass(person)}`}>{personPresenceText(person)}</div>
             {person.bio ? <p className="ms-contact-card__bio">{person.bio}</p> : null}
             {person.status_message ? <div className="muted">{person.status_message}</div> : null}
           </div>
@@ -444,7 +444,7 @@ export function FriendsPage() {
           <div>
             <strong>{displayName(other)}</strong>
             <div className="muted">@{other.username}</div>
-            <div className={`ms-contact-presence ${other.is_online ? "is-online" : ""}`}>{personPresenceText(other)}</div>
+            <div className={`ms-contact-presence ${personPresenceToneClass(other)}`}>{personPresenceText(other)}</div>
             {item.message ? <p className="ms-contact-request__message">“{item.message}”</p> : null}
           </div>
         </div>

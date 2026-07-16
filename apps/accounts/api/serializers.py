@@ -15,7 +15,7 @@ from drf_spectacular.utils import extend_schema_field
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from apps.accounts.models import AuthActionToken, FriendRequest, Profile, SocialAccount, UserSession
-from apps.chat.services import is_user_online
+from apps.chat.services import get_presence_snapshot
 
 User = get_user_model()
 
@@ -291,8 +291,12 @@ class UserDiscoverySerializer(serializers.ModelSerializer):
     status_message = serializers.SerializerMethodField()
     is_current_user = serializers.SerializerMethodField()
     is_online = serializers.SerializerMethodField()
+    active_devices = serializers.SerializerMethodField()
     last_seen_at = serializers.SerializerMethodField()
     presence_label = serializers.SerializerMethodField()
+    presence_status = serializers.SerializerMethodField()
+    device_type = serializers.SerializerMethodField()
+    device_types = serializers.SerializerMethodField()
     presence_visibility = serializers.SerializerMethodField()
     friendship_status = serializers.SerializerMethodField()
     proximity_km = serializers.FloatField(read_only=True, required=False)
@@ -310,8 +314,12 @@ class UserDiscoverySerializer(serializers.ModelSerializer):
             "status_message",
             "is_current_user",
             "is_online",
+            "active_devices",
             "last_seen_at",
             "presence_label",
+            "presence_status",
+            "device_type",
+            "device_types",
             "presence_visibility",
             "friendship_status",
             "proximity_km",
@@ -352,15 +360,37 @@ class UserDiscoverySerializer(serializers.ModelSerializer):
         profile = getattr(obj, "profile", None)
         return profile is None or bool(getattr(profile, "show_online_status", True))
 
+    def _presence_snapshot(self, obj):
+        cache_key = f"_user_presence_{obj.id}"
+        if not hasattr(self, cache_key):
+            setattr(self, cache_key, get_presence_snapshot(obj.id))
+        return getattr(self, cache_key)
+
     def get_is_online(self, obj) -> bool:
-        return is_user_online(obj.id) if self._presence_is_visible(obj) else False
+        return bool(self._presence_snapshot(obj)["is_online"]) if self._presence_is_visible(obj) else False
+
+    def get_active_devices(self, obj) -> int:
+        return int(self._presence_snapshot(obj)["active_devices"]) if self._presence_is_visible(obj) else 0
 
     @extend_schema_field(serializers.DateTimeField(allow_null=True))
     def get_last_seen_at(self, obj):
         return getattr(obj, "last_seen_at", None) if self._presence_is_visible(obj) else None
 
     def get_presence_label(self, obj) -> str:
-        return "online" if self.get_is_online(obj) else "offline"
+        if not self._presence_is_visible(obj):
+            return "offline"
+        return str(self._presence_snapshot(obj).get("presence_label") or "offline")
+
+    def get_presence_status(self, obj) -> str:
+        if not self._presence_is_visible(obj):
+            return "offline"
+        return str(self._presence_snapshot(obj).get("presence_status") or "offline")
+
+    def get_device_type(self, obj):
+        return self._presence_snapshot(obj).get("device_type") if self._presence_is_visible(obj) else None
+
+    def get_device_types(self, obj) -> list[str]:
+        return list(self._presence_snapshot(obj).get("device_types") or []) if self._presence_is_visible(obj) else []
 
     def get_presence_visibility(self, obj) -> str:
         return "public" if self._presence_is_visible(obj) else "hidden"

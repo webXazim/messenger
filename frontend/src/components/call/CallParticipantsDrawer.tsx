@@ -3,6 +3,7 @@ import { useModalAccessibility } from "../../hooks/useModalAccessibility";
 import type { CallParticipant } from "../../types/chat";
 import { participantName } from "./callPresentation";
 import { UserAvatar } from "../UserAvatar";
+import { personPresenceText } from "../../lib/personPresentation";
 
 function CloseIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>;
@@ -33,7 +34,7 @@ function participantStatus(participant: CallParticipant) {
   if (participant.state === "ringing" || participant.state === "invited") return "Ringing";
   if (participant.state === "declined") return "Declined";
   if (participant.state === "left") return "Left call";
-  return participant.user.is_online ? "Online" : "Offline";
+  return personPresenceText(participant.user);
 }
 
 function ParticipantRow({ participant, isSelf = false }: { participant: CallParticipant; isSelf?: boolean }) {
