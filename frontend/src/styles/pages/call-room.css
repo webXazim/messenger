@@ -412,3 +412,248 @@
     min-height: 3.6rem;
   }
 }
+
+/* Keep the media session mounted while the user moves through the app. */
+.ms-persistent-call {
+  min-width: 0;
+}
+
+.ms-persistent-call--full {
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.ms-persistent-call--full .ms-persistent-call__stage {
+  min-height: 0;
+  height: 100%;
+}
+
+.ms-persistent-call--full .ms-audio-call,
+.ms-persistent-call--full .ms-video-call {
+  min-height: 0;
+  height: 100%;
+}
+
+.ms-persistent-call--compact {
+  position: relative;
+  z-index: 45;
+  flex: 0 0 auto;
+  padding: 0.5rem clamp(0.5rem, 1.5vw, 1rem);
+  border-bottom: 1px solid var(--ms-color-border-subtle, #e5e5e5);
+  background: rgb(255 255 255 / 0.96);
+  box-shadow: 0 0.45rem 1.5rem rgb(0 0 0 / 0.06);
+  backdrop-filter: blur(16px);
+}
+
+/* Visually hide the full call surface without unmounting its audio/video nodes. */
+.ms-persistent-call--compact .ms-persistent-call__stage {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
+.ms-persistent-call--compact .ms-persistent-call__stage .ms-audio-call,
+.ms-persistent-call--compact .ms-persistent-call__stage .ms-video-call {
+  width: 1px;
+  min-width: 0;
+  height: 1px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ms-active-call-bar {
+  width: min(48rem, 100%);
+  min-width: 0;
+  min-height: 3.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  margin-inline: auto;
+  padding: 0.4rem 0.5rem 0.4rem 0.65rem;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 1.1rem;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 0.2);
+}
+
+.ms-active-call-bar__identity {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 2.55rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.ms-active-call-bar__identity:focus-visible,
+.ms-active-call-bar__control:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.ms-active-call-bar__avatar {
+  width: 2.55rem;
+  height: 2.55rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 50%;
+  background: #f2f2f2;
+  color: #111111;
+  font-size: 0.72rem;
+  font-weight: 820;
+  letter-spacing: -0.025em;
+}
+
+.ms-active-call-bar__copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.ms-active-call-bar__copy strong,
+.ms-active-call-bar__copy > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-active-call-bar__copy strong {
+  font-size: var(--ms-font-size-xs);
+  font-weight: 760;
+}
+
+.ms-active-call-bar__copy > span {
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: rgb(255 255 255 / 0.66);
+  font-size: var(--ms-font-size-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ms-active-call-bar__copy i {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #8a8a8a;
+  box-shadow: 0 0 0 0.18rem rgb(255 255 255 / 0.08);
+}
+
+.ms-active-call-bar__copy i.is-ok {
+  background: #27b678;
+}
+
+.ms-active-call-bar__copy i.is-warn {
+  background: #d89a28;
+}
+
+.ms-active-call-bar__copy i.is-danger {
+  background: #df5660;
+}
+
+.ms-active-call-bar__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ms-active-call-bar__control {
+  width: 2.55rem;
+  height: 2.55rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.1);
+  color: #ffffff;
+}
+
+.ms-active-call-bar__control:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+
+.ms-active-call-bar__control.is-off {
+  background: #ffffff;
+  color: #111111;
+}
+
+.ms-active-call-bar__control.is-accept {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #111111;
+}
+
+.ms-active-call-bar__control.is-end {
+  border-color: #c52a35;
+  background: #c52a35;
+  color: #ffffff;
+}
+
+.ms-active-call-bar__control:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.ms-active-call-bar__control svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 560px) {
+  .ms-persistent-call--compact {
+    padding: 0.375rem;
+  }
+
+  .ms-active-call-bar {
+    gap: 0.4rem;
+    min-height: 3.25rem;
+    padding: 0.3rem 0.35rem 0.3rem 0.5rem;
+    border-radius: 0.95rem;
+  }
+
+  .ms-active-call-bar__identity {
+    grid-template-columns: 2.3rem minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  .ms-active-call-bar__avatar,
+  .ms-active-call-bar__control {
+    width: 2.3rem;
+    height: 2.3rem;
+  }
+
+  .ms-active-call-bar__controls {
+    gap: 0.28rem;
+  }
+}
+
+@media (max-width: 370px) {
+  .ms-active-call-bar__avatar {
+    display: none;
+  }
+
+  .ms-active-call-bar__identity {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

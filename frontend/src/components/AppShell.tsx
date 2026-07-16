@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
@@ -16,6 +16,7 @@ import { isConversationActivelyViewedAtLatest } from "../lib/activeConversationV
 import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
 import { getRealtimeSyncMarker, markConversationReadInCaches, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
+import { CallRoomPage } from "../pages/CallRoomPage";
 
 
 function getCallActionError(error: unknown, fallback: string) {
@@ -40,6 +41,48 @@ type MessageToast = {
   body: string;
   avatar?: string | null;
 };
+
+const ACTIVE_CALL_SESSION_KEY = "messenger.active-call-id";
+
+function callIdFromPath(pathname: string) {
+  const match = pathname.match(/^\/calls\/([^/]+)\/?$/);
+  if (!match?.[1]) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function activeCallSessionKey(userId?: string | number) {
+  return `${ACTIVE_CALL_SESSION_KEY}:${String(userId || "anonymous")}`;
+}
+
+function storedActiveCallId(userId?: string | number) {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.sessionStorage.getItem(activeCallSessionKey(userId)) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberActiveCallId(userId: string | number | undefined, callId: string) {
+  try {
+    window.sessionStorage.setItem(activeCallSessionKey(userId), callId);
+  } catch {
+    // The live in-memory call still persists when session storage is unavailable.
+  }
+}
+
+function forgetActiveCallId(userId: string | number | undefined, callId: string) {
+  try {
+    const storageKey = activeCallSessionKey(userId);
+    if (window.sessionStorage.getItem(storageKey) === callId) window.sessionStorage.removeItem(storageKey);
+  } catch {
+    // Nothing else is required when session storage is unavailable.
+  }
+}
 
 function attachmentNotificationLabel(message: ReturnType<typeof normalizeMessage>) {
   const attachments = message.attachments ?? [];
@@ -68,6 +111,8 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const routeCallId = useMemo(() => callIdFromPath(location.pathname), [location.pathname]);
+  const [activeCallId, setActiveCallId] = useState(() => routeCallId || storedActiveCallId(user?.id));
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const [messageToasts, setMessageToasts] = useState<MessageToast[]>([]);
   const [showCallOverlay, setShowCallOverlay] = useState(false);
@@ -80,6 +125,23 @@ export function AppShell() {
   const callActionOwnerRef = useRef("");
   const callActionChannelRef = useRef<ReturnType<typeof createCallActionChannel> | null>(null);
   if (!callActionOwnerRef.current) callActionOwnerRef.current = createCallActionOwnerId();
+
+  useEffect(() => {
+    if (!routeCallId) return;
+    setActiveCallId(routeCallId);
+    rememberActiveCallId(user?.id, routeCallId);
+  }, [routeCallId, user?.id]);
+
+  useEffect(() => {
+    if (routeCallId || activeCallId || !user?.id) return;
+    const restoredCallId = storedActiveCallId(user.id);
+    if (restoredCallId) setActiveCallId(restoredCallId);
+  }, [activeCallId, routeCallId, user?.id]);
+
+  const clearActiveCall = useCallback((finishedCallId: string) => {
+    setActiveCallId((current) => current === finishedCallId ? "" : current);
+    forgetActiveCallId(user?.id, finishedCallId);
+  }, [user?.id]);
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
@@ -493,7 +555,7 @@ export function AppShell() {
 
   const userLabel = user?.profile?.display_name || user?.full_name || user?.username || "You";
   const isFocusedChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
-  const isCallRoom = /^\/calls\/[^/]+\/?$/.test(location.pathname);
+  const isCallRoom = Boolean(routeCallId);
   return (
     <div
       className={[
@@ -538,7 +600,15 @@ export function AppShell() {
             onAccept={() => void handleIncomingCallAction("accept")}
           />
         ) : null}
-        <div className="ms-app-stage">
+        {activeCallId ? (
+          <CallRoomPage
+            key={activeCallId}
+            callIdOverride={activeCallId}
+            displayMode={isCallRoom && routeCallId === activeCallId ? "full" : "compact"}
+            onCallFinished={clearActiveCall}
+          />
+        ) : null}
+        <div className={`ms-app-stage ${isCallRoom ? "ms-app-stage--call-route" : ""}`}>
           <div className="ms-app-stage__main">
             <Outlet />
           </div>

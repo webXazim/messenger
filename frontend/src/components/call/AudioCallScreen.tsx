@@ -103,7 +103,7 @@ export function AudioCallScreen({
       />
 
       <header className="ms-audio-call__header">
-        <button type="button" className="ms-audio-call__back" onClick={onLeave} aria-label="Leave call">
+        <button type="button" className="ms-audio-call__back" onClick={onLeave} aria-label="Minimize call">
           <BackIcon />
         </button>
         <span>Voice call</span>

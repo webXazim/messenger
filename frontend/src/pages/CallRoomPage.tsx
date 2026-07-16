@@ -5,7 +5,7 @@ import { chatApi } from "../api/chat";
 import { AudioCallScreen } from "../components/call/AudioCallScreen";
 import { cameraFacingFromTrack, findPreferredCameraDevice, supportsMobileCameraSwitch, type CameraFacingMode } from "../components/call/callCamera";
 import { VideoCallScreen } from "../components/call/VideoCallScreen";
-import { getCallViewState } from "../components/call/callPresentation";
+import { formatElapsed, getCallViewState, participantInitials, participantName } from "../components/call/callPresentation";
 import { useAuth } from "../contexts/AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useCallWakeLock } from "../hooks/useCallWakeLock";
@@ -41,6 +41,11 @@ function getCallMutationError(error: unknown, fallback: string) {
     }
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+function getCallHttpStatus(error: unknown) {
+  if (!error || typeof error !== "object" || !("response" in error)) return 0;
+  return Number((error as { response?: { status?: number } }).response?.status || 0);
 }
 
 function isLiveCallStatus(status?: string) {
@@ -358,8 +363,47 @@ async function collectPeerQualityMetrics(
   } satisfies PeerQualityMetrics;
 }
 
-export function CallRoomPage() {
-  const { callId = "" } = useParams();
+type CallRoomPageProps = {
+  callIdOverride?: string;
+  displayMode?: "full" | "compact";
+  onCallFinished?: (callId: string) => void;
+};
+
+function CompactMicrophoneIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="8" y="3" width="8" height="12" rx="4" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+      {muted ? <path d="m4 4 16 16" /> : null}
+    </svg>
+  );
+}
+
+function CompactVideoIcon({ disabled }: { disabled: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      <path d="m16 10 5-3v10l-5-3" />
+      {disabled ? <path d="m4 4 16 16" /> : null}
+    </svg>
+  );
+}
+
+function CompactExpandIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5" /></svg>;
+}
+
+function CompactHangupIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15.5c4.7-4 9.3-4 14 0l-2.5 3-3-2v-2.2a9 9 0 0 0-3 0v2.2l-3 2-2.5-3Z" /></svg>;
+}
+
+function CompactAcceptIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.8h3l1.2 4-2 1.7a14.4 14.4 0 0 0 5.3 5.3l1.7-2 4 1.2v3c0 1.1-.9 2-2 2C10.9 19 5 13.1 5 5.8c0-1.1.9-2 2-2Z" /></svg>;
+}
+
+export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinished }: CallRoomPageProps = {}) {
+  const { callId: routeCallId = "" } = useParams();
+  const callId = callIdOverride || routeCallId;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -473,6 +517,12 @@ export function CallRoomPage() {
     [call?.participants, localCallUser],
   );
 
+  useEffect(() => {
+    if (!callId || !callQuery.isError || ![403, 404, 410].includes(getCallHttpStatus(callQuery.error))) return;
+    onCallFinished?.(callId);
+    if (displayMode === "full") navigate("/calls", { replace: true });
+  }, [callId, callQuery.error, callQuery.isError, displayMode, navigate, onCallFinished]);
+
   const canAcceptCall = Boolean(call && !isInitiator && isLiveCallStatus(call.status) && localParticipant?.state === "ringing");
   const canInitializeLocalMedia = Boolean(call && (isInitiator || localParticipant?.state === "joined"));
 
@@ -575,6 +625,11 @@ export function CallRoomPage() {
       navigate(call.conversation ? `/chat/${call.conversation}` : "/calls", { replace: true });
     }
   }, [call, navigate]);
+
+  useEffect(() => {
+    if (!call || !isTerminalCall(call)) return;
+    onCallFinished?.(call.id);
+  }, [call?.id, call?.status, onCallFinished]);
 
   useEffect(() => {
     callRef.current = call ?? null;
@@ -1718,7 +1773,40 @@ export function CallRoomPage() {
     }
   };
 
-  if (!call) return <div className="ms-page-loading" role="status">Loading call…</div>;
+  if (!call && displayMode === "compact") {
+    return (
+      <section className="ms-persistent-call ms-persistent-call--compact" aria-label="Restoring active call">
+        <aside className="ms-active-call-bar">
+          <div className="ms-active-call-bar__identity" role="status">
+            <span className="ms-active-call-bar__avatar" aria-hidden="true">CS</span>
+            <span className="ms-active-call-bar__copy">
+              <strong>Restoring active call</strong>
+              <span><i className="is-warn" aria-hidden="true" />Reconnecting secure media…</span>
+            </span>
+          </div>
+          <div className="ms-active-call-bar__controls">
+            <button
+              type="button"
+              className="ms-active-call-bar__control"
+              onClick={() => navigate(`/calls/${callId}`)}
+              aria-label="Open active call"
+              title="Open active call"
+            >
+              <CompactExpandIcon />
+            </button>
+          </div>
+        </aside>
+      </section>
+    );
+  }
+
+  if (!call) {
+    return (
+      <div className="ms-page-loading" role={callQuery.isError ? "alert" : "status"}>
+        {callQuery.isError ? "This call is no longer available." : "Loading call…"}
+      </div>
+    );
+  }
 
   const participants = call.participants ?? [];
   const selfParticipant = participants.find((participant) => isSameUserIdentity(participant.user, localCallUser));
@@ -1745,9 +1833,22 @@ export function CallRoomPage() {
     ? Math.max(0, Math.floor((clockTick - answeredStartedAt) / 1000))
     : Math.max(0, Number(call.duration_seconds || 0));
   const primaryQualityAlert = qualityAlerts[0];
+  const minimizeCall = () => {
+    if (canAcceptCall) {
+      declineMutation.mutate();
+      return;
+    }
+    navigate(call.conversation ? `/chat/${call.conversation}` : "/chat");
+  };
+  const compactDisplayName = isGroupCall
+    ? `${Math.max(remoteParticipants.length, 1) + 1}-person call`
+    : participantName(primaryRemoteParticipant);
+  const compactStatus = callUxState.label === "Connected"
+    ? `${callUxState.label} · ${formatElapsed(connectedSeconds)}`
+    : callUxState.label;
 
-  if (call.call_type === "voice") {
-    return (
+  const callScreen = call.call_type === "voice"
+    ? (
       <AudioCallScreen
         remoteParticipant={primaryRemoteParticipant}
         remoteParticipants={remoteParticipants}
@@ -1765,7 +1866,7 @@ export function CallRoomPage() {
         remotePlaybackBlocked={remotePlaybackBlocked}
         qualityMessage={primaryQualityAlert ? "Call quality is reduced. The connection is adjusting automatically." : undefined}
         remoteAudioRef={remoteAudioRef}
-        onLeave={() => canAcceptCall ? declineMutation.mutate() : endMutation.mutate()}
+        onLeave={minimizeCall}
         onAccept={() => acceptMutation.mutate()}
         onToggleAudio={toggleAudio}
         onToggleSpeaker={() => setSpeakerEnabled((current) => !current)}
@@ -1774,11 +1875,9 @@ export function CallRoomPage() {
         onRestartConnection={() => void requestIceRestart()}
         onEnableSound={() => void unlockRemotePlayback()}
       />
-    );
-  }
-
-  return (
-    <VideoCallScreen
+    )
+    : (
+      <VideoCallScreen
       selfParticipant={selfParticipant}
       remoteParticipant={primaryRemoteParticipant}
       remoteParticipants={remoteParticipants}
@@ -1802,7 +1901,7 @@ export function CallRoomPage() {
       localVideoRef={localVideoRef}
       remoteVideoRef={remoteVideoRef}
       remoteAudioRef={remoteAudioRef}
-      onLeave={() => canAcceptCall ? declineMutation.mutate() : endMutation.mutate()}
+      onLeave={minimizeCall}
       onAccept={() => acceptMutation.mutate()}
       onToggleAudio={toggleAudio}
       onToggleVideo={toggleVideo}
@@ -1821,6 +1920,96 @@ export function CallRoomPage() {
           remoteAudioStreamRef.current,
         );
       }}
-    />
+      />
+    );
+
+  return (
+    <section className={`ms-persistent-call ms-persistent-call--${displayMode}`} aria-label="Active call">
+      <div
+        ref={(element) => {
+          if (element) element.inert = displayMode === "compact";
+        }}
+        className="ms-persistent-call__stage"
+        aria-hidden={displayMode === "compact"}
+      >
+        {callScreen}
+      </div>
+      {displayMode === "compact" ? (
+        <aside className="ms-active-call-bar" aria-label={`Active call with ${compactDisplayName}`}>
+          <button
+            type="button"
+            className="ms-active-call-bar__identity"
+            onClick={() => navigate(`/calls/${callId}`)}
+            aria-label={`Return to call with ${compactDisplayName}`}
+          >
+            <span className={`ms-active-call-bar__avatar is-${callUxState.tone}`} aria-hidden="true">
+              {participantInitials(primaryRemoteParticipant)}
+            </span>
+            <span className="ms-active-call-bar__copy">
+              <strong>{compactDisplayName}</strong>
+              <span><i className={`is-${callUxState.tone}`} aria-hidden="true" />{compactStatus}</span>
+            </span>
+          </button>
+          <div className="ms-active-call-bar__controls" aria-label="Call controls">
+            {canAcceptCall ? (
+              <button
+                type="button"
+                className="ms-active-call-bar__control is-accept"
+                onClick={() => acceptMutation.mutate()}
+                disabled={callActionBusy}
+                aria-label="Answer call"
+                title="Answer call"
+              >
+                <CompactAcceptIcon />
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={`ms-active-call-bar__control ${audioEnabled ? "" : "is-off"}`}
+                  onClick={() => void toggleAudio()}
+                  disabled={callActionBusy}
+                  aria-label={audioEnabled ? "Mute microphone" : "Turn on microphone"}
+                  title={audioEnabled ? "Mute microphone" : "Turn on microphone"}
+                >
+                  <CompactMicrophoneIcon muted={!audioEnabled} />
+                </button>
+                {call.call_type === "video" ? (
+                  <button
+                    type="button"
+                    className={`ms-active-call-bar__control ${videoEnabled ? "" : "is-off"}`}
+                    onClick={() => void toggleVideo()}
+                    disabled={callActionBusy}
+                    aria-label={videoEnabled ? "Turn off camera" : "Turn on camera"}
+                    title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+                  >
+                    <CompactVideoIcon disabled={!videoEnabled} />
+                  </button>
+                ) : null}
+              </>
+            )}
+            <button
+              type="button"
+              className="ms-active-call-bar__control"
+              onClick={() => navigate(`/calls/${callId}`)}
+              aria-label="Return to full call"
+              title="Return to full call"
+            >
+              <CompactExpandIcon />
+            </button>
+            <button
+              type="button"
+              className="ms-active-call-bar__control is-end"
+              onClick={() => canAcceptCall ? declineMutation.mutate() : endMutation.mutate()}
+              disabled={callActionBusy}
+              aria-label={canAcceptCall ? "Decline call" : "End call"}
+              title={canAcceptCall ? "Decline call" : "End call"}
+            >
+              <CompactHangupIcon />
+            </button>
+          </div>
+        </aside>
+      ) : null}
+    </section>
   );
 }

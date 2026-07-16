@@ -42,6 +42,10 @@
   min-height: 100%;
 }
 
+.ms-app-stage--call-route {
+  display: none;
+}
+
 .ms-app-shell--focused-chat .ms-app-main,
 .ms-app-shell--call-room .ms-app-main {
   overflow: hidden;

@@ -8,7 +8,6 @@ import { AuthRedirectPage } from "./pages/AuthRedirectPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { ConversationPage } from "./pages/ConversationPage";
 import { CallsPage } from "./pages/CallsPage";
-import { CallRoomPage } from "./pages/CallRoomPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { FriendsPage } from "./pages/FriendsPage";
 import { GroupsPage } from "./pages/GroupsPage";
@@ -30,7 +29,7 @@ export default function App() {
           <Route path="chat" element={<ConversationsPage />} />
           <Route path="chat/:conversationId" element={<ConversationPage />} />
           <Route path="calls" element={<CallsPage />} />
-          <Route path="calls/:callId" element={<CallRoomPage />} />
+          <Route path="calls/:callId" element={<></>} />
           <Route path="friends" element={<FriendsPage />} />
           <Route path="groups" element={<GroupsPage />} />
           <Route path="saved" element={<Navigate to="/chat" replace />} />

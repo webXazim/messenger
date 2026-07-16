@@ -266,7 +266,7 @@ export function VideoCallScreen({
       />
 
       <header className="ms-video-call__header">
-        <button type="button" className="ms-video-call__back" onClick={onLeave} aria-label="Leave call">
+        <button type="button" className="ms-video-call__back" onClick={onLeave} aria-label="Minimize call">
           <BackIcon />
         </button>
         <div className="ms-video-call__identity">
