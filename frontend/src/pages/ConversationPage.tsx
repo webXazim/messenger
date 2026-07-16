@@ -406,7 +406,9 @@ export function ConversationPage() {
     enabled: !!conversationId,
     staleTime: 60_000,
     gcTime: 30 * 60_000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchInterval: () => document.visibilityState === "visible" ? 15_000 : false,
+    refetchIntervalInBackground: false,
     structuralSharing: (current, incoming) => mergeConversationReceipts(current as Conversation | undefined, incoming as Conversation),
   });
   useEffect(() => {
@@ -658,12 +660,14 @@ export function ConversationPage() {
     const receiptKey = `${targetConversationId}:${messageId}`;
     if (lastReadReceiptMessageRef.current === receiptKey) return;
     lastReadReceiptMessageRef.current = receiptKey;
-    void chatApi.markConversationRead(targetConversationId, { message_id: messageId }).then(() => {
+    socket.send({ event: "message.read", data: { conversation_id: targetConversationId, message_id: messageId } });
+    void chatApi.markConversationRead(targetConversationId, { message_id: messageId }).then((receipt) => {
+      applyParticipantReceiptInCache(targetConversationId, "message.read", receipt, queryClient);
       markConversationReadInCache(targetConversationId, queryClient);
     }).catch(() => {
       if (lastReadReceiptMessageRef.current === receiptKey) lastReadReceiptMessageRef.current = "";
     });
-  }, [queryClient]);
+  }, [queryClient, socket]);
 
   useEffect(() => {
     if (!conversationId) return;
@@ -679,6 +683,11 @@ export function ConversationPage() {
         return;
       }
       if (payloadConversationId && payloadConversationId !== conversationId) return;
+
+      if (payload.event === "conversation.subscribed") {
+        void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        return;
+      }
 
       if (payload.event === "message.sent") {
         const clientTempId = String(data.client_temp_id || "");
@@ -977,10 +986,18 @@ export function ConversationPage() {
     const receiptKey = `${conversationId}:${latestMessageId}`;
     if (lastDeliveredReceiptMessageRef.current === receiptKey) return;
     lastDeliveredReceiptMessageRef.current = receiptKey;
-    void chatApi.markConversationDelivered(conversationId, { message_id: latestMessageId }).catch(() => {
+    socket.send({ event: "message.delivered", data: { conversation_id: conversationId, message_id: latestMessageId } });
+    void chatApi.markConversationDelivered(conversationId, { message_id: latestMessageId }).then((receipt) => {
+      applyParticipantReceiptInCache(conversationId, "message.delivered", receipt, queryClient);
+    }).catch(() => {
       if (lastDeliveredReceiptMessageRef.current === receiptKey) lastDeliveredReceiptMessageRef.current = "";
     });
-  }, [conversationId, latestMessageId]);
+  }, [conversationId, latestMessageId, queryClient, socket]);
+
+  useEffect(() => {
+    if (socketStatus !== "open" || !conversationId) return;
+    void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+  }, [conversationId, queryClient, socketStatus]);
 
   useEffect(() => {
     if (!conversationId || !latestMessageId || !pageVisible || !timelineAtLatest) return;

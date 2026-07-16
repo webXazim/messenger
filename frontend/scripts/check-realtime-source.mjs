@@ -50,6 +50,10 @@ for (const required of [
   'payload.event === "message.reaction_updated"',
   "acknowledgeConversationRead(conversationId, normalized.id)",
   "timelineAtLatestRef.current",
+  'socket.send({ event: "message.read"',
+  'socket.send({ event: "message.delivered"',
+  'applyParticipantReceiptInCache(targetConversationId, "message.read", receipt, queryClient)',
+  'refetchInterval:',
 ]) {
   assert.ok(conversation.includes(required), `Missing typing/realtime UI protection: ${required}`);
 }
@@ -80,6 +84,7 @@ assert.ok(cache.includes('{ queryKey: ["conversation-route"] }'), "Named convers
 assert.ok(appShell.includes('["call.heartbeat", "call.media_state", "call.quality_report"]'), "Active call traffic does not reconcile global user presence.");
 assert.ok(serializers.includes("return getattr(obj, \"last_seen_at\", None) if self._presence_is_visible(obj) else None"), "Private last-seen data is still exposed.");
 assert.ok(views.includes('if getattr(participant, "_read_changed", False)'), "Unchanged read receipts are still broadcast repeatedly.");
+assert.ok(services.includes("effective_read_message"), "Duplicate read acknowledgements do not repair their delivered cursor.");
 assert.ok(views.includes("_broadcast_presence_update(request.user, snapshot)"), "REST presence changes are not propagated to peers.");
 assert.match(consumers, /_subscribe[\s\S]*group_send\(group_name, self\._event_payload\("message\.delivered"/, "Subscription delivery receipts are not broadcast to the sender.");
 

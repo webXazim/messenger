@@ -2878,24 +2878,31 @@ def mark_conversation_read(actor, conversation, message_id=None):
             raise ValidationError({"message_id": "Message not found in this conversation."})
     else:
         message = conversation.messages.order_by("-created_at").first()
-    if (
+    read_is_already_ahead = bool(
         message
         and participant.last_read_message_id
         and participant.last_read_message
         and participant.last_read_message.created_at >= message.created_at
-    ):
-        return participant
-    participant.last_read_message = message
-    participant.last_read_at = timezone.now()
-    participant.save(update_fields=["last_read_message", "last_read_at", "updated_at"])
-    participant._read_changed = bool(message)
-    if message:
-        delivered_participant = mark_conversation_delivered(actor, conversation, message.id)
+    )
+    if message and not read_is_already_ahead:
+        participant.last_read_message = message
+        participant.last_read_at = timezone.now()
+        participant.save(update_fields=["last_read_message", "last_read_at", "updated_at"])
+        participant._read_changed = True
+
+    # Read implies delivered. Always reconcile delivery through the effective
+    # read cursor, even when this request is a duplicate or arrives out of order.
+    # This repairs partial receipt state instead of returning early with a read
+    # pointer ahead of its delivered pointer.
+    effective_read_message = participant.last_read_message if read_is_already_ahead else message
+    if effective_read_message:
+        delivered_participant = mark_conversation_delivered(actor, conversation, effective_read_message.id)
         participant.last_delivered_message_id = delivered_participant.last_delivered_message_id
         participant.last_delivered_message = delivered_participant.last_delivered_message
         participant.last_delivered_at = delivered_participant.last_delivered_at
         participant._delivery_changed = bool(getattr(delivered_participant, "_delivery_changed", False))
-        log_chat_event(ChatAuditLog.EventType.READ_MARKED, actor=actor, conversation=conversation, message=message)
+        if participant._read_changed:
+            log_chat_event(ChatAuditLog.EventType.READ_MARKED, actor=actor, conversation=conversation, message=effective_read_message)
     return participant
 
 

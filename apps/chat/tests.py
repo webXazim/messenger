@@ -2290,6 +2290,38 @@ class ChatApiTests(TestCase):
         self.assertEqual(response.data["last_read_message_id"], message["id"])
         self.assertEqual(response.data["last_delivered_message_id"], message["id"])
 
+    def test_duplicate_read_repairs_a_stale_delivered_pointer(self):
+        conversation = self.create_direct_conversation()
+        first = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "first"},
+            format="json",
+        ).data
+        second = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"text": "second"},
+            format="json",
+        ).data
+        self.client.force_authenticate(self.other)
+        self.client.post(
+            reverse("conversation-mark-read", kwargs={"conversation_id": conversation["id"]}),
+            {"message_id": second["id"]},
+            format="json",
+        )
+        participant = ConversationParticipant.objects.get(conversation_id=conversation["id"], user=self.other)
+        participant.last_delivered_message_id = first["id"]
+        participant.save(update_fields=["last_delivered_message"])
+
+        repaired = self.client.post(
+            reverse("conversation-mark-read", kwargs={"conversation_id": conversation["id"]}),
+            {"message_id": second["id"]},
+            format="json",
+        )
+        participant.refresh_from_db()
+        self.assertEqual(repaired.status_code, 200)
+        self.assertEqual(str(participant.last_read_message_id), second["id"])
+        self.assertEqual(str(participant.last_delivered_message_id), second["id"])
+
     def test_receipt_pointers_never_move_backwards(self):
         conversation = self.create_direct_conversation()
         first = self.client.post(
@@ -2673,6 +2705,35 @@ class ChatWebsocketTests(TransactionTestCase):
             self.assertEqual(sender_delivered["data"]["user_id"], str(self.user.id))
             self.assertEqual(sender_delivered["data"]["last_delivered_message_id"], self.message_id)
             self.assertEqual(recipient_delivered["data"], sender_delivered["data"])
+            await recipient.disconnect()
+            await sender.disconnect()
+
+        asyncio.run(runner())
+
+    def test_active_recipient_read_event_reaches_sender(self):
+        import asyncio
+
+        async def runner():
+            sender, sender_connected = await self._connect(self.other)
+            recipient, recipient_connected = await self._connect(self.user)
+            self.assertTrue(sender_connected)
+            self.assertTrue(recipient_connected)
+
+            await sender.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
+            await recipient.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
+            await self._receive_event(sender, "conversation.subscribed")
+            await self._receive_event(recipient, "conversation.subscribed")
+            await self._receive_event(sender, "message.delivered")
+
+            await recipient.send_json_to({
+                "event": "message.read",
+                "data": {"conversation_id": self.conversation["id"], "message_id": self.message_id},
+            })
+            sender_read = await self._receive_event(sender, "message.read")
+            recipient_read = await self._receive_event(recipient, "message.read")
+            self.assertEqual(sender_read["data"]["user_id"], str(self.user.id))
+            self.assertEqual(sender_read["data"]["last_read_message_id"], self.message_id)
+            self.assertEqual(sender_read["data"], recipient_read["data"])
             await recipient.disconnect()
             await sender.disconnect()
 
