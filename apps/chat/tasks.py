@@ -80,21 +80,33 @@ def fanout_push_notifications(message_id):
             "title": title,
             "body": preview,
         }
-        tokens = list(devices.values_list("push_token", flat=True))
-        if not tokens:
-            continue
-        result = send_push(
-            tokens,
-            title=title,
-            body=preview,
-            data=common_data,
-        )
-        attempted += result.attempted
-        sent += result.sent
-        failed += result.failed
-        invalid_tokens = getattr(result, "invalid_tokens", []) or []
-        if invalid_tokens:
-            invalidated_devices += devices.filter(push_token__in=invalid_tokens).update(is_active=False, updated_at=timezone.now())
+        for platform in ("android", "ios", "web"):
+            platform_devices = devices.filter(platform=platform)
+            tokens = list(platform_devices.values_list("push_token", flat=True))
+            if not tokens:
+                continue
+            if platform == "web":
+                # Data-only web pushes let our service worker render actions such as Reply.
+                result = send_push_with_options(
+                    tokens,
+                    title=title,
+                    body=preview,
+                    data=common_data,
+                    include_notification=False,
+                )
+            else:
+                result = send_push(
+                    tokens,
+                    title=title,
+                    body=preview,
+                    data=common_data,
+                )
+            attempted += result.attempted
+            sent += result.sent
+            failed += result.failed
+            invalid_tokens = getattr(result, "invalid_tokens", []) or []
+            if invalid_tokens:
+                invalidated_devices += platform_devices.filter(push_token__in=invalid_tokens).update(is_active=False, updated_at=timezone.now())
     return {"attempted": attempted, "sent": sent, "failed": failed, "invalidated_devices": invalidated_devices}
 
 

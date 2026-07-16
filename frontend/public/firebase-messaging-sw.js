@@ -23,10 +23,13 @@
   const messaging = firebase.messaging();
 
   messaging.onBackgroundMessage((payload) => {
-    const title = payload?.notification?.title || "New message";
+    const title = payload?.notification?.title || payload?.data?.title || payload?.data?.sender_name || "New message";
+    const isMessageNotification = Boolean(payload?.data?.conversation_id && payload?.data?.message_id && !payload?.data?.call_id);
     const options = {
-      body: payload?.notification?.body || "Open the chat to view it.",
+      body: payload?.notification?.body || payload?.data?.body || "Open the chat to view it.",
       data: payload?.data || {},
+      tag: payload?.data?.conversation_id ? `message:${payload.data.conversation_id}` : undefined,
+      actions: isMessageNotification ? [{ action: "reply", title: "Reply" }] : [],
     };
     self.registration.showNotification(title, options);
   });
@@ -35,7 +38,10 @@
     event.notification.close();
     const conversationId = event.notification?.data?.conversation_id;
     const callId = event.notification?.data?.call_id;
-    const targetPath = conversationId ? `/chat/${conversationId}` : callId ? `/calls/${callId}` : "/";
+    const replyRequested = event.action === "reply";
+    const targetPath = callId
+      ? `/calls/${callId}`
+      : conversationId ? `/chat/${conversationId}${replyRequested ? "?reply=1" : ""}` : "/";
     event.waitUntil((async () => {
       const clientList = await clients.matchAll({ type: "window", includeUncontrolled: true });
       for (const client of clientList) {

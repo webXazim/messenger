@@ -11,6 +11,7 @@ import { UserAvatar } from "./UserAvatar";
 import { ensureBrowserWebPushRegistration, getLastWebPushPromptAt, getStoredWebPushToken, getWebPushPermissionMessage, getWebPushStatus, rememberWebPushPrompt, showChatActivityNotification } from "../lib/pushNotifications";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
+import { decryptMessageTextResult } from "../lib/e2ee";
 import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
 import { getRealtimeSyncMarker, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
@@ -38,6 +39,27 @@ type MessageToast = {
   body: string;
   avatar?: string | null;
 };
+
+function attachmentNotificationLabel(message: ReturnType<typeof normalizeMessage>) {
+  const attachments = message.attachments ?? [];
+  if (!attachments.length) return "New message";
+  if (attachments.length > 1) return `Sent ${attachments.length} attachments`;
+  const kind = String(attachments[0]?.media_kind || attachments[0]?.mime_type || "").toLowerCase();
+  if (kind.includes("image")) return "Sent a photo";
+  if (kind.includes("video")) return "Sent a video";
+  if (kind.includes("audio")) return "Sent an audio message";
+  return `Sent ${attachments[0]?.original_name || "a file"}`;
+}
+
+async function resolveMessageNotificationBody(userId: string, message: ReturnType<typeof normalizeMessage>) {
+  if (message.is_encrypted && message.encryption) {
+    const decrypted = await decryptMessageTextResult(userId, message);
+    if (decrypted.status === "ready" && decrypted.text.trim()) return decrypted.text.trim().slice(0, 180);
+  } else if (message.text.trim()) {
+    return message.text.trim().slice(0, 180);
+  }
+  return attachmentNotificationLabel(message);
+}
 
 export function AppShell() {
   const { user, logout } = useAuth();
@@ -346,23 +368,24 @@ export function AppShell() {
         const chatIsOpen = conversationId && location.pathname.startsWith(`/chat/${conversationId}`) && document.visibilityState === "visible";
         if (sender && !isSameUserIdentity(sender, user)) {
           if (chatIsOpen) return;
-          const body = String(payload.data?.text || (Array.isArray(payload.data?.attachments) && payload.data.attachments.length ? "Sent an attachment" : "New chat activity"));
-          pushMessageToast({
-            id: `message:${conversationId}:${messageId}`,
-            conversationId,
-            messageId,
-            title: senderName,
-            body,
-            avatar: typeof sender.avatar === "string" ? sender.avatar : null,
-          });
-          void showChatActivityNotification({
-            title: senderName,
-            body,
-            tag: `message:${conversationId}:${messageId}`,
-            data: {
-              conversation_id: conversationId,
-              message_id: messageId,
-            },
+          void resolveMessageNotificationBody(String(user?.id || ""), message).then((body) => {
+            pushMessageToast({
+              id: `message:${conversationId}:${messageId}`,
+              conversationId,
+              messageId,
+              title: senderName,
+              body,
+              avatar: typeof sender.avatar === "string" ? sender.avatar : null,
+            });
+            return showChatActivityNotification({
+              title: senderName,
+              body,
+              tag: `message:${conversationId}:${messageId}`,
+              data: {
+                conversation_id: conversationId,
+                message_id: messageId,
+              },
+            });
           }).catch(() => undefined);
         }
       }
@@ -542,6 +565,16 @@ export function AppShell() {
                   <strong>{toast.title}</strong>
                   <span>{toast.body}</span>
                 </span>
+              </button>
+              <button
+                type="button"
+                className="ms-toast__reply"
+                onClick={() => {
+                  dismissMessageToast(toast.id);
+                  if (toast.conversationId) navigate(`/chat/${toast.conversationId}?reply=1`);
+                }}
+              >
+                Reply
               </button>
               <button
                 type="button"

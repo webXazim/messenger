@@ -66,6 +66,7 @@ export function MessageComposer({
   onSendVoiceNote,
   disabled = false,
   disabledReason,
+  autoFocus = false,
 }: {
   onUpload: (file: File, options: ComposerUploadRequestOptions) => Promise<ComposerUploadResult>;
   onDiscardUpload?: (uploadId: string) => void;
@@ -81,6 +82,7 @@ export function MessageComposer({
   onTyping?: () => void;
   disabled?: boolean;
   disabledReason?: string | null;
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState("");
   const [pendingUploads, setPendingUploads] = useState<PendingComposerUpload[]>([]);
@@ -110,6 +112,10 @@ export function MessageComposer({
   const focusTextarea = () => {
     window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
   };
+
+  useEffect(() => {
+    if (autoFocus) focusTextarea();
+  }, [autoFocus, draftKey]);
 
   useEffect(() => {
     setSubmitError(null);

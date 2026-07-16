@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { authApi } from "../api/auth";
 import { chatApi, normalizeConversation, normalizeMessage, type MessagePage } from "../api/chat";
 import { ForwardMessageModal } from "../components/ForwardMessageModal";
@@ -252,6 +252,7 @@ export function ConversationPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const namedRoute = isNamedConversationRoute(routeConversationKey);
   const routeConversationQuery = useQuery({
     queryKey: ["conversation-route", routeConversationKey.toLowerCase()],
@@ -270,6 +271,7 @@ export function ConversationPage() {
     retry: 1,
   });
   const conversationId = namedRoute ? routeConversationQuery.data?.id || "" : routeConversationKey;
+  const notificationReplyRequested = new URLSearchParams(location.search).get("reply") === "1";
   const { socket, socketStatus } = useChatSocket();
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -1955,6 +1957,7 @@ export function ConversationPage() {
           ) : null}
           <TypingIndicator names={Object.values(typingUsers).filter(Boolean)} />
           <MessageComposer
+            autoFocus={notificationReplyRequested}
             draftKey={buildConversationDraftKey(String(user?.id || "anonymous"), conversationId)}
             legacyDraftKey={buildLegacyConversationDraftKey(conversationId)}
             uploadPolicy={composerUploadPolicy}

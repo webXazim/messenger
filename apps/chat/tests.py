@@ -2809,6 +2809,28 @@ class ChatBackgroundTaskTests(TestCase):
         self.assertEqual(result["attempted"], 1)
         self.assertTrue(mock_send_push.called)
 
+    @patch("apps.chat.tasks.send_push_with_options")
+    @patch("apps.chat.tasks.send_push")
+    def test_fanout_push_notifications_uses_data_only_web_push_for_reply_actions(self, mock_send_push, mock_send_push_with_options):
+        from apps.chat.tasks import fanout_push_notifications
+
+        UserDevice.objects.filter(user=self.other).delete()
+        UserDevice.objects.create(user=self.other, platform="web", push_token="web-push-1", is_active=True)
+        mock_send_push_with_options.return_value = type(
+            "Result",
+            (),
+            {"attempted": 1, "sent": 1, "failed": 0, "invalid_tokens": []},
+        )()
+
+        result = fanout_push_notifications(self.message_id)
+
+        self.assertEqual(result["attempted"], 1)
+        self.assertFalse(mock_send_push.called)
+        self.assertTrue(mock_send_push_with_options.called)
+        self.assertFalse(mock_send_push_with_options.call_args.kwargs["include_notification"])
+        self.assertEqual(mock_send_push_with_options.call_args.kwargs["data"]["event"], "message")
+        self.assertEqual(str(mock_send_push_with_options.call_args.kwargs["data"]["message_id"]), self.message_id)
+
     @patch("apps.chat.tasks.send_push")
     def test_fanout_push_notifications_deactivates_invalid_tokens(self, mock_send_push):
         from apps.chat.tasks import fanout_push_notifications

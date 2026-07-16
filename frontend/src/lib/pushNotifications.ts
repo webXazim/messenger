@@ -163,7 +163,15 @@ export async function showChatActivityNotification({
   data?: Record<string, string>;
 }) {
   if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return false;
-  const payload = { body, tag, data: data ?? {} };
+  const replyAction = data?.conversation_id && data?.message_id && !data?.call_id
+    ? [{ action: "reply", title: "Reply" }]
+    : [];
+  const payload: NotificationOptions & { actions: Array<{ action: string; title: string }> } = {
+    body,
+    tag,
+    data: data ?? {},
+    actions: replyAction,
+  };
   if ("serviceWorker" in navigator) {
     const registration = await navigator.serviceWorker.getRegistration();
     if (registration) {
@@ -173,7 +181,7 @@ export async function showChatActivityNotification({
   }
   const notification = new Notification(title, payload);
   notification.onclick = () => {
-    const href = data?.conversation_id ? `/chat/${data.conversation_id}` : data?.call_id ? `/calls/${data.call_id}` : "/";
+    const href = data?.call_id ? `/calls/${data.call_id}` : data?.conversation_id ? `/chat/${data.conversation_id}?reply=1` : "/";
     window.focus();
     window.location.assign(href);
   };
