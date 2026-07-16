@@ -9,6 +9,7 @@ export type ConversationListBaseProps = {
   onlineFriends?: UserSearchResult[];
   openingFriendId?: string | null;
   onOpenFriend?: (friend: UserSearchResult) => void;
+  onPrefetchConversation?: (conversation: Conversation) => void;
 };
 
 export type ConversationFilter = "all" | "unread" | "groups" | "archived";

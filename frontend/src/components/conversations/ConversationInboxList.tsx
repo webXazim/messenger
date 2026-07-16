@@ -7,7 +7,7 @@ import { conversationListEmptyCopy, filterConversationsForInbox } from "./conver
 import { applyKnownOnlinePresence } from "./conversationPresentation";
 import type { ConversationListBaseProps } from "./types";
 
-export function ConversationInboxList({ conversations, currentUserId, currentUser, onlineFriends, openingFriendId, onOpenFriend }: ConversationListBaseProps) {
+export function ConversationInboxList({ conversations, currentUserId, currentUser, onlineFriends, openingFriendId, onOpenFriend, onPrefetchConversation }: ConversationListBaseProps) {
   const { search, filter, setSearch, setFilter } = useConversationListPreferences();
   const presenceAwareConversations = useMemo(
     () => applyKnownOnlinePresence(conversations, onlineFriends),
@@ -36,6 +36,7 @@ export function ConversationInboxList({ conversations, currentUserId, currentUse
             conversation={conversation}
             currentUserId={currentUserId}
             currentUser={currentUser}
+            onPrefetch={onPrefetchConversation}
           />
         ))}
 

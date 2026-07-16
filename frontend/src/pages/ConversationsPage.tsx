@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth";
@@ -9,6 +9,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { parseApiError } from "../lib/apiErrors";
 import { conversationPath } from "../lib/conversationRoute";
 import { readStoredChatInboxWidth } from "../lib/chatPaneSizing";
+import { prefetchConversationResources } from "../lib/conversationPrefetch";
 import type { UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
 
@@ -66,6 +67,9 @@ export function ConversationsPage() {
         return true;
       });
   }, [friendsQuery.data, user?.id]);
+  const prefetchConversation = useCallback((conversation: Conversation) => {
+    prefetchConversationResources(queryClient, conversation.id, user?.id);
+  }, [queryClient, user?.id]);
 
   const directChatMutation = useMutation({
     mutationFn: async (person: UserSearchResult) => {
@@ -122,6 +126,7 @@ export function ConversationsPage() {
             onlineFriends={friends}
             openingFriendId={directChatMutation.isPending ? String(directChatMutation.variables?.id || "") : null}
             onOpenFriend={(friend) => directChatMutation.mutate(friend)}
+            onPrefetchConversation={prefetchConversation}
           />
         )}
       </aside>

@@ -30,6 +30,7 @@ import { useConversationTimeline } from "../hooks/useConversationTimeline";
 import { applyActiveConversationReadState, clearActiveConversationView, isConversationActivelyViewedAtLatest, setActiveConversationView } from "../lib/activeConversationView";
 import { safeId } from "../lib/safeId";
 import { buildConversationDraftKey, buildLegacyConversationDraftKey } from "../lib/conversationDrafts";
+import { prefetchConversationResources } from "../lib/conversationPrefetch";
 import {
   advanceMessageReceiptPages,
   findMessageInPages,
@@ -263,7 +264,7 @@ export function ConversationPage() {
   const [startingCallType, setStartingCallType] = useState<"voice" | "video" | null>(null);
   const [decryptedTexts, setDecryptedTexts] = useState<Record<string, string>>({});
   const [decryptionStates, setDecryptionStates] = useState<Record<string, { status: "pending" | "ready" | "unavailable" | "error"; message?: string }>>({});
-  const [initiallyReadyConversationId, setInitiallyReadyConversationId] = useState("");
+  const [readyConversationIds, setReadyConversationIds] = useState<Set<string>>(() => new Set());
   const [reportedMessageIds, setReportedMessageIds] = useState<Record<string, boolean>>({});
   const [inboxWidth, setInboxWidth] = useState(readStoredChatInboxWidth);
   const [isResizingInbox, setIsResizingInbox] = useState(false);
@@ -391,6 +392,9 @@ export function ConversationPage() {
     queryKey: ["conversation", conversationId],
     queryFn: () => chatApi.getConversation(conversationId),
     enabled: !!conversationId,
+    initialData: () => (queryClient.getQueryData<Conversation[]>(["conversations"]) ?? [])
+      .find((conversation) => conversation.id === conversationId),
+    initialDataUpdatedAt: 0,
     staleTime: 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
@@ -450,6 +454,9 @@ export function ConversationPage() {
     staleTime: 10_000,
     retry: 2,
   });
+  const prefetchConversation = useCallback((target: Conversation) => {
+    prefetchConversationResources(queryClient, target.id, user?.id);
+  }, [queryClient, user?.id]);
   useEffect(() => {
     if (!conversationId || !e2eeIdentityQuery.data?.keyId) return;
     // Identity registration and key-material loading can finish in either order.
@@ -915,12 +922,17 @@ export function ConversationPage() {
   useEffect(() => {
     if (!conversationId || messagesQuery.isLoading || conversationQuery.isLoading || routeConversationQuery.isLoading) return;
     if (encryptionReadiness.status === "preparing" || hasEncryptedMessagesPending) return;
-    setInitiallyReadyConversationId(conversationId);
+    setReadyConversationIds((current) => {
+      if (current.has(conversationId)) return current;
+      const next = new Set(current);
+      next.add(conversationId);
+      return next;
+    });
   }, [conversationId, conversationQuery.isLoading, encryptionReadiness.status, hasEncryptedMessagesPending, messagesQuery.isLoading, routeConversationQuery.isLoading]);
 
   const messages = useMemo(
     () => {
-      if (initiallyReadyConversationId !== conversationId) return [];
+      if (!readyConversationIds.has(conversationId)) return [];
       return [...pagedMessages]
         .map((message) => {
           if (!message.is_encrypted) return message;
@@ -941,7 +953,7 @@ export function ConversationPage() {
           return timestampDelta || String(a.id).localeCompare(String(b.id));
         });
     },
-    [conversationId, decryptedTexts, decryptionStates, e2eeIdentityQuery.isError, initiallyReadyConversationId, pagedMessages],
+    [conversationId, decryptedTexts, decryptionStates, e2eeIdentityQuery.isError, pagedMessages, readyConversationIds],
   );
   const latestMessageId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -1754,7 +1766,7 @@ export function ConversationPage() {
   const isInitialChatLoading = routeConversationQuery.isLoading
     || conversationQuery.isLoading
     || messagesQuery.isLoading
-    || initiallyReadyConversationId !== conversationId;
+    || !readyConversationIds.has(conversationId);
   const showEmptyConversation = !isInitialChatLoading && !chatError && messages.length === 0;
 
   const headerNotices = useMemo<ChatHeaderNotice[]>(() => {
@@ -1813,6 +1825,7 @@ export function ConversationPage() {
             onlineFriends={friends}
             openingFriendId={onlineFriendMutation.isPending ? String(onlineFriendMutation.variables?.id || "") : null}
             onOpenFriend={(friend) => onlineFriendMutation.mutate(friend)}
+            onPrefetchConversation={prefetchConversation}
           />
         )}
       </aside>

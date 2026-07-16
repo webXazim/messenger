@@ -34,10 +34,12 @@ export function ConversationRow({
   conversation,
   currentUserId,
   currentUser,
+  onPrefetch,
 }: {
   conversation: Conversation;
   currentUserId?: string;
   currentUser?: Partial<UserLite> | null;
+  onPrefetch?: (conversation: Conversation) => void;
 }) {
   const title = conversationDisplayName(conversation, currentUserId, currentUser);
   const unread = conversation.unread_count > 0;
@@ -50,6 +52,9 @@ export function ConversationRow({
     <NavLink
       to={conversationPath(conversation, currentUser)}
       className={({ isActive }) => `ms-inbox-row${isActive ? " is-active" : ""}${unread ? " has-unread" : ""}`}
+      onPointerEnter={() => onPrefetch?.(conversation)}
+      onPointerDown={() => onPrefetch?.(conversation)}
+      onFocus={() => onPrefetch?.(conversation)}
     >
       <UserAvatar
         person={peer ?? { display_name: title }}

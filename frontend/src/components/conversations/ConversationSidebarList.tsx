@@ -15,6 +15,7 @@ export function ConversationSidebarList({
   onlineFriends,
   openingFriendId,
   onOpenFriend,
+  onPrefetchConversation,
 }: ConversationListBaseProps) {
   const { search, filter, setSearch, setFilter } = useConversationListPreferences();
   const presenceAwareConversations = useMemo(
@@ -58,6 +59,7 @@ export function ConversationSidebarList({
             conversation={conversation}
             currentUserId={currentUserId}
             currentUser={currentUser}
+            onPrefetch={onPrefetchConversation}
           />
         ))}
         {!filteredConversations.length ? (

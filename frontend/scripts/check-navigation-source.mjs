@@ -12,6 +12,7 @@ const row = read("src/components/conversations/ConversationRow.tsx");
 const preferences = read("src/hooks/useConversationListPreferences.ts");
 const chatApi = read("src/api/chat.ts");
 const details = read("src/pages/ConversationPage.tsx");
+const prefetch = read("src/lib/conversationPrefetch.ts");
 
 assert.ok(!app.includes("SavedPage"), "Unfinished Saved page is still imported.");
 assert.ok(app.includes('<Route path="saved" element={<Navigate to="/chat" replace />} />'), "Legacy Saved URLs are not redirected safely.");
@@ -32,5 +33,8 @@ for (const label of ["Pinned", "Muted", "Archived", "End-to-end encrypted"]) {
 }
 assert.ok(details.includes("conversationStatePending"), "Conversation state actions can still be double-submitted.");
 assert.ok(details.includes("patchConversationViewerState"), "Pin/mute/archive changes do not update the inbox immediately.");
+assert.ok(details.includes("readyConversationIds"), "Previously opened chats lose their ready state while switching conversations.");
+assert.ok(row.includes("onPointerEnter") && row.includes("onFocus"), "Chat rows do not warm conversation data before navigation.");
+assert.ok(prefetch.includes("prefetchInfiniteQuery") && prefetch.includes('["messages", conversationId]'), "Message history is not prefetched before opening a chat.");
 
 console.log("Navigation source regression checks passed.");
