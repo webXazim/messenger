@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { authApi } from "../api/auth";
@@ -27,6 +27,7 @@ import {
 } from "../lib/e2ee";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useConversationTimeline } from "../hooks/useConversationTimeline";
+import { applyActiveConversationReadState, clearActiveConversationView, isConversationActivelyViewedAtLatest, setActiveConversationView } from "../lib/activeConversationView";
 import { safeId } from "../lib/safeId";
 import { buildConversationDraftKey, buildLegacyConversationDraftKey } from "../lib/conversationDrafts";
 import {
@@ -736,15 +737,20 @@ export function ConversationPage() {
               }))
             : next;
         });
-        if (
+        const shouldReadImmediately =
           payload.event === "message.created"
           && document.visibilityState === "visible"
           && timelineAtLatestRef.current
-          && !isSameUserIdentity(normalized.sender, localCurrentUser)
-        ) {
+          && !isSameUserIdentity(normalized.sender, localCurrentUser);
+        if (shouldReadImmediately) {
+          markConversationReadInCache(conversationId, queryClient);
           acknowledgeConversationRead(conversationId, normalized.id);
         }
-        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] }).then(() => {
+          if (isConversationActivelyViewedAtLatest(conversationId)) {
+            markConversationReadInCache(conversationId, queryClient);
+          }
+        });
         return;
       }
 
@@ -818,7 +824,7 @@ export function ConversationPage() {
       }
 
       if (payload.event === "conversation.updated") {
-        const updated = normalizeConversation(data);
+        const updated = applyActiveConversationReadState(normalizeConversation(data));
         if (updated.id === conversationId) {
           queryClient.setQueryData<Conversation>(["conversation", conversationId], (current) => mergeConversationReceipts(current, updated));
           queryClient.setQueryData(["conversations"], (current: unknown) => Array.isArray(current)
@@ -995,6 +1001,12 @@ export function ConversationPage() {
     getErrorMessage,
   });
   timelineAtLatestRef.current = timelineAtLatest;
+
+  useLayoutEffect(() => {
+    if (!conversationId) return;
+    setActiveConversationView({ conversationId, atLatest: timelineAtLatest, visible: pageVisible });
+    return () => clearActiveConversationView(conversationId);
+  }, [conversationId, pageVisible, timelineAtLatest]);
 
   useEffect(() => {
     if (!conversationId || !latestMessageId) return;

@@ -2,6 +2,7 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { MessagePage } from "../api/chat";
 import type { Call, Conversation, Message } from "../types/chat";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "./messageReceipts";
+import { applyActiveConversationReadState } from "./activeConversationView";
 
 export type ChatSyncPayload = {
   conversations: Conversation[];
@@ -29,7 +30,7 @@ export function upsertConversationList(current: Conversation[] | undefined, inco
 }
 
 export function patchConversationCaches(queryClient: QueryClient, incoming: Conversation) {
-  const reconciledIncoming = reconcileConversationPresence(queryClient, incoming);
+  const reconciledIncoming = applyActiveConversationReadState(reconcileConversationPresence(queryClient, incoming));
   queryClient.setQueryData<Conversation[]>(["conversations"], (current) => upsertConversationList(current, reconciledIncoming));
   queryClient.setQueryData<Conversation>(["conversation", incoming.id], (current) =>
     current ? mergeConversationPreservingPresence(current, reconciledIncoming) : reconciledIncoming,

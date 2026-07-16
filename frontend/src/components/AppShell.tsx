@@ -12,6 +12,7 @@ import { ensureBrowserWebPushRegistration, getLastWebPushPromptAt, getStoredWebP
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
 import { decryptMessageTextResult } from "../lib/e2ee";
+import { isConversationActivelyViewedAtLatest } from "../lib/activeConversationView";
 import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
 import { getRealtimeSyncMarker, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
@@ -365,9 +366,9 @@ export function AppShell() {
           sender
             ? String(sender.display_name || sender.username || "New message")
             : "New message";
-        const chatIsOpen = conversationId && location.pathname.startsWith(`/chat/${conversationId}`) && document.visibilityState === "visible";
+        const chatIsOpenAtLatest = isConversationActivelyViewedAtLatest(conversationId);
         if (sender && !isSameUserIdentity(sender, user)) {
-          if (chatIsOpen) return;
+          if (chatIsOpenAtLatest) return;
           void resolveMessageNotificationBody(String(user?.id || ""), message).then((body) => {
             pushMessageToast({
               id: `message:${conversationId}:${messageId}`,
