@@ -1,6 +1,7 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { MessagePage } from "../api/chat";
 import type { Call, Conversation, Message } from "../types/chat";
+import { mergeConversationReceipts } from "./messageReceipts";
 
 export type ChatSyncPayload = {
   conversations: Conversation[];
@@ -154,13 +155,14 @@ function reconcileConversationPresence(queryClient: QueryClient, incoming: Conve
 }
 
 function mergeConversationPreservingPresence(current: Conversation, incoming: Conversation): Conversation {
+  const receiptSafeIncoming = mergeConversationReceipts(current, incoming);
   const currentUsers = new Map(
     current.participants.map((participant) => [String(participant.user.id), participant.user]),
   );
   return {
     ...current,
-    ...incoming,
-    participants: incoming.participants.map((participant) => ({
+    ...receiptSafeIncoming,
+    participants: receiptSafeIncoming.participants.map((participant) => ({
       ...participant,
       user: preservePresence(currentUsers.get(String(participant.user.id)), participant.user),
     })),

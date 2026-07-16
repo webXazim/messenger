@@ -173,7 +173,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         payload = await self._mark_delivered_sync(conversation_id, None)
         await self.send_json({"event": "conversation.subscribed", "data": {"conversation_id": conversation_id}})
         if payload.get("changed") and payload.get("last_delivered_message_id"):
-            await self.send_json(self._event_payload("message.delivered", payload))
+            await self.channel_layer.group_send(group_name, self._event_payload("message.delivered", payload))
 
     async def _unsubscribe(self, conversation_id):
         group_name = f"conversation_{conversation_id}"

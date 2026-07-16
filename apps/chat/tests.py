@@ -2622,9 +2622,9 @@ class ChatWebsocketTests(TransactionTestCase):
         other_client.force_authenticate(self.other)
         self.message_id = other_client.post(reverse("message-list-create", kwargs={"conversation_id": self.conversation["id"]}), {"text": "hello"}, format="json").data["id"]
 
-    async def _connect(self):
+    async def _connect(self, user=None):
         from config.asgi import application
-        token = str(AccessToken.for_user(self.user))
+        token = str(AccessToken.for_user(user or self.user))
         communicator = WebsocketCommunicator(application, f"/ws/chat/?token={token}")
         connected, _ = await communicator.connect()
         return communicator, connected
@@ -2650,6 +2650,31 @@ class ChatWebsocketTests(TransactionTestCase):
             delivered = await communicator.receive_json_from()
             self.assertEqual(delivered["event"], "message.delivered")
             await communicator.disconnect()
+
+        asyncio.run(runner())
+
+    def test_subscription_delivery_event_reaches_sender(self):
+        import asyncio
+
+        async def runner():
+            sender, sender_connected = await self._connect(self.other)
+            self.assertTrue(sender_connected)
+            await sender.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
+            sender_subscribed = await sender.receive_json_from()
+            self.assertEqual(sender_subscribed["event"], "conversation.subscribed")
+
+            recipient, recipient_connected = await self._connect(self.user)
+            self.assertTrue(recipient_connected)
+            await recipient.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
+            recipient_subscribed = await recipient.receive_json_from()
+            self.assertEqual(recipient_subscribed["event"], "conversation.subscribed")
+            recipient_delivered = await self._receive_event(recipient, "message.delivered")
+            sender_delivered = await self._receive_event(sender, "message.delivered")
+            self.assertEqual(sender_delivered["data"]["user_id"], str(self.user.id))
+            self.assertEqual(sender_delivered["data"]["last_delivered_message_id"], self.message_id)
+            self.assertEqual(recipient_delivered["data"], sender_delivered["data"])
+            await recipient.disconnect()
+            await sender.disconnect()
 
         asyncio.run(runner())
 

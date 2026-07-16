@@ -751,7 +751,9 @@ export function ConversationPage() {
         if (updated.id === conversationId) {
           queryClient.setQueryData<Conversation>(["conversation", conversationId], (current) => mergeConversationReceipts(current, updated));
           queryClient.setQueryData(["conversations"], (current: unknown) => Array.isArray(current)
-            ? current.map((item) => item && typeof item === "object" && String((item as Record<string, unknown>).id || "") === conversationId ? { ...item, ...updated } : item)
+            ? current.map((item) => item && typeof item === "object" && String((item as Record<string, unknown>).id || "") === conversationId
+              ? mergeConversationReceipts(item as Conversation, updated)
+              : item)
             : current);
         }
         return;
