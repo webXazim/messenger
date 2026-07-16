@@ -348,7 +348,6 @@ export function VideoCallScreen({
         remoteTrackCount={remoteTrackCount}
         localVideoEnabled={videoEnabled}
         localVideoMirrored={localVideoMirrored}
-        chromeVisible={chromeVisible}
         onUserActivity={revealChrome}
         onVideoLayoutChange={onVideoLayoutChange}
       />

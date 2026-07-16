@@ -368,6 +368,7 @@ type CallRoomPageProps = {
   callIdOverride?: string;
   displayMode?: "full" | "compact";
   onCallFinished?: (callId: string) => void;
+  onCallMinimize?: (callId: string) => void;
 };
 
 function CompactMicrophoneIcon({ muted }: { muted: boolean }) {
@@ -402,7 +403,7 @@ function CompactAcceptIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.8h3l1.2 4-2 1.7a14.4 14.4 0 0 0 5.3 5.3l1.7-2 4 1.2v3c0 1.1-.9 2-2 2C10.9 19 5 13.1 5 5.8c0-1.1.9-2 2-2Z" /></svg>;
 }
 
-export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinished }: CallRoomPageProps = {}) {
+export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinished, onCallMinimize }: CallRoomPageProps = {}) {
   const { callId: routeCallId = "" } = useParams();
   const callId = callIdOverride || routeCallId;
   const navigate = useNavigate();
@@ -1867,10 +1868,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
     : Math.max(0, Number(call.duration_seconds || 0));
   const primaryQualityAlert = qualityAlerts[0];
   const minimizeCall = () => {
-    if (canAcceptCall) {
-      declineMutation.mutate();
-      return;
-    }
+    onCallMinimize?.(call.id);
     navigate(call.conversation ? `/chat/${call.conversation}` : "/chat");
   };
   const compactDisplayName = isGroupCall

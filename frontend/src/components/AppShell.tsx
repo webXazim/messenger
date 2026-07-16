@@ -119,6 +119,7 @@ export function AppShell() {
   const queryClient = useQueryClient();
   const routeCallId = useMemo(() => callIdFromPath(location.pathname), [location.pathname]);
   const [activeCallId, setActiveCallId] = useState(() => routeCallId || storedActiveCallId(user?.id));
+  const [expandedCallId, setExpandedCallId] = useState(() => routeCallId);
   const [incomingCall, setIncomingCall] = useState<Call | null>(null);
   const [messageToasts, setMessageToasts] = useState<MessageToast[]>([]);
   const [showCallOverlay, setShowCallOverlay] = useState(false);
@@ -126,6 +127,7 @@ export function AppShell() {
   const [incomingCallError, setIncomingCallError] = useState<string | null>(null);
   const [webPushBanner, setWebPushBanner] = useState<{ tone: "warning" | "danger"; message: string; action?: "enable" | "settings" } | null>(null);
   const previousSocketStatusRef = useRef(socketStatus);
+  const previousRouteCallIdRef = useRef(routeCallId);
   const realtimeSyncInFlightRef = useRef(false);
   const incomingActionInFlightRef = useRef(false);
   const outgoingCallConversationRef = useRef("");
@@ -137,6 +139,7 @@ export function AppShell() {
     const normalizedCallId = String(callId || "");
     if (!normalizedCallId) return;
     setActiveCallId(normalizedCallId);
+    setExpandedCallId(normalizedCallId);
     rememberActiveCallId(user?.id, normalizedCallId);
   }, [user?.id]);
 
@@ -156,6 +159,14 @@ export function AppShell() {
   }, [activateCall, routeCallId]);
 
   useEffect(() => {
+    const previousRouteCallId = previousRouteCallIdRef.current;
+    previousRouteCallIdRef.current = routeCallId;
+    if (previousRouteCallId && !routeCallId) {
+      setExpandedCallId((current) => current === previousRouteCallId ? "" : current);
+    }
+  }, [routeCallId]);
+
+  useEffect(() => {
     if (routeCallId || activeCallId || !user?.id) return;
     const restoredCallId = storedActiveCallId(user.id);
     if (restoredCallId) setActiveCallId(restoredCallId);
@@ -163,8 +174,13 @@ export function AppShell() {
 
   const clearActiveCall = useCallback((finishedCallId: string) => {
     setActiveCallId((current) => current === finishedCallId ? "" : current);
+    setExpandedCallId((current) => current === finishedCallId ? "" : current);
     forgetActiveCallId(user?.id, finishedCallId);
   }, [user?.id]);
+
+  const minimizeActiveCall = useCallback((callId: string) => {
+    setExpandedCallId((current) => current === callId ? "" : current);
+  }, []);
 
   const presentIncomingCall = useCallback((call: Call) => {
     const callPath = `/calls/${call.id}`;
@@ -609,7 +625,8 @@ export function AppShell() {
 
   const userLabel = user?.profile?.display_name || user?.full_name || user?.username || "You";
   const isFocusedChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
-  const isCallRoom = Boolean(routeCallId);
+  const activeCallIsExpanded = Boolean(activeCallId && (routeCallId === activeCallId || expandedCallId === activeCallId));
+  const isCallRoom = Boolean(routeCallId || activeCallIsExpanded);
   const activeCallContextValue = useMemo(() => ({
     activeCallId,
     activateCall,
@@ -651,7 +668,7 @@ export function AppShell() {
             </div>
           </div>
         ) : null}
-        {incomingCall && !showCallOverlay && routeCallId !== incomingCall.id ? (
+        {incomingCall && !showCallOverlay && !(activeCallIsExpanded && activeCallId === incomingCall.id) ? (
           <IncomingCallBanner
             call={incomingCall}
             action={incomingCallAction}
@@ -665,8 +682,9 @@ export function AppShell() {
           <CallRoomPage
             key={activeCallId}
             callIdOverride={activeCallId}
-            displayMode={isCallRoom && routeCallId === activeCallId ? "full" : "compact"}
+            displayMode={activeCallIsExpanded ? "full" : "compact"}
             onCallFinished={clearActiveCall}
+            onCallMinimize={minimizeActiveCall}
           />
         ) : null}
         <div className={`ms-app-stage ${isCallRoom ? "ms-app-stage--call-route" : ""}`}>

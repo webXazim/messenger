@@ -43,6 +43,7 @@ assert.ok(callRoom.includes('if (call.status === "missed")'), "Unanswered calls 
 assert.ok(appShell.includes("handleIncomingCallAction"), "Incoming banner and overlay do not share one guarded action path.");
 assert.ok(appShell.includes("claimCallAction"), "Incoming acceptance is not coordinated across tabs.");
 assert.ok(appShell.includes("activeCallId") && appShell.includes("<CallRoomPage"), "The live call controller is not mounted above child routes.");
+assert.ok(appShell.includes("expandedCallId") && appShell.includes("displayMode={activeCallIsExpanded ? \"full\" : \"compact\"}"), "New and incoming calls can still open as a compact bar instead of the full call screen.");
 assert.ok(activeCallContext.includes("activateCall") && activeCallContext.includes("expectOutgoingCall"), "Call launchers cannot atomically activate the persistent call controller.");
 assert.ok(conversationPage.includes("expectOutgoingCall(conversationId)") && callsPage.includes("expectOutgoingCall(conversationId)"), "Outgoing call launchers can still miss the server's started event.");
 assert.ok(appShell.includes("outgoingCallConversationRef.current === conversationId") && appShell.includes("activateCall(call.id)"), "The caller is not activated from the matching realtime started event.");
@@ -52,6 +53,8 @@ assert.ok(appShell.includes('payload.event === "call.accepted"') && appShell.inc
 assert.ok(app.includes('path="calls/:callId" element={<></>}'), "The call route can mount a second competing call controller.");
 assert.ok(callRoom.includes('displayMode?: "full" | "compact"'), "The call controller cannot switch between full and persistent modes.");
 assert.ok(callRoom.includes("ms-active-call-bar") && callRoom.includes("onLeave={minimizeCall}"), "The persistent call bar or minimize behavior is missing.");
+const minimizeCallBlock = callRoom.slice(callRoom.indexOf("const minimizeCall"), callRoom.indexOf("const compactDisplayName"));
+assert.ok(minimizeCallBlock.includes("onCallMinimize?.(call.id)") && !minimizeCallBlock.includes("declineMutation"), "Minimizing an incoming full-screen call can still decline it.");
 assert.ok(callRoom.includes("onCallFinished?.(call.id)"), "Terminal calls do not clear the persistent call session.");
 assert.ok(callRoomCss.includes("Visually hide the full call surface without unmounting its audio/video nodes"), "Compact mode can unmount or pause the live media surface.");
 assert.ok(callRoom.includes("resolveVideoSenderProfile") && callRoom.includes('displayMode === "compact" ? "low"'), "Persistent calls do not advertise and apply their reduced video profile.");

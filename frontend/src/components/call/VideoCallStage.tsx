@@ -36,7 +36,6 @@ export function VideoCallStage({
   remoteTrackCount,
   localVideoEnabled = true,
   localVideoMirrored = true,
-  chromeVisible = true,
   onUserActivity,
   onVideoLayoutChange,
 }: {
@@ -48,7 +47,6 @@ export function VideoCallStage({
   remoteTrackCount: number;
   localVideoEnabled?: boolean;
   localVideoMirrored?: boolean;
-  chromeVisible?: boolean;
   peerState?: string;
   onUserActivity?: () => void;
   onVideoLayoutChange?: () => void;
@@ -97,13 +95,6 @@ export function VideoCallStage({
 
   const remoteIsMain = mainVideo === "remote";
   const swapVideos = () => setMainVideo((current) => current === "remote" ? "local" : "remote");
-  const activateMainVideo = () => {
-    if (!chromeVisible) {
-      onUserActivity?.();
-      return;
-    }
-    swapVideos();
-  };
 
   return (
     <div ref={stageRef} className={`ms-video-call__stage ${remoteIsMain ? "is-remote-main" : "is-local-main"}`}>
@@ -121,8 +112,6 @@ export function VideoCallStage({
             message={primaryRemoteParticipant?.state === "joined" ? "Camera off" : "Waiting for video"}
           />
         ) : <LocalFallback />}
-        onActivate={activateMainVideo}
-        activateLabel={`Switch ${remoteIsMain ? "your camera" : primaryName} to the main view`}
       />
       <FloatingLocalVideo
         stageRef={stageRef}

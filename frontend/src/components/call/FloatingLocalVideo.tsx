@@ -77,12 +77,14 @@ export function FloatingLocalVideo({
     observer?.observe(floating);
     window.addEventListener("orientationchange", placeFromRelativePosition);
     window.addEventListener("resize", placeFromRelativePosition);
+    window.visualViewport?.addEventListener("resize", placeFromRelativePosition);
 
     return () => {
       window.cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener("orientationchange", placeFromRelativePosition);
       window.removeEventListener("resize", placeFromRelativePosition);
+      window.visualViewport?.removeEventListener("resize", placeFromRelativePosition);
     };
   }, [stageRef]);
 
@@ -122,10 +124,10 @@ export function FloatingLocalVideo({
     updateRelativePosition(next);
   };
 
-  const finishPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const finishPointer = (event: ReactPointerEvent<HTMLDivElement>, allowActivation: boolean) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    const shouldActivate = !drag.moved;
+    const shouldActivate = allowActivation && !drag.moved;
     dragRef.current = null;
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -149,8 +151,9 @@ export function FloatingLocalVideo({
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={finishPointer}
-      onPointerCancel={finishPointer}
+      onPointerUp={(event) => finishPointer(event, true)}
+      onPointerCancel={(event) => finishPointer(event, false)}
+      onLostPointerCapture={(event) => finishPointer(event, false)}
     >
       <VideoTile
         label={label}
