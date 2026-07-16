@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import {
+  advanceMessageReceiptPages,
   flattenMessagePages,
   mapMessagePages,
   markMessageDeletedPages,
@@ -47,6 +48,11 @@ assert.equal(confirmedData.pages[0].results.length, 2, "Optimistic replacement m
 assert.equal(confirmedData.pages[0].results[0].id, "server-1");
 assert.equal(confirmedData.pages[1].results[0].id, "oldest");
 assert.equal(flattenMessagePages(confirmedData).filter((message) => message.client_temp_id === "client-1").length, 1);
+
+const readData = advanceMessageReceiptPages(confirmedData, "server-1", "read", "user-1");
+assert.equal(readData.pages[0].results[0].delivery_status, "read", "A live read receipt must update the message immediately.");
+const staleSentData = upsertMessagePages(readData, confirmed);
+assert.equal(staleSentData.pages[0].results[0].delivery_status, "read", "A late sent payload must not downgrade a read receipt.");
 
 const failedData = mapMessagePages(
   confirmedData,

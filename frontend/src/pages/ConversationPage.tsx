@@ -30,10 +30,12 @@ import { useConversationTimeline } from "../hooks/useConversationTimeline";
 import { safeId } from "../lib/safeId";
 import { buildConversationDraftKey, buildLegacyConversationDraftKey } from "../lib/conversationDrafts";
 import {
+  advanceMessageReceiptPages,
   findMessageInPages,
   flattenMessagePages,
   mapMessagePages,
   markMessageDeletedPages,
+  mergeDeliveryStatus,
   removeMessagePages,
   upsertMessagePages,
 } from "../lib/messageTimeline";
@@ -686,7 +688,12 @@ export function ConversationPage() {
           queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => mapMessagePages(
             current,
             (item) => item.client_temp_id === clientTempId,
-            (item) => ({ ...item, id: messageId || item.id, delivery_status: "sent", failed_reason: null }),
+            (item) => ({
+              ...item,
+              id: messageId || item.id,
+              delivery_status: mergeDeliveryStatus(item.delivery_status, "sent"),
+              failed_reason: null,
+            }),
           ));
         }
         return;
@@ -757,7 +764,25 @@ export function ConversationPage() {
         const receiptEvent = payload.event as "message.read" | "message.delivered";
         applyParticipantReceiptInCache(conversationId, receiptEvent, data, queryClient);
 
-        if (receiptEvent === "message.read" && String(data.user_id || "") === String(user?.id || "")) {
+        const receiptUserId = String(data.user_id || "");
+        const pointerMessageId = String(
+          receiptEvent === "message.read"
+            ? data.last_read_message_id || ""
+            : data.last_delivered_message_id || "",
+        );
+        if (receiptUserId && pointerMessageId && receiptUserId !== String(user?.id || "")) {
+          queryClient.setQueryData<InfiniteData<MessagePage>>(
+            ["messages", conversationId],
+            (current) => advanceMessageReceiptPages(
+              current,
+              pointerMessageId,
+              receiptEvent === "message.read" ? "read" : "delivered",
+              String(user?.id || ""),
+            ),
+          );
+        }
+
+        if (receiptEvent === "message.read" && receiptUserId === String(user?.id || "")) {
           markConversationReadInCache(conversationId, queryClient);
         }
 

@@ -12,10 +12,32 @@ function matchesMessage(left: Message, right: Message) {
   return Boolean(left.client_temp_id && right.client_temp_id && left.client_temp_id === right.client_temp_id);
 }
 
+const DELIVERY_STATUS_RANK: Record<string, number> = {
+  pending: 0,
+  sending: 0,
+  sent: 1,
+  delivered: 2,
+  read: 3,
+};
+
+export function mergeDeliveryStatus(currentStatus?: string | null, incomingStatus?: string | null): string | undefined {
+  const current = String(currentStatus || "").toLowerCase();
+  const incoming = String(incomingStatus || "").toLowerCase();
+  if (!incoming) return currentStatus || undefined;
+  if (!current) return incomingStatus || undefined;
+  if (incoming === "failed") return incomingStatus || undefined;
+  if (current === "failed") return incomingStatus || undefined;
+  const currentRank = DELIVERY_STATUS_RANK[current];
+  const incomingRank = DELIVERY_STATUS_RANK[incoming];
+  if (currentRank === undefined || incomingRank === undefined) return incomingStatus || undefined;
+  return (incomingRank >= currentRank ? incomingStatus : currentStatus) || undefined;
+}
+
 export function mergeTimelineMessage(existing: Message, incoming: Message): Message {
   return {
     ...existing,
     ...incoming,
+    delivery_status: mergeDeliveryStatus(existing.delivery_status, incoming.delivery_status),
     attachments: incoming.attachments ?? existing.attachments,
     reactions: incoming.reactions ?? existing.reactions,
     reaction_summary: incoming.reaction_summary ?? existing.reaction_summary,
@@ -24,6 +46,28 @@ export function mergeTimelineMessage(existing: Message, incoming: Message): Mess
     links: incoming.links ?? existing.links,
     metadata: incoming.metadata ?? existing.metadata,
   };
+}
+
+export function advanceMessageReceiptPages(
+  current: InfiniteData<TimelineMessagePage> | undefined,
+  pointerMessageId: string,
+  status: "delivered" | "read",
+  senderUserId: string,
+) {
+  const pointer = findMessageInPages(current, pointerMessageId);
+  if (!pointer) return current;
+  const pointerTime = Date.parse(pointer.created_at);
+  if (!Number.isFinite(pointerTime)) return current;
+  return mapMessagePages(
+    current,
+    (message) => String(message.sender.id) === String(senderUserId)
+      && Date.parse(message.created_at) <= pointerTime
+      && String(message.delivery_status || "").toLowerCase() !== "failed",
+    (message) => ({
+      ...message,
+      delivery_status: mergeDeliveryStatus(message.delivery_status, status),
+    }),
+  );
 }
 
 export function flattenMessagePages(data: InfiniteData<TimelineMessagePage> | undefined): Message[] {

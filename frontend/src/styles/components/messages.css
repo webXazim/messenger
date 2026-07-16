@@ -230,11 +230,10 @@
 }
 
 .ms-message-row--own .ms-message-copy.is-text-only {
-  --ms-text-meta-reserve: 4.125rem;
+  --ms-text-meta-reserve: 4.75rem;
 }
 
-.ms-message-card.is-action-pending .ms-message-copy.is-text-only,
-.ms-message-row.is-optimistic .ms-message-copy.is-text-only {
+.ms-message-card.is-action-pending .ms-message-copy.is-text-only {
   --ms-text-meta-reserve: 6.5rem;
 }
 
