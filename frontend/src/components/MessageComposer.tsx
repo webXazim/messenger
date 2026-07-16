@@ -86,12 +86,12 @@ export function MessageComposer({
   const [pendingUploads, setPendingUploads] = useState<PendingComposerUpload[]>([]);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submissionsInFlight, setSubmissionsInFlight] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const pendingUploadsRef = useRef<PendingComposerUpload[]>([]);
   const uploadControllersRef = useRef<Record<string, AbortController>>({});
   const activeUploadIdsRef = useRef(new Set<string>());
-  const pendingClientTempIdRef = useRef<string | null>(null);
+  const draftRevisionRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const keyboardHelpId = useId();
   const submitErrorId = useId();
@@ -113,7 +113,7 @@ export function MessageComposer({
 
   useEffect(() => {
     setSubmitError(null);
-    pendingClientTempIdRef.current = null;
+    draftRevisionRef.current += 1;
     if (!editingMessage && draftKey) {
       setText(readConversationDraft(draftKey, legacyDraftKey));
     }
@@ -131,7 +131,7 @@ export function MessageComposer({
         return [];
       });
       onClearReply();
-      pendingClientTempIdRef.current = null;
+      draftRevisionRef.current += 1;
     }
   }, [editingMessage?.id]);
 
@@ -154,9 +154,11 @@ export function MessageComposer({
   const hasFailedUpload = pendingUploads.some((item) => item.status === "failed");
   const hasBlockingUpload = hasPendingUpload || hasFailedUpload;
   const composerDisabled = disabled || Boolean(disabledReason);
+  const isSubmitting = submissionsInFlight > 0;
+  const editingSubmissionLocked = Boolean(editingMessage) && isSubmitting;
   const canSend = useMemo(
-    () => !composerDisabled && !isSubmitting && !hasBlockingUpload && (text.trim().length > 0 || uploadedAttachmentIds.length > 0),
-    [composerDisabled, hasBlockingUpload, isSubmitting, text, uploadedAttachmentIds],
+    () => !composerDisabled && !editingSubmissionLocked && !hasBlockingUpload && (text.trim().length > 0 || uploadedAttachmentIds.length > 0),
+    [composerDisabled, editingSubmissionLocked, hasBlockingUpload, text, uploadedAttachmentIds],
   );
 
   const revokeUploadPreview = (upload?: PendingComposerUpload) => {
@@ -231,6 +233,7 @@ export function MessageComposer({
   }, [pendingUploads, performUpload, uploadPolicy.maxParallelUploads]);
 
   const uploadFiles = (files: FileList | File[]) => {
+    draftRevisionRef.current += 1;
     const nextUploads: PendingComposerUpload[] = [];
     const errors: string[] = [];
     Array.from(files).forEach((file) => {
@@ -252,23 +255,28 @@ export function MessageComposer({
   };
 
   const retryUpload = (localId: string) => {
+    draftRevisionRef.current += 1;
     setSubmitError(null);
     setPendingUploads((current) => current.map((item) => item.localId === localId
       ? { ...item, status: "queued", progress: undefined, error: undefined }
       : item));
   };
 
-  const removeUpload = (localId: string) => setPendingUploads((current) => {
-    const target = current.find((item) => item.localId === localId);
-    uploadControllersRef.current[localId]?.abort();
-    delete uploadControllersRef.current[localId];
-    activeUploadIdsRef.current.delete(localId);
-    if (target?.uploadId) onDiscardUpload?.(target.uploadId);
-    revokeUploadPreview(target);
-    return current.filter((item) => item.localId !== localId);
-  });
+  const removeUpload = (localId: string) => {
+    draftRevisionRef.current += 1;
+    setPendingUploads((current) => {
+      const target = current.find((item) => item.localId === localId);
+      uploadControllersRef.current[localId]?.abort();
+      delete uploadControllersRef.current[localId];
+      activeUploadIdsRef.current.delete(localId);
+      if (target?.uploadId) onDiscardUpload?.(target.uploadId);
+      revokeUploadPreview(target);
+      return current.filter((item) => item.localId !== localId);
+    });
+  };
 
   const toggleViewOnce = (localId: string) => {
+    draftRevisionRef.current += 1;
     setPendingUploads((current) => current.map((item) => item.localId === localId ? { ...item, viewOnce: !item.viewOnce } : item));
   };
 
@@ -300,9 +308,10 @@ export function MessageComposer({
       onDrop={handleDrop}
       onSubmit={async (event) => {
         event.preventDefault();
-        if (composerDisabled || !canSend || hasBlockingUpload || isSubmitting) return;
-        const clientTempId = pendingClientTempIdRef.current || safeId("message");
-        pendingClientTempIdRef.current = clientTempId;
+        if (composerDisabled || !canSend || hasBlockingUpload || editingSubmissionLocked) return;
+        const clientTempId = safeId("message");
+        const submissionRevision = draftRevisionRef.current + 1;
+        draftRevisionRef.current = submissionRevision;
         const submittedText = text;
         const submittedUploads = pendingUploads.filter((item) => item.status === "uploaded" && item.uploadId);
         const optimisticAttachments = submittedUploads.map((item) => ({
@@ -325,10 +334,12 @@ export function MessageComposer({
         pendingUploadsRef.current = [];
         setPendingUploads([]);
         setText("");
+        removeConversationDraft(draftKey);
+        if (!editingMessage) onClearReply();
         focusTextarea();
         try {
           setSubmitError(null);
-          setIsSubmitting(true);
+          setSubmissionsInFlight((current) => current + 1);
           await onSend({
             type: "text",
             text: submittedText,
@@ -339,18 +350,17 @@ export function MessageComposer({
             reply_to_id: editingMessage ? null : (replyTo?.id ?? null),
             entities: extractEntities(submittedText),
           });
-          pendingClientTempIdRef.current = null;
           submittedUploads.forEach(revokeUploadPreview);
-          removeConversationDraft(draftKey);
-          onClearReply();
           onCancelEdit();
         } catch (error) {
-          pendingUploadsRef.current = submittedUploads;
-          setPendingUploads(submittedUploads);
-          setText(submittedText);
-          setSubmitError(error instanceof Error ? error.message : "Could not send this message. Your draft and attachments are still here.");
+          if (draftRevisionRef.current === submissionRevision) {
+            pendingUploadsRef.current = submittedUploads;
+            setPendingUploads(submittedUploads);
+            setText(submittedText);
+            setSubmitError(error instanceof Error ? error.message : "Could not send this message. Your draft and attachments are still here.");
+          }
         } finally {
-          setIsSubmitting(false);
+          setSubmissionsInFlight((current) => Math.max(0, current - 1));
           focusTextarea();
         }
       }}
@@ -364,7 +374,7 @@ export function MessageComposer({
             onCancelEdit();
             setText("");
             removeConversationDraft(draftKey);
-            pendingClientTempIdRef.current = null;
+            draftRevisionRef.current += 1;
           }}
         />
       ) : replyTo ? (
@@ -405,7 +415,8 @@ export function MessageComposer({
             rows={1}
             value={text}
             onChange={(event) => {
-              if (isSubmitting) return;
+              if (editingSubmissionLocked) return;
+              draftRevisionRef.current += 1;
               setText(event.target.value);
               setSubmitError(null);
               onTyping?.();
@@ -438,19 +449,15 @@ export function MessageComposer({
           className="ms-message-composer__send"
           type="submit"
           onPointerDown={(event) => event.preventDefault()}
-          disabled={!canSend || hasBlockingUpload || isSubmitting}
-          aria-label={isSubmitting
-            ? "Sending message"
-            : editingMessage
+          disabled={!canSend || hasBlockingUpload}
+          aria-label={editingMessage
               ? "Save message"
               : hasFailedUpload
                 ? "Remove or retry failed attachments before sending"
                 : hasPendingUpload
                   ? "Wait for attachments to finish uploading"
                   : "Send message"}
-          title={disabledReason || (isSubmitting
-            ? "Sending…"
-            : editingMessage
+          title={disabledReason || (editingMessage
               ? "Save message"
               : hasFailedUpload
                 ? "Remove or retry failed attachments"

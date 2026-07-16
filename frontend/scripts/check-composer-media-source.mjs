@@ -29,7 +29,8 @@ for (const required of [
   "AbortController",
   "maxParallelUploads",
   "hasFailedUpload",
-  "pendingClientTempIdRef",
+  "submissionsInFlight",
+  "draftRevisionRef",
   "validateComposerUpload",
 ]) {
   assert.ok(composer.includes(required), `Missing composer reliability behavior: ${required}`);
@@ -51,6 +52,9 @@ assert.ok(conversation.includes("include_thumbnail: false"), "Encrypted media ma
 assert.ok(conversation.includes("previewBlob: encryptedPreview"), "Encrypted attachments do not carry a compact recipient-safe preview.");
 assert.ok(conversation.includes("_optimistic_attachments"), "Optimistic messages discard attachment media metadata.");
 assert.match(composer, /setPendingUploads\(\[\]\);[\s\S]*setText\(""\);[\s\S]*await onSend/, "The composer attachment preview is not cleared at the optimistic send handoff.");
+assert.ok(composer.includes('const clientTempId = safeId("message")'), "Concurrent sends can accidentally reuse a temporary message id.");
+assert.equal(composer.includes("!isSubmitting && !hasBlockingUpload"), false, "An in-flight text send still blocks the next message.");
+assert.equal(composer.includes("hasBlockingUpload || isSubmitting"), false, "The submit handler still rejects rapid text sends.");
 assert.ok(composer.includes("_optimistic_attachments: optimisticAttachments"), "The composer does not hand its visual attachment metadata to the inline optimistic message.");
 assert.ok(composer.includes("width: item.width") && composer.includes("height: item.height"), "Optimistic media does not preserve the final attachment aspect ratio.");
 assert.ok(conversation.includes("await sendMutation.mutateAsync(nextPayload)"), "Composer send failures are still swallowed.");
