@@ -54,6 +54,11 @@ function callIdFromPath(pathname: string) {
   }
 }
 
+function isForegroundBrowserTab() {
+  if (typeof document === "undefined") return false;
+  return document.visibilityState === "visible";
+}
+
 function activeCallSessionKey(userId?: string | number) {
   return `${ACTIVE_CALL_SESSION_KEY}:${String(userId || "anonymous")}`;
 }
@@ -142,6 +147,19 @@ export function AppShell() {
     setActiveCallId((current) => current === finishedCallId ? "" : current);
     forgetActiveCallId(user?.id, finishedCallId);
   }, [user?.id]);
+
+  const presentIncomingCall = useCallback((call: Call) => {
+    const callPath = `/calls/${call.id}`;
+    setIncomingCall(call);
+    setIncomingCallError(null);
+    setIncomingCallAction(null);
+    if (isForegroundBrowserTab()) {
+      setShowCallOverlay(false);
+      if (location.pathname !== callPath) navigate(callPath);
+      return;
+    }
+    setShowCallOverlay(!/^\/calls\/[^/]+\/?$/.test(location.pathname));
+  }, [location.pathname, navigate]);
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
@@ -273,10 +291,7 @@ export function AppShell() {
           return ["initiated", "ringing", "ongoing"].includes(call.status) && participant?.state === "ringing";
         });
         if (pendingIncoming && !location.pathname.startsWith(`/calls/${pendingIncoming.id}`)) {
-          setIncomingCall(pendingIncoming);
-          setIncomingCallError(null);
-          setIncomingCallAction(null);
-          setShowCallOverlay(!/^\/calls\/[^/]+\/?$/.test(location.pathname));
+          presentIncomingCall(pendingIncoming);
         }
         setRealtimeSyncMarker(userId, payload.next_since || payload.server_time);
         if (payload.has_more_conversations) {
@@ -301,7 +316,7 @@ export function AppShell() {
     }
     previousSocketStatusRef.current = socketStatus;
     return () => { cancelled = true; };
-  }, [location.pathname, queryClient, socketStatus, user]);
+  }, [location.pathname, presentIncomingCall, queryClient, socketStatus, user]);
 
   const dismissMessageToast = (toastId: string) => {
     setMessageToasts((current) => current.filter((toast) => toast.id !== toastId));
@@ -357,8 +372,10 @@ export function AppShell() {
         if (first) seenNotificationKeys.delete(first);
       }
 
+      let realtimeCallPayload: Call | null = null;
       if (["call.started", "call.created", "call.accepted", "call.ended", "call.declined", "call.missed", "call.failed"].includes(payload.event)) {
         const callPayload = normalizeCall(payload.data || {});
+        realtimeCallPayload = callPayload;
         if (callPayload.id) {
           patchCallCaches(queryClient, callPayload);
           if (payload.event === "call.accepted") {
@@ -370,6 +387,13 @@ export function AppShell() {
                 presence_label: "online",
                 presence_status: "active",
               }));
+            if (
+              activeCallId === callPayload.id
+              && isForegroundBrowserTab()
+              && location.pathname !== `/calls/${callPayload.id}`
+            ) {
+              navigate(`/calls/${callPayload.id}`);
+            }
           }
         }
       }
@@ -459,27 +483,20 @@ export function AppShell() {
         }
       }
       if (payload.event !== "call.started" && payload.event !== "call.created") return;
-      const callId = String(payload.data?.call_id || payload.data?.id || "");
-      if (!callId) return;
-      void chatApi.getCall(callId).then((call) => {
-        if (call.status === "ringing" && !isSameUserIdentity(call.initiated_by, user)) {
-          void showChatActivityNotification({
-            title: `${call.initiated_by?.display_name || call.initiated_by?.username || "Someone"} is calling`,
-            body: `${call.call_type === "video" ? "Video" : "Voice"} call incoming`,
-            tag: `call:${call.id}`,
-            data: { call_id: call.id, conversation_id: String(call.conversation || "") },
-          }).catch(() => undefined);
-          setIncomingCall(call);
-          setIncomingCallError(null);
-          setIncomingCallAction(null);
-          setShowCallOverlay(!/^\/calls\/[^/]+\/?$/.test(location.pathname));
-        }
+      const call = realtimeCallPayload ?? normalizeCall(payload.data || {});
+      if (!call.id || call.status !== "ringing" || isSameUserIdentity(call.initiated_by, user)) return;
+      void showChatActivityNotification({
+        title: `${call.initiated_by?.display_name || call.initiated_by?.username || "Someone"} is calling`,
+        body: `${call.call_type === "video" ? "Video" : "Voice"} call incoming`,
+        tag: `call:${call.id}`,
+        data: { call_id: call.id, conversation_id: String(call.conversation || "") },
       }).catch(() => undefined);
+      presentIncomingCall(call);
     });
     return () => {
       unsubscribe();
     };
-  }, [incomingCall?.id, location.pathname, queryClient, socket, user?.id]);
+  }, [activeCallId, incomingCall?.id, location.pathname, navigate, presentIncomingCall, queryClient, socket, user?.id]);
 
   const clearIncoming = () => {
     setIncomingCall(null);
@@ -590,7 +607,7 @@ export function AppShell() {
             </div>
           </div>
         ) : null}
-        {incomingCall && !showCallOverlay ? (
+        {incomingCall && !showCallOverlay && routeCallId !== incomingCall.id ? (
           <IncomingCallBanner
             call={incomingCall}
             action={incomingCallAction}

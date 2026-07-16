@@ -6,6 +6,7 @@ import { AudioCallScreen } from "../components/call/AudioCallScreen";
 import { cameraFacingFromTrack, findPreferredCameraDevice, supportsMobileCameraSwitch, type CameraFacingMode } from "../components/call/callCamera";
 import { VideoCallScreen } from "../components/call/VideoCallScreen";
 import { formatElapsed, getCallViewState, participantInitials, participantName } from "../components/call/callPresentation";
+import { resolveVideoSenderProfile } from "../components/call/callMediaProfile";
 import { useAuth } from "../contexts/AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useCallWakeLock } from "../hooks/useCallWakeLock";
@@ -437,6 +438,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const processedSignalsRef = useRef<Map<string, number>>(new Map());
   const observedOrchestrationSignalIdsRef = useRef<Set<string>>(new Set());
+  const lastSurfaceVideoProfileRef = useRef("");
   const offerSentRef = useRef(false);
   const iceRestartTimerRef = useRef<number | null>(null);
   const disconnectGraceTimerRef = useRef<number | null>(null);
@@ -514,6 +516,16 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
   const isDesignatedOfferer = shouldLocalUserCreateOffer(call, localCallUser);
   const remoteJoined = useMemo(
     () => Boolean(call?.participants?.some((participant) => !isSameUserIdentity(participant.user, localCallUser) && participant.state === "joined")),
+    [call?.participants, localCallUser],
+  );
+  const remotePreferredVideoQuality = useMemo(
+    () => {
+      const preferences = (call?.participants ?? [])
+        .filter((participant) => !isSameUserIdentity(participant.user, localCallUser) && participant.state === "joined")
+        .map((participant) => participant.preferred_video_quality)
+        .filter(Boolean);
+      return preferences.includes("low") ? "low" : preferences[0];
+    },
     [call?.participants, localCallUser],
   );
 
@@ -848,32 +860,24 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
     if (!sender) return;
     const profile = (configQuery.data?.network_profiles ?? {}) as Record<string, unknown>;
     const lowBandwidth = (profile.low_bandwidth_video ?? {}) as Record<string, unknown>;
-    const mode = String(recommendation?.mode || "standard");
+    const networkRecommendation = toSignalRecord(recommendation?.network_recommendation);
     const params = sender.getParameters();
     const encodings = params.encodings?.length ? [...params.encodings] : [{}];
-    const nextBitrate =
-      mode === "audio_only"
-        ? 40_000
-        : mode === "low_bandwidth_video" || mode === "reconnect"
-          ? Number(lowBandwidth.max_bitrate_bps ?? 250_000)
-          : undefined;
-    const nextFrameRate =
-      mode === "audio_only"
-        ? 4
-        : mode === "low_bandwidth_video" || mode === "reconnect"
-          ? Number(lowBandwidth.max_framerate ?? 12)
-          : undefined;
-    const scaleDown =
-      mode === "audio_only"
-        ? 4
-        : mode === "low_bandwidth_video" || mode === "reconnect"
-          ? 2
-          : 1;
+    const senderProfile = resolveVideoSenderProfile({
+      mode: String(recommendation?.mode || networkRecommendation.mode || "standard"),
+      videoActive,
+      compact: displayMode === "compact",
+      remotePreferredVideoQuality,
+      lowBandwidthMaxBitrate: Number(lowBandwidth.max_bitrate_bps ?? 250_000),
+      lowBandwidthMaxFramerate: Number(lowBandwidth.max_framerate ?? 12),
+    });
     for (const encoding of encodings) {
-      encoding.active = videoActive;
-      encoding.maxBitrate = nextBitrate;
-      encoding.maxFramerate = nextFrameRate;
-      encoding.scaleResolutionDownBy = scaleDown;
+      encoding.active = senderProfile.active;
+      if (senderProfile.maxBitrate === undefined) delete encoding.maxBitrate;
+      else encoding.maxBitrate = senderProfile.maxBitrate;
+      if (senderProfile.maxFramerate === undefined) delete encoding.maxFramerate;
+      else encoding.maxFramerate = senderProfile.maxFramerate;
+      encoding.scaleResolutionDownBy = senderProfile.scaleResolutionDownBy;
     }
     params.encodings = encodings;
     try {
@@ -881,7 +885,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
     } catch {
       appendSignalLog("video sender params skipped");
     }
-  }, [appendSignalLog, configQuery.data?.network_profiles, videoEnabled]);
+  }, [appendSignalLog, configQuery.data?.network_profiles, displayMode, remotePreferredVideoQuality, videoEnabled]);
 
   const refreshVideoDeviceState = useCallback(async (stream: MediaStream | null = localStreamRef.current) => {
     const track = stream?.getVideoTracks()[0];
@@ -1536,8 +1540,30 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
   }, [call?.status, processPendingSignals]);
 
   useEffect(() => {
+    if (!peerReady) return;
     void applyNetworkRecommendation(orchestration);
-  }, [applyNetworkRecommendation, orchestration]);
+  }, [applyNetworkRecommendation, orchestration, peerReady]);
+
+  useEffect(() => {
+    if (!callId || call?.call_type !== "video" || !isLiveCallStatus(call.status)) return;
+    const preferredVideoQuality = displayMode === "compact"
+      ? "low"
+      : videoEnabled
+        ? String(orchestration?.recommended_video_quality || "medium")
+        : "off";
+    const profileKey = `${callId}:${displayMode}:${preferredVideoQuality}`;
+    if (lastSurfaceVideoProfileRef.current === profileKey) return;
+    lastSurfaceVideoProfileRef.current = profileKey;
+    void chatApi.updateCallMediaState(callId, buildMediaStatePatch({
+      preferred_video_quality: preferredVideoQuality,
+      diagnostics: {
+        surface_mode: displayMode,
+        persistent_video_profile: displayMode === "compact",
+      },
+    })).catch(() => {
+      if (lastSurfaceVideoProfileRef.current === profileKey) lastSurfaceVideoProfileRef.current = "";
+    });
+  }, [call?.call_type, call?.status, callId, displayMode, orchestration?.recommended_video_quality, videoEnabled]);
 
   useEffect(() => {
     if (!orchestration) return;
@@ -1592,7 +1618,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
           video_enabled: videoEnabled,
           peer_state: peerState,
           network_quality: metrics.networkQuality,
-          preferred_video_quality: metrics.preferredVideoQuality,
+          preferred_video_quality: displayMode === "compact" ? "low" : metrics.preferredVideoQuality,
           packet_loss_pct: metrics.packetLossPct,
           round_trip_time_ms: metrics.roundTripTimeMs,
           jitter_ms: metrics.jitterMs,
@@ -1602,13 +1628,14 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
             browser: navigator.userAgent,
             peer_state: peerState,
             network_online: networkOnline,
+            surface_mode: displayMode,
           },
         });
       };
       void submit().catch(() => undefined);
-    }, Math.max(configQuery.data?.quality_report_interval_seconds ?? 12, 12) * 1000);
+    }, Math.max(configQuery.data?.quality_report_interval_seconds ?? 12, displayMode === "compact" ? 24 : 12) * 1000);
     return () => window.clearInterval(timer);
-  }, [audioEnabled, call?.status, callId, configQuery.data?.quality_report_interval_seconds, networkOnline, pageVisible, peerState, videoEnabled]);
+  }, [audioEnabled, call?.status, callId, configQuery.data?.quality_report_interval_seconds, displayMode, networkOnline, pageVisible, peerState, videoEnabled]);
 
   const toggleAudio = async () => {
     const next = !audioEnabled;
@@ -1625,7 +1652,9 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       }
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         audio_enabled: next,
-        preferred_video_quality: String(orchestration?.recommended_video_quality || (videoEnabled ? "medium" : "off")),
+        preferred_video_quality: displayMode === "compact"
+          ? "low"
+          : String(orchestration?.recommended_video_quality || (videoEnabled ? "medium" : "off")),
       }));
     } catch (error) {
       setAudioEnabled(!next);
@@ -1654,7 +1683,9 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       }, next);
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: next,
-        preferred_video_quality: next ? String(orchestration?.recommended_video_quality || "medium") : "off",
+        preferred_video_quality: displayMode === "compact"
+          ? "low"
+          : next ? String(orchestration?.recommended_video_quality || "medium") : "off",
       }));
     } catch (error) {
       setVideoEnabled(!next);
@@ -1717,7 +1748,9 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       }, true);
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: true,
-        preferred_video_quality: String(orchestration?.recommended_video_quality || "medium"),
+        preferred_video_quality: displayMode === "compact"
+          ? "low"
+          : String(orchestration?.recommended_video_quality || "medium"),
       }));
     } catch (error) {
       let usableVideoTrack = localStreamRef.current?.getVideoTracks().some((track) => track.readyState === "live") ?? false;

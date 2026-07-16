@@ -17,6 +17,7 @@ import {
   findPreferredCameraDevice,
   supportsMobileCameraSwitch,
 } from "../.call-test-build/components/call/callCamera.js";
+import { resolveVideoSenderProfile } from "../.call-test-build/components/call/callMediaProfile.js";
 import {
   callDestination,
   callDirection,
@@ -125,6 +126,35 @@ assert.equal(cameraFacingFromTrack({ label: "Rear camera", getSettings: () => ({
 assert.equal(cameraFacingFromTrack({ label: "", getSettings: () => ({ facingMode: "user" }) }), "user");
 assert.equal(supportsMobileCameraSwitch({ facingModeSupported: true, maxTouchPoints: 5, userAgent: "" }), true);
 assert.equal(supportsMobileCameraSwitch({ facingModeSupported: true, maxTouchPoints: 0, userAgent: "Desktop" }), false);
+
+assert.deepEqual(resolveVideoSenderProfile({ mode: "standard", videoActive: true, compact: false }), {
+  active: true,
+  maxBitrate: undefined,
+  maxFramerate: undefined,
+  scaleResolutionDownBy: 1,
+  reduced: false,
+});
+assert.deepEqual(resolveVideoSenderProfile({ mode: "standard", videoActive: true, compact: true }), {
+  active: true,
+  maxBitrate: 180_000,
+  maxFramerate: 10,
+  scaleResolutionDownBy: 2.5,
+  reduced: true,
+});
+assert.deepEqual(resolveVideoSenderProfile({ mode: "standard", videoActive: true, compact: false, remotePreferredVideoQuality: "low" }), {
+  active: true,
+  maxBitrate: 180_000,
+  maxFramerate: 10,
+  scaleResolutionDownBy: 2.5,
+  reduced: true,
+});
+assert.deepEqual(resolveVideoSenderProfile({ mode: "audio_only", videoActive: true, compact: true }), {
+  active: true,
+  maxBitrate: 40_000,
+  maxFramerate: 4,
+  scaleResolutionDownBy: 4,
+  reduced: true,
+});
 
 
 const me = { id: "1", username: "me" };

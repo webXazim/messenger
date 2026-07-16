@@ -16,6 +16,7 @@
     "src/components/call/callPresentation.ts",
     "src/components/call/callGeometry.ts",
     "src/components/call/callCamera.ts",
+    "src/components/call/callMediaProfile.ts",
     "src/components/messages/messagePresentation.ts",
     "src/types/chat.ts",
     "src/lib/callLifecycle.ts",
