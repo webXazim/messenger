@@ -406,7 +406,12 @@ export function MessageComposer({
           className="ms-message-composer__input"
           rows={1}
           value={text}
-          onChange={(event) => { setText(event.target.value); setSubmitError(null); onTyping?.(); }}
+          onChange={(event) => {
+            if (isSubmitting) return;
+            setText(event.target.value);
+            setSubmitError(null);
+            onTyping?.();
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
@@ -418,13 +423,13 @@ export function MessageComposer({
           aria-describedby={`${keyboardHelpId}${submitError ? ` ${submitErrorId}` : ""}`}
           aria-keyshortcuts="Enter"
           aria-busy={isSubmitting}
-          readOnly={isSubmitting}
           disabled={composerDisabled}
         />
 
         <button
           className="ms-message-composer__send"
           type="submit"
+          onPointerDown={(event) => event.preventDefault()}
           disabled={!canSend || hasBlockingUpload || isSubmitting}
           aria-label={isSubmitting
             ? "Sending message"

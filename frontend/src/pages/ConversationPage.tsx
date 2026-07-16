@@ -69,6 +69,15 @@ function getMessageGroupPosition(groupedBefore: boolean, groupedAfter: boolean):
   return "single";
 }
 
+function JumpToLatestIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+      <path d="m6 4 6 6 6-6" />
+    </svg>
+  );
+}
+
 function buildOptimisticMessage(
   userId: string,
   username: string,
@@ -1761,17 +1770,18 @@ export function ConversationPage() {
           })}
         </section>
 
-        {showJumpToLatest ? (
-          <button
-            type="button"
-            className="ms-chat-jump-latest"
-            onClick={scrollToLatest}
-          >
-            Latest <span aria-hidden="true">↓</span>
-          </button>
-        ) : null}
-
         <footer className="ms-chat-composer-dock">
+          {showJumpToLatest ? (
+            <button
+              type="button"
+              className="ms-chat-jump-latest"
+              onClick={scrollToLatest}
+              aria-label="Jump to latest message"
+              title="Jump to latest message"
+            >
+              <JumpToLatestIcon />
+            </button>
+          ) : null}
           <TypingIndicator names={Object.values(typingUsers).filter(Boolean)} />
           <MessageComposer
             draftKey={buildConversationDraftKey(String(user?.id || "anonymous"), conversationId)}

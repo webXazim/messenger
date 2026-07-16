@@ -328,20 +328,28 @@
 .ms-chat-jump-latest {
   position: absolute;
   right: clamp(var(--ms-space-4), 3vw, var(--ms-space-8));
-  bottom: clamp(5.5rem, 12vh, 7.5rem);
+  bottom: calc(100% + var(--ms-space-3));
   z-index: 11;
-  min-height: 2.25rem;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--ms-space-1);
-  padding: 0 var(--ms-space-3);
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid var(--ms-color-line-strong);
   border-radius: var(--ms-radius-pill);
   background: var(--ms-color-surface);
   color: var(--ms-color-ink);
   box-shadow: var(--ms-shadow-md);
-  font-size: var(--ms-font-size-xs);
-  font-weight: 750;
+}
+
+.ms-chat-jump-latest svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .ms-conversation-resizer {
@@ -494,7 +502,7 @@
 
   .ms-chat-jump-latest {
     right: var(--ms-space-3);
-    bottom: 5.25rem;
+    bottom: calc(100% + var(--ms-space-2));
   }
 
   .ms-conversation-view__details {
