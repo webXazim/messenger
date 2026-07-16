@@ -133,7 +133,7 @@ export function DesktopNavigationRail({ userLabel, userAvatar, socketStatus, onL
 
 export function MobileBottomNavigation() {
   return (
-    <aside className="ms-mobile-nav" aria-label="Messenger navigation">
+    <aside className="ms-mobile-nav" aria-label="Crescentsphere navigation">
       <NavigationLinks mobile />
     </aside>
   );

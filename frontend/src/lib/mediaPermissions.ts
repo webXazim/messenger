@@ -54,6 +54,7 @@ export function buildCallMediaConstraints(kind: "voice" | "video", compactVideo 
       ? {
           width: { ideal: compactVideo ? 640 : 1280 },
           height: { ideal: compactVideo ? 360 : 720 },
+          frameRate: { ideal: compactVideo ? 24 : 30, max: 30 },
           facingMode: "user",
         }
       : false,

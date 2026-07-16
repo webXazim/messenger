@@ -799,7 +799,7 @@ export function SettingsPage() {
                 <div className="ms-settings-row">
                   <div className="ms-settings-row__copy">
                     <strong>Log out of this browser</strong>
-                    <div className="muted">Your local account data and this browser’s messenger session will be cleared.</div>
+                    <div className="muted">Your local account data and this browser’s Crescentsphere session will be cleared.</div>
                   </div>
                   <div className="ms-page-actions">
                     <button type="button" className="ms-button ms-button--compact" disabled={logoutMutation.isPending} onClick={() => logoutMutation.mutate()}>
@@ -1090,7 +1090,7 @@ export function SettingsPage() {
                 <div className="ms-page-warning">
                   <strong>Secure connection required</strong>
                   <div>{e2eeEnvironment.message}</div>
-                  <div>Open the messenger over HTTPS in a supported browser to register this device.</div>
+                  <div>Open Crescentsphere over HTTPS in a supported browser to register this device.</div>
                 </div>
               ) : null}
               {e2eeEnvironment.available && e2eeIdentityQuery.isLoading ? <div className="ms-settings-empty">Securing this browser…</div> : null}

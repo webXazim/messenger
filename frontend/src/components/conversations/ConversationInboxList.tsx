@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useConversationListPreferences } from "../../hooks/useConversationListPreferences";
 import { ConversationListControls } from "./ConversationListControls";
-import { StatusTray } from "./StatusTray";
+import { StatusTray, useUserStatuses } from "./StatusTray";
 import { ConversationRow } from "./ConversationRow";
 import { conversationListEmptyCopy, filterConversationsForInbox } from "./conversationFiltering";
 import { applyKnownOnlinePresence } from "./conversationPresentation";
@@ -9,6 +9,8 @@ import type { ConversationListBaseProps } from "./types";
 
 export function ConversationInboxList({ conversations, currentUserId, currentUser, onlineFriends, openingFriendId, onOpenFriend, onPrefetchConversation }: ConversationListBaseProps) {
   const { search, filter, setSearch, setFilter } = useConversationListPreferences();
+  const statusesQuery = useUserStatuses();
+  const statuses = statusesQuery.data ?? [];
   const presenceAwareConversations = useMemo(
     () => applyKnownOnlinePresence(conversations, onlineFriends),
     [conversations, onlineFriends],
@@ -26,7 +28,7 @@ export function ConversationInboxList({ conversations, currentUserId, currentUse
         filter={filter}
         onSearchChange={setSearch}
         onFilterChange={setFilter}
-        middleContent={<StatusTray currentUser={currentUser} friends={onlineFriends} busyUserId={openingFriendId} onOpenFriend={onOpenFriend} />}
+        middleContent={<StatusTray currentUser={currentUser} friends={onlineFriends} statuses={statuses} statusesLoading={statusesQuery.isFetching} busyUserId={openingFriendId} onOpenFriend={onOpenFriend} />}
       />
 
       <div className="ms-inbox-list__scroll ms-scroll-region">
@@ -36,6 +38,7 @@ export function ConversationInboxList({ conversations, currentUserId, currentUse
             conversation={conversation}
             currentUserId={currentUserId}
             currentUser={currentUser}
+            statuses={statuses}
             onPrefetch={onPrefetchConversation}
           />
         ))}

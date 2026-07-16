@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { UserAvatar } from "../UserAvatar";
-import type { Conversation, UserLite } from "../../types/chat";
+import type { Conversation, UserLite, UserStatus } from "../../types/chat";
 import {
   conversationDisplayName,
   conversationPeer,
@@ -9,6 +9,7 @@ import {
   conversationViewerParticipant,
 } from "./conversationPresentation";
 import { conversationPath } from "../../lib/conversationRoute";
+import { openUserStatus } from "./StatusTray";
 
 function LockIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" /></svg>;
@@ -34,11 +35,13 @@ export function ConversationRow({
   conversation,
   currentUserId,
   currentUser,
+  statuses = [],
   onPrefetch,
 }: {
   conversation: Conversation;
   currentUserId?: string;
   currentUser?: Partial<UserLite> | null;
+  statuses?: UserStatus[];
   onPrefetch?: (conversation: Conversation) => void;
 }) {
   const title = conversationDisplayName(conversation, currentUserId, currentUser);
@@ -47,41 +50,58 @@ export function ConversationRow({
   const viewer = conversationViewerParticipant(conversation, currentUserId, currentUser);
   const secure = Boolean(conversation.last_message?.is_encrypted);
   const securityUpdate = Boolean(conversation.e2ee_rekey_required);
+  const peerId = String(peer?.id || "");
+  const peerStatuses = conversation.type === "direct" && peerId
+    ? statuses.filter((status) => String(status.author.id) === peerId)
+    : [];
+  const hasStory = peerStatuses.length > 0;
+  const hasUnseenStory = peerStatuses.some((status) => !status.is_viewed);
 
   return (
-    <NavLink
-      to={conversationPath(conversation, currentUser)}
-      className={({ isActive }) => `ms-inbox-row${isActive ? " is-active" : ""}${unread ? " has-unread" : ""}`}
-      onPointerEnter={() => onPrefetch?.(conversation)}
-      onPointerDown={() => onPrefetch?.(conversation)}
-      onFocus={() => onPrefetch?.(conversation)}
-    >
-      <UserAvatar
-        person={peer ?? { display_name: title }}
-        size="md"
-        shape={conversation.type === "group" ? "rounded" : "circle"}
-        showPresence={conversation.type === "direct"}
-        className={conversation.type === "group" ? "ms-inbox-avatar ms-inbox-avatar--group" : "ms-inbox-avatar"}
-        decorative
-      />
+    <div className="ms-inbox-row-shell">
+      <NavLink
+        to={conversationPath(conversation, currentUser)}
+        className={({ isActive }) => `ms-inbox-row${isActive ? " is-active" : ""}${unread ? " has-unread" : ""}`}
+        onPointerEnter={() => onPrefetch?.(conversation)}
+        onPointerDown={() => onPrefetch?.(conversation)}
+        onFocus={() => onPrefetch?.(conversation)}
+      >
+        <UserAvatar
+          person={peer ?? { display_name: title }}
+          size="md"
+          shape={conversation.type === "group" ? "rounded" : "circle"}
+          showPresence={conversation.type === "direct"}
+          className={conversation.type === "group" ? "ms-inbox-avatar ms-inbox-avatar--group" : "ms-inbox-avatar"}
+          decorative
+        />
 
-      <span className="ms-inbox-row__content">
-        <span className="ms-inbox-row__topline">
-          <span className="ms-inbox-row__title">
-            <strong title={title}>{title}</strong>
-            {viewer?.is_pinned ? <span className="ms-inbox-row__state" title="Pinned" aria-label="Pinned"><PinIcon /></span> : null}
-            {viewer?.is_muted ? <span className="ms-inbox-row__state" title="Muted" aria-label="Muted"><MuteIcon /></span> : null}
-            {viewer?.is_archived ? <span className="ms-inbox-row__state" title="Archived" aria-label="Archived"><ArchiveIcon /></span> : null}
-            {secure ? <span className="ms-inbox-row__state" title="End-to-end encrypted" aria-label="End-to-end encrypted"><LockIcon /></span> : null}
-            {securityUpdate ? <span className="ms-inbox-row__state ms-inbox-row__state--warning" title="Security update required" aria-label="Security update required"><SecurityIcon /></span> : null}
+        <span className="ms-inbox-row__content">
+          <span className="ms-inbox-row__topline">
+            <span className="ms-inbox-row__title">
+              <strong title={title}>{title}</strong>
+              {viewer?.is_pinned ? <span className="ms-inbox-row__state" title="Pinned" aria-label="Pinned"><PinIcon /></span> : null}
+              {viewer?.is_muted ? <span className="ms-inbox-row__state" title="Muted" aria-label="Muted"><MuteIcon /></span> : null}
+              {viewer?.is_archived ? <span className="ms-inbox-row__state" title="Archived" aria-label="Archived"><ArchiveIcon /></span> : null}
+              {secure ? <span className="ms-inbox-row__state" title="End-to-end encrypted" aria-label="End-to-end encrypted"><LockIcon /></span> : null}
+              {securityUpdate ? <span className="ms-inbox-row__state ms-inbox-row__state--warning" title="Security update required" aria-label="Security update required"><SecurityIcon /></span> : null}
+            </span>
+            <time dateTime={conversation.last_message?.created_at || conversation.last_message_at || undefined}>{conversationTime(conversation)}</time>
           </span>
-          <time dateTime={conversation.last_message?.created_at || conversation.last_message_at || undefined}>{conversationTime(conversation)}</time>
+          <span className="ms-inbox-row__bottomline">
+            <span className="ms-inbox-row__preview">{conversationSnippet(conversation, currentUserId, currentUser)}</span>
+            {unread ? <span className="ms-inbox-row__badge" aria-label={`${conversation.unread_count} unread messages`}>{conversation.unread_count > 99 ? "99+" : conversation.unread_count}</span> : null}
+          </span>
         </span>
-        <span className="ms-inbox-row__bottomline">
-          <span className="ms-inbox-row__preview">{conversationSnippet(conversation, currentUserId, currentUser)}</span>
-          {unread ? <span className="ms-inbox-row__badge" aria-label={`${conversation.unread_count} unread messages`}>{conversation.unread_count > 99 ? "99+" : conversation.unread_count}</span> : null}
-        </span>
-      </span>
-    </NavLink>
+      </NavLink>
+      {hasStory ? (
+        <button
+          type="button"
+          className={`ms-inbox-row__story-trigger${hasUnseenStory ? " has-unseen" : ""}`}
+          onClick={() => openUserStatus(peerId)}
+          aria-label={`View ${title}'s story`}
+          title={`View ${title}'s story`}
+        />
+      ) : null}
+    </div>
   );
 }

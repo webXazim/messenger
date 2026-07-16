@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useConversationListPreferences } from "../../hooks/useConversationListPreferences";
 import { ConversationListControls } from "./ConversationListControls";
-import { StatusTray } from "./StatusTray";
+import { StatusTray, useUserStatuses } from "./StatusTray";
 import { ConversationRow } from "./ConversationRow";
 import { conversationListEmptyCopy, filterConversationsForInbox } from "./conversationFiltering";
 import { applyKnownOnlinePresence } from "./conversationPresentation";
@@ -18,6 +18,8 @@ export function ConversationSidebarList({
   onPrefetchConversation,
 }: ConversationListBaseProps) {
   const { search, filter, setSearch, setFilter } = useConversationListPreferences();
+  const statusesQuery = useUserStatuses();
+  const statuses = statusesQuery.data ?? [];
   const presenceAwareConversations = useMemo(
     () => applyKnownOnlinePresence(conversations, onlineFriends),
     [conversations, onlineFriends],
@@ -36,8 +38,8 @@ export function ConversationSidebarList({
     <section className="ms-chat-inbox" aria-label="Chat list">
       <header className="ms-chat-inbox__header">
         <div>
-          <span>Messenger</span>
-          <h2>Chats</h2>
+          <span>Chats</span>
+          <h2>Crescentsphere</h2>
         </div>
         {unreadCount ? <strong aria-label={`${unreadCount} unread chats`}>{unreadCount > 99 ? "99+" : unreadCount}</strong> : null}
       </header>
@@ -48,7 +50,7 @@ export function ConversationSidebarList({
         searchInputId={searchInputId}
         onSearchChange={setSearch}
         onFilterChange={setFilter}
-        middleContent={<StatusTray currentUser={currentUser} friends={onlineFriends} busyUserId={openingFriendId} onOpenFriend={onOpenFriend} />}
+        middleContent={<StatusTray currentUser={currentUser} friends={onlineFriends} statuses={statuses} statusesLoading={statusesQuery.isFetching} busyUserId={openingFriendId} onOpenFriend={onOpenFriend} />}
       />
 
       <div className="ms-inbox-list__scroll ms-scroll-region">
@@ -58,6 +60,7 @@ export function ConversationSidebarList({
             conversation={conversation}
             currentUserId={currentUserId}
             currentUser={currentUser}
+            statuses={statuses}
             onPrefetch={onPrefetchConversation}
           />
         ))}

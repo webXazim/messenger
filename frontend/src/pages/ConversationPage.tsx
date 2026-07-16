@@ -1690,6 +1690,13 @@ export function ConversationPage() {
     }
   };
 
+  const startCallFromDetails = (callType: "voice" | "video") => {
+    // The details panel is a full-screen dialog on mobile. Remove it before the
+    // async media preflight so the persistent call screen cannot open beneath it.
+    setShowDetails(false);
+    void startCall(callType);
+  };
+
   useEffect(() => {
     window.localStorage.setItem("chat-inbox-width", String(inboxWidth));
   }, [inboxWidth]);
@@ -2132,8 +2139,8 @@ export function ConversationPage() {
               securityReadiness={encryptionReadiness}
               onChangeMediaKind={setMediaKind}
               onClose={() => setShowDetails(false)}
-              onStartVoiceCall={() => void startCall("voice")}
-              onStartVideoCall={() => void startCall("video")}
+              onStartVoiceCall={() => startCallFromDetails("voice")}
+              onStartVideoCall={() => startCallFromDetails("video")}
               onToggleNotification={(patch) => { void chatApi.updateConversationNotifications(conversationId, patch).then(() => queryClient.invalidateQueries({ queryKey: ["conversation-notifications", conversationId] })); }}
               onSetMuteHours={(hours) => {
                 const muted_until = hours ? new Date(Date.now() + hours * 60 * 60 * 1000).toISOString() : null;

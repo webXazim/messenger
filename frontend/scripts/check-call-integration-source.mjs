@@ -57,8 +57,10 @@ const minimizeCallBlock = callRoom.slice(callRoom.indexOf("const minimizeCall"),
 assert.ok(minimizeCallBlock.includes("onCallMinimize?.(call.id)") && !minimizeCallBlock.includes("declineMutation"), "Minimizing an incoming full-screen call can still decline it.");
 assert.ok(callRoom.includes("onCallFinished?.(call.id)"), "Terminal calls do not clear the persistent call session.");
 assert.ok(callRoomCss.includes("Visually hide the full call surface without unmounting its audio/video nodes"), "Compact mode can unmount or pause the live media surface.");
-assert.ok(callRoom.includes("resolveVideoSenderProfile") && callRoom.includes('displayMode === "compact" ? "low"'), "Persistent calls do not advertise and apply their reduced video profile.");
-assert.ok(callMediaProfile.includes("PERSISTENT_MAX_BITRATE_BPS") && callMediaProfile.includes("remotePreferredVideoQuality"), "Persistent video efficiency caps are missing or not shared with the peer.");
+assert.ok(callRoom.includes("resolveVideoSenderProfile") && !callRoom.includes('displayMode === "compact" ? "low"'), "Minimizing a healthy call still forces both peers onto a low-quality video profile.");
+assert.ok(callMediaProfile.includes("bandwidthReduced") && callMediaProfile.includes("remotePreferredVideoQuality"), "Adaptive video reduction is not tied to network or peer feedback.");
+assert.ok(media.includes("frameRate") && media.includes("1280") && media.includes("720"), "Video capture is not requesting a clear 720p/30fps source profile.");
+assert.ok(conversationPage.includes("startCallFromDetails") && conversationPage.includes("setShowDetails(false)"), "Calls from the mobile details dialog can still open behind the dialog.");
 assert.ok(appShell.includes('message.metadata?.system_event === "call"'), "Call timeline messages can still appear as generic receiver toasts.");
 assert.ok(callRoom.indexOf("lastOfferSentAtRef.current = Date.now()") > callRoom.indexOf('await sendSignal("offer"'), "Initial offers are marked sent before signaling succeeds.");
 assert.ok(callRoom.includes("if (!sent) offerSentRef.current = false"), "A throttled or unsent initial offer can still block handshake retries.");

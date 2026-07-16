@@ -136,16 +136,23 @@ assert.deepEqual(resolveVideoSenderProfile({ mode: "standard", videoActive: true
 });
 assert.deepEqual(resolveVideoSenderProfile({ mode: "standard", videoActive: true, compact: true }), {
   active: true,
-  maxBitrate: 180_000,
-  maxFramerate: 10,
-  scaleResolutionDownBy: 2.5,
-  reduced: true,
+  maxBitrate: undefined,
+  maxFramerate: undefined,
+  scaleResolutionDownBy: 1,
+  reduced: false,
 });
 assert.deepEqual(resolveVideoSenderProfile({ mode: "standard", videoActive: true, compact: false, remotePreferredVideoQuality: "low" }), {
   active: true,
-  maxBitrate: 180_000,
-  maxFramerate: 10,
-  scaleResolutionDownBy: 2.5,
+  maxBitrate: 250_000,
+  maxFramerate: 12,
+  scaleResolutionDownBy: 2,
+  reduced: true,
+});
+assert.deepEqual(resolveVideoSenderProfile({ mode: "low_bandwidth_video", videoActive: true, compact: false }), {
+  active: true,
+  maxBitrate: 250_000,
+  maxFramerate: 12,
+  scaleResolutionDownBy: 2,
   reduced: true,
 });
 assert.deepEqual(resolveVideoSenderProfile({ mode: "audio_only", videoActive: true, compact: true }), {

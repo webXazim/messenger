@@ -369,7 +369,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
   }
 
   return (
-    <AuthFormShell kicker={isSignup ? "Get started" : "Welcome back"} title={isSignup ? "Create your account" : "Sign in to Messenger"} description={isSignup ? "One account for private conversations on all your devices." : "Continue your conversations securely."}>
+    <AuthFormShell kicker={isSignup ? "Get started" : "Welcome back"} title={isSignup ? "Create your account" : "Sign in to Crescentsphere"} description={isSignup ? "One account for private conversations on all your devices." : "Continue your conversations securely."}>
       <form className="auth-inline-form" onSubmit={submitCredentials} noValidate>
         {error ? <div className="auth-alert" role="alert"><strong>We couldn't continue</strong><span>{error}</span></div> : null}
 
@@ -416,7 +416,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
 
         {!isSignup ? <div className="auth-form-meta"><span>Protected session</span><Link to="/forgot-password">Forgot password?</Link></div> : null}
         <button className="auth-submit" type="submit" disabled={busy || (isSignup ? !username.trim() || !email.trim() || (usernameCheckIsCurrent && ["checking", "unavailable"].includes(usernameAvailability.status)) : !identifier.trim()) || !password}>{busy ? <><span className="auth-spinner" />Please wait…</> : isSignup ? "Create account" : "Sign in"}</button>
-        <p className="auth-switch">{isSignup ? "Already have an account?" : "New to Messenger?"} <Link to={isSignup ? "/login" : "/register"}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
+        <p className="auth-switch">{isSignup ? "Already have an account?" : "New to Crescentsphere?"} <Link to={isSignup ? "/login" : "/register"}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
         <p className="auth-legal">By continuing, you agree to responsible use and acknowledge our privacy practices.</p>
       </form>
     </AuthFormShell>

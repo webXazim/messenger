@@ -1547,11 +1547,9 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
 
   useEffect(() => {
     if (!callId || call?.call_type !== "video" || !isLiveCallStatus(call.status)) return;
-    const preferredVideoQuality = displayMode === "compact"
-      ? "low"
-      : videoEnabled
-        ? String(orchestration?.recommended_video_quality || "medium")
-        : "off";
+    const preferredVideoQuality = videoEnabled
+      ? String(orchestration?.recommended_video_quality || "high")
+      : "off";
     const profileKey = `${callId}:${displayMode}:${preferredVideoQuality}`;
     if (lastSurfaceVideoProfileRef.current === profileKey) return;
     lastSurfaceVideoProfileRef.current = profileKey;
@@ -1612,14 +1610,14 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
           ? await collectPeerQualityMetrics(peer, statsSampleRef, networkOnline, peerState)
           : {
               networkQuality: mapMetricsToNetworkQuality({}, networkOnline, peerState),
-              preferredVideoQuality: videoEnabled ? "medium" : "off",
+              preferredVideoQuality: videoEnabled ? "high" : "off",
             } as PeerQualityMetrics;
         await chatApi.sendCallQualityReport(callId, {
           audio_enabled: audioEnabled,
           video_enabled: videoEnabled,
           peer_state: peerState,
           network_quality: metrics.networkQuality,
-          preferred_video_quality: displayMode === "compact" ? "low" : metrics.preferredVideoQuality,
+          preferred_video_quality: metrics.preferredVideoQuality,
           packet_loss_pct: metrics.packetLossPct,
           round_trip_time_ms: metrics.roundTripTimeMs,
           jitter_ms: metrics.jitterMs,
@@ -1653,9 +1651,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       }
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         audio_enabled: next,
-        preferred_video_quality: displayMode === "compact"
-          ? "low"
-          : String(orchestration?.recommended_video_quality || (videoEnabled ? "medium" : "off")),
+        preferred_video_quality: String(orchestration?.recommended_video_quality || (videoEnabled ? "high" : "off")),
       }));
     } catch (error) {
       setAudioEnabled(!next);
@@ -1684,9 +1680,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       }, next);
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: next,
-        preferred_video_quality: displayMode === "compact"
-          ? "low"
-          : next ? String(orchestration?.recommended_video_quality || "medium") : "off",
+        preferred_video_quality: next ? String(orchestration?.recommended_video_quality || "high") : "off",
       }));
     } catch (error) {
       setVideoEnabled(!next);
@@ -1749,9 +1743,7 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       }, true);
       await chatApi.updateCallMediaState(callId, buildMediaStatePatch({
         video_enabled: true,
-        preferred_video_quality: displayMode === "compact"
-          ? "low"
-          : String(orchestration?.recommended_video_quality || "medium"),
+        preferred_video_quality: String(orchestration?.recommended_video_quality || "high"),
       }));
     } catch (error) {
       let usableVideoTrack = localStreamRef.current?.getVideoTracks().some((track) => track.readyState === "live") ?? false;
