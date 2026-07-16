@@ -43,11 +43,12 @@ import {
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
-import { patchCallCaches } from "../lib/realtimeCache";
+import { markConversationReadInCaches, patchCallCaches } from "../lib/realtimeCache";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "../lib/messageReceipts";
 import { conversationPath, isNamedConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
 import { createLocalAttachmentPreview, generateAndStoreLocalPreview, storeLocalPreview, transferLocalPreview } from "../lib/mediaPreviewCache";
+import { CHAT_INBOX_DEFAULT_WIDTH, CHAT_INBOX_MAX_WIDTH, CHAT_INBOX_MIN_WIDTH, clampChatInboxWidth, readStoredChatInboxWidth } from "../lib/chatPaneSizing";
 import type { UserSearchResult } from "../types/auth";
 import type { AttachmentEncryptionEnvelope, Conversation, Message, MessageAttachment } from "../types/chat";
 
@@ -112,22 +113,6 @@ function buildOptimisticMessage(
       ? { is_voice_note: true, duration_seconds: options.durationSeconds ?? null, waveform: options.waveform ?? [] }
       : null,
   } as Message;
-}
-
-function markConversationReadInCache(messagesKeyConversationId: string, queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.setQueryData(["conversations"], (current: Message[] | unknown) => {
-    if (!Array.isArray(current)) return current;
-    return current.map((conversation) => {
-      if (!conversation || typeof conversation !== "object") return conversation;
-      const item = conversation as Record<string, unknown>;
-      if (String(item.id || "") !== messagesKeyConversationId) return conversation;
-      return { ...item, unread_count: 0 };
-    });
-  });
-  queryClient.setQueryData(["conversation", messagesKeyConversationId], (current: unknown) => {
-    if (!current || typeof current !== "object") return current;
-    return { ...(current as Record<string, unknown>), unread_count: 0 };
-  });
 }
 
 function applyParticipantReceiptInCache(
@@ -216,25 +201,12 @@ type TimelineConfirmation =
   | { kind: "leave-conversation" }
   | { kind: "block-contact"; userId: string; displayName: string };
 
-const INBOX_MIN_WIDTH = 280;
-const INBOX_MAX_WIDTH = 440;
-const INBOX_DEFAULT_WIDTH = 340;
 const DETAILS_MIN_WIDTH = 300;
 const DETAILS_MAX_WIDTH = 440;
 const DETAILS_DEFAULT_WIDTH = 340;
 const CHAT_MIN_WIDTH = 420;
 
-function clampInboxWidth(width: number) {
-  return Math.min(INBOX_MAX_WIDTH, Math.max(INBOX_MIN_WIDTH, Math.round(width)));
-}
-
-function readStoredInboxWidth() {
-  if (typeof window === "undefined") return INBOX_DEFAULT_WIDTH;
-  const stored = Number(window.localStorage.getItem("chat-inbox-width"));
-  return Number.isFinite(stored) ? clampInboxWidth(stored) : INBOX_DEFAULT_WIDTH;
-}
-
-function clampDetailsWidth(width: number, inboxWidth = INBOX_DEFAULT_WIDTH) {
+function clampDetailsWidth(width: number, inboxWidth = CHAT_INBOX_DEFAULT_WIDTH) {
   const viewportMax = typeof window === "undefined"
     ? DETAILS_MAX_WIDTH
     : Math.max(DETAILS_MIN_WIDTH, window.innerWidth - inboxWidth - CHAT_MIN_WIDTH);
@@ -293,7 +265,7 @@ export function ConversationPage() {
   const [decryptionStates, setDecryptionStates] = useState<Record<string, { status: "pending" | "ready" | "unavailable" | "error"; message?: string }>>({});
   const [initiallyReadyConversationId, setInitiallyReadyConversationId] = useState("");
   const [reportedMessageIds, setReportedMessageIds] = useState<Record<string, boolean>>({});
-  const [inboxWidth, setInboxWidth] = useState(readStoredInboxWidth);
+  const [inboxWidth, setInboxWidth] = useState(readStoredChatInboxWidth);
   const [isResizingInbox, setIsResizingInbox] = useState(false);
   const [detailsWidth, setDetailsWidth] = useState(readStoredDetailsWidth);
   const [isResizingDetails, setIsResizingDetails] = useState(false);
@@ -679,7 +651,7 @@ export function ConversationPage() {
     socket.send({ event: "message.read", data: { conversation_id: targetConversationId, message_id: messageId } });
     void chatApi.markConversationRead(targetConversationId, { message_id: messageId }).then((receipt) => {
       applyParticipantReceiptInCache(targetConversationId, "message.read", receipt, queryClient);
-      markConversationReadInCache(targetConversationId, queryClient);
+      markConversationReadInCaches(queryClient, targetConversationId);
     }).catch(() => {
       if (lastReadReceiptMessageRef.current === receiptKey) lastReadReceiptMessageRef.current = "";
     });
@@ -743,12 +715,12 @@ export function ConversationPage() {
           && timelineAtLatestRef.current
           && !isSameUserIdentity(normalized.sender, localCurrentUser);
         if (shouldReadImmediately) {
-          markConversationReadInCache(conversationId, queryClient);
+          markConversationReadInCaches(queryClient, conversationId);
           acknowledgeConversationRead(conversationId, normalized.id);
         }
         void queryClient.invalidateQueries({ queryKey: ["conversations"] }).then(() => {
           if (isConversationActivelyViewedAtLatest(conversationId)) {
-            markConversationReadInCache(conversationId, queryClient);
+            markConversationReadInCaches(queryClient, conversationId);
           }
         });
         return;
@@ -813,7 +785,7 @@ export function ConversationPage() {
         }
 
         if (receiptEvent === "message.read" && receiptUserId === String(user?.id || "")) {
-          markConversationReadInCache(conversationId, queryClient);
+          markConversationReadInCaches(queryClient, conversationId);
         }
 
         // Opening a chat on another participant's device only changes receipt
@@ -990,6 +962,7 @@ export function ConversationPage() {
     jumpToMessage,
     scrollToLatest,
     registerMessageRef,
+    getMessageNode,
   } = useConversationTimeline({
     conversationId,
     messages,
@@ -1027,9 +1000,29 @@ export function ConversationPage() {
   }, [conversationId, queryClient, socketStatus]);
 
   useEffect(() => {
-    if (!conversationId || !latestMessageId || !pageVisible || !timelineAtLatest) return;
-    acknowledgeConversationRead(conversationId, latestMessageId);
-  }, [acknowledgeConversationRead, conversationId, latestMessageId, pageVisible, timelineAtLatest]);
+    if (!conversationId || !latestMessageId || !pageVisible) return;
+    const scroller = scrollerRef.current;
+    const messageNode = getMessageNode(latestMessageId);
+    if (!scroller || !messageNode) return;
+
+    const markSeen = () => {
+      if (document.visibilityState !== "visible") return;
+      const messageRect = messageNode.getBoundingClientRect();
+      const scrollerRect = scroller.getBoundingClientRect();
+      const visible = messageRect.bottom > scrollerRect.top && messageRect.top < scrollerRect.bottom;
+      if (!visible) return;
+      markConversationReadInCaches(queryClient, conversationId);
+      acknowledgeConversationRead(conversationId, latestMessageId);
+    };
+
+    markSeen();
+    if (typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) markSeen();
+    }, { root: scroller, threshold: 0.01 });
+    observer.observe(messageNode);
+    return () => observer.disconnect();
+  }, [acknowledgeConversationRead, conversationId, getMessageNode, latestMessageId, pageVisible, queryClient, scrollerRef]);
   const encryptionReadinessMessage = useMemo(() => {
     if (encryptionReadiness.code !== "participant_device_missing" || !encryptionReadiness.missingParticipantIds.length) {
       return encryptionReadiness.message;
@@ -1681,7 +1674,7 @@ export function ConversationPage() {
 
   useEffect(() => {
     const handleResize = () => {
-      setInboxWidth((current) => clampInboxWidth(current));
+      setInboxWidth((current) => clampChatInboxWidth(current));
       setDetailsWidth((current) => clampDetailsWidth(current, inboxWidth));
     };
     window.addEventListener("resize", handleResize);
@@ -1703,7 +1696,7 @@ export function ConversationPage() {
     setIsResizingInbox(true);
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      setInboxWidth(clampInboxWidth(startWidth + moveEvent.clientX - startX));
+      setInboxWidth(clampChatInboxWidth(startWidth + moveEvent.clientX - startX));
     };
 
     const stopResize = () => {
@@ -1830,18 +1823,18 @@ export function ConversationPage() {
         onPointerDown={startInboxResize}
         onKeyDown={(event) => {
           const step = event.shiftKey ? 32 : 16;
-          if (event.key === "ArrowLeft") setInboxWidth((current) => clampInboxWidth(current - step));
-          else if (event.key === "ArrowRight") setInboxWidth((current) => clampInboxWidth(current + step));
-          else if (event.key === "Home") setInboxWidth(INBOX_MIN_WIDTH);
-          else if (event.key === "End") setInboxWidth(INBOX_MAX_WIDTH);
+          if (event.key === "ArrowLeft") setInboxWidth((current) => clampChatInboxWidth(current - step));
+          else if (event.key === "ArrowRight") setInboxWidth((current) => clampChatInboxWidth(current + step));
+          else if (event.key === "Home") setInboxWidth(CHAT_INBOX_MIN_WIDTH);
+          else if (event.key === "End") setInboxWidth(CHAT_INBOX_MAX_WIDTH);
           else return;
           event.preventDefault();
         }}
         role="separator"
         aria-label="Resize conversation list"
         aria-orientation="vertical"
-        aria-valuemin={INBOX_MIN_WIDTH}
-        aria-valuemax={INBOX_MAX_WIDTH}
+        aria-valuemin={CHAT_INBOX_MIN_WIDTH}
+        aria-valuemax={CHAT_INBOX_MAX_WIDTH}
         aria-valuenow={inboxWidth}
         aria-keyshortcuts="ArrowLeft ArrowRight Home End"
         title="Use left and right arrow keys to resize the conversation list"

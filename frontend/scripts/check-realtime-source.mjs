@@ -94,7 +94,9 @@ assert.ok(appShell.includes("isConversationActivelyViewedAtLatest(conversationId
 assert.ok(activeConversationView.includes("activeConversationView.conversationId !== conversationId"), "Active chat notification suppression is not keyed by the resolved conversation id.");
 assert.ok(activeConversationView.includes("activeConversationView.atLatest"), "Active chat notification suppression does not require the latest-message viewpoint.");
 assert.ok(conversation.includes("setActiveConversationView({ conversationId, atLatest: timelineAtLatest, visible: pageVisible })"), "Conversation pages do not publish their live latest-view state.");
-assert.match(conversation, /shouldReadImmediately[\s\S]*markConversationReadInCache\(conversationId, queryClient\)[\s\S]*acknowledgeConversationRead/, "Visible latest-view messages are not cleared from unread state immediately.");
+assert.match(conversation, /shouldReadImmediately[\s\S]*markConversationReadInCaches\(queryClient, conversationId\)[\s\S]*acknowledgeConversationRead/, "Visible latest-view messages are not cleared from unread state immediately.");
+assert.match(appShell, /chatIsOpenAtLatest[\s\S]*socket\.send\(\{ event: "message\.read"/, "The global realtime listener does not publish an immediate read receipt for the visible latest chat.");
+assert.ok(conversation.includes("new IntersectionObserver"), "Rendered message visibility is not observed for immediate read receipts.");
 assert.ok(cache.includes("applyActiveConversationReadState(reconcileConversationPresence"), "Realtime conversation updates can restore an unread badge for the actively viewed latest chat.");
 assert.ok(!appShell.includes("New chat activity"), "Foreground message notifications still expose the generic activity label.");
 assert.ok(appShell.includes('navigate(`/chat/${toast.conversationId}?reply=1`)'), "In-app message notifications do not offer a reply handoff.");

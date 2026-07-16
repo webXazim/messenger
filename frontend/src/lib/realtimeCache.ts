@@ -70,6 +70,20 @@ export function patchConversationReceiptCaches(
   queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, (current) => patchConversation(current));
 }
 
+export function markConversationReadInCaches(queryClient: QueryClient, conversationId: string) {
+  if (!conversationId) return;
+  const clearUnread = (conversation: Conversation | undefined) => {
+    if (!conversation || String(conversation.id) !== conversationId || conversation.unread_count === 0) return conversation;
+    return { ...conversation, unread_count: 0 };
+  };
+
+  queryClient.setQueryData<Conversation[]>(["conversations"], (current) =>
+    current?.map((conversation) => clearUnread(conversation) ?? conversation),
+  );
+  queryClient.setQueryData<Conversation>(["conversation", conversationId], clearUnread);
+  queryClient.setQueriesData<Conversation>({ queryKey: ["conversation-route"] }, clearUnread);
+}
+
 export function patchMessageCache(queryClient: QueryClient, conversationId: string, incoming: Message) {
   queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => {
     if (!current?.pages?.length) return current;

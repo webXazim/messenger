@@ -1,34 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth";
 import { chatApi } from "../api/chat";
 import { ConversationList } from "../components/ConversationList";
-import { GroupChatModal } from "../components/GroupChatModal";
 import { NewConversationModal } from "../components/NewConversationModal";
 import { useAuth } from "../contexts/AuthContext";
 import { parseApiError } from "../lib/apiErrors";
 import { conversationPath } from "../lib/conversationRoute";
+import { readStoredChatInboxWidth } from "../lib/chatPaneSizing";
 import type { UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
-
-function NewMessageIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
-function NewGroupIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8.5 11.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7.5-1a2.5 2.5 0 1 0 0-5" />
-      <path d="M3.5 19v-.5c0-2.4 2.2-4.3 5-4.3s5 1.9 5 4.3v.5h-10Zm10-1.8c.7-1.5 2.1-2.5 4-2.5 2.3 0 4.2 1.5 4.2 3.5v.8h-5.2" />
-      <path d="M18.5 4v4M16.5 6h4" />
-    </svg>
-  );
-}
 
 function EmptyConversationIcon() {
   return (
@@ -49,10 +31,9 @@ export function ConversationsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [showGroupModal, setShowGroupModal] = useState(false);
   const [showNewConversationModal, setShowNewConversationModal] = useState(false);
-  const [groupError, setGroupError] = useState<string | null>(null);
   const [directChatError, setDirectChatError] = useState<string | null>(null);
+  const inboxWidth = readStoredChatInboxWidth();
 
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
@@ -86,21 +67,6 @@ export function ConversationsPage() {
       });
   }, [friendsQuery.data, user?.id]);
 
-  const createGroupMutation = useMutation({
-    mutationFn: ({ title, uniqueName, participantIds }: { title: string; uniqueName: string; participantIds: string[] }) =>
-      chatApi.createGroupConversation(title, uniqueName, participantIds),
-    onMutate: () => setGroupError(null),
-    onSuccess: async (conversation) => {
-      setShowGroupModal(false);
-      queryClient.setQueryData(["conversation", conversation.id], conversation);
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      navigate(conversationPath(conversation, currentUserIdentity));
-    },
-    onError: (mutationError) => {
-      setGroupError(parseApiError(mutationError, "Could not create this group.").message);
-    },
-  });
-
   const directChatMutation = useMutation({
     mutationFn: async (person: UserSearchResult) => {
       const existing = findDirectConversation(conversations, person.id);
@@ -128,35 +94,12 @@ export function ConversationsPage() {
   };
 
   return (
-    <div className="ms-conversations-page" aria-label="Chats">
+    <div
+      className="ms-conversations-page"
+      aria-label="Chats"
+      style={{ "--chat-inbox-width": `${inboxWidth}px` } as CSSProperties}
+    >
       <aside className="ms-conversations-page__inbox">
-        <header className="ms-conversations-page__header">
-          <div>
-            <span className="ms-conversations-page__eyebrow">Messenger</span>
-            <h1>Chats</h1>
-          </div>
-          <div className="ms-conversations-page__actions" aria-label="Chat actions">
-            <button
-              type="button"
-              className="ms-conversations-page__action"
-              onClick={() => setShowGroupModal(true)}
-              aria-label="Create group"
-              title="Create group"
-            >
-              <NewGroupIcon />
-            </button>
-            <button
-              type="button"
-              className="ms-conversations-page__action ms-conversations-page__action--primary"
-              onClick={openNewConversation}
-              aria-label="Start new conversation"
-              title="Start new conversation"
-            >
-              <NewMessageIcon />
-            </button>
-          </div>
-        </header>
-
         {conversationsQuery.isLoading ? (
           <div className="ms-conversations-state" role="status" aria-live="polite">
             <span className="ms-conversations-state__spinner" aria-hidden="true" />
@@ -174,7 +117,8 @@ export function ConversationsPage() {
             conversations={conversations}
             currentUserId={String(user?.id || "")}
             currentUser={currentUserIdentity}
-            variant="inbox"
+            variant="sidebar"
+            searchInputId="conversation-index-search"
             onlineFriends={friends}
             openingFriendId={directChatMutation.isPending ? String(directChatMutation.variables?.id || "") : null}
             onOpenFriend={(friend) => directChatMutation.mutate(friend)}
@@ -204,15 +148,6 @@ export function ConversationsPage() {
         />
       ) : null}
 
-      {showGroupModal ? (
-        <GroupChatModal
-          friends={friends}
-          busy={createGroupMutation.isPending}
-          error={groupError}
-          onClose={() => setShowGroupModal(false)}
-          onCreate={(title, uniqueName, participantIds) => createGroupMutation.mutate({ title, uniqueName, participantIds })}
-        />
-      ) : null}
     </div>
   );
 }

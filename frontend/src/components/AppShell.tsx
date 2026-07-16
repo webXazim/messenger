@@ -15,7 +15,7 @@ import { decryptMessageTextResult } from "../lib/e2ee";
 import { isConversationActivelyViewedAtLatest } from "../lib/activeConversationView";
 import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
-import { getRealtimeSyncMarker, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
+import { getRealtimeSyncMarker, markConversationReadInCaches, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
 
 
 function getCallActionError(error: unknown, fallback: string) {
@@ -353,8 +353,13 @@ export function AppShell() {
         const sender = payload.data?.sender && typeof payload.data.sender === "object" ? (payload.data.sender as Record<string, unknown>) : null;
         const conversationId = String(message.conversation_id || payload.data?.conversation_id || payload.data?.conversation || "");
         const messageId = String(message.id || payload.data?.message_id || "");
+        const chatIsOpenAtLatest = isConversationActivelyViewedAtLatest(conversationId);
         if (sender && !isSameUserIdentity(sender, user) && conversationId && messageId) {
           socket.send({ event: "message.delivered", data: { conversation_id: conversationId, message_id: messageId } });
+          if (chatIsOpenAtLatest) {
+            markConversationReadInCaches(queryClient, conversationId);
+            socket.send({ event: "message.read", data: { conversation_id: conversationId, message_id: messageId } });
+          }
           void chatApi.markConversationDelivered(conversationId, { message_id: messageId }).then((receipt) => {
             patchConversationReceiptCaches(queryClient, conversationId, "message.delivered", receipt);
           }).catch(() => undefined);
@@ -366,7 +371,6 @@ export function AppShell() {
           sender
             ? String(sender.display_name || sender.username || "New message")
             : "New message";
-        const chatIsOpenAtLatest = isConversationActivelyViewedAtLatest(conversationId);
         if (sender && !isSameUserIdentity(sender, user)) {
           if (chatIsOpenAtLatest) return;
           void resolveMessageNotificationBody(String(user?.id || ""), message).then((body) => {

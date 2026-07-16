@@ -1,12 +1,14 @@
 /* Standalone Chats inbox and conversation-list presentation. */
 
 .ms-conversations-page {
+  --chat-inbox-width: var(--ms-conversation-list-width);
+
   width: 100%;
   min-width: 0;
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: var(--ms-conversation-list-width) minmax(0, 1fr);
+  grid-template-columns: var(--chat-inbox-width) minmax(0, 1fr);
   overflow: hidden;
   background: var(--ms-color-canvas);
 }

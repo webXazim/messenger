@@ -11,6 +11,7 @@ const styles = read("src/styles/index.css");
 const html = read("index.html");
 const contacts = read("src/pages/FriendsPage.tsx");
 const conversation = read("src/pages/ConversationPage.tsx");
+const conversations = read("src/pages/ConversationsPage.tsx");
 const composer = read("src/components/MessageComposer.tsx");
 const messageActions = read("src/components/messages/MessageActions.tsx");
 const confirmDialog = read("src/components/ConfirmDialog.tsx");
@@ -48,6 +49,8 @@ assert.ok(contacts.includes('role="tablist"'), "Contacts navigation is not expos
 assert.ok(contacts.includes('event.key === "ArrowRight"'), "Contacts tabs do not support arrow-key navigation.");
 assert.ok(contacts.includes('role="tabpanel"'), "Contacts tab panels are missing semantics.");
 assert.ok(conversation.includes('aria-keyshortcuts="ArrowLeft ArrowRight Home End"'), "Desktop panel resizers are not keyboard operable.");
+assert.ok(conversations.includes('variant="sidebar"'), "The standalone chat list does not use the same presentation as an opened chat.");
+assert.ok(conversations.includes("readStoredChatInboxWidth"), "The standalone and opened chat lists do not share their persisted width.");
 assert.ok(composer.includes('aria-keyshortcuts="Enter"'), "Composer keyboard behavior is not announced.");
 assert.ok(messageActions.includes('aria-haspopup="menu"'), "Message action menu semantics are missing.");
 assert.ok(messageActions.includes('event.key === "ArrowDown"'), "Message action menu does not support arrow-key navigation.");

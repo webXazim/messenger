@@ -193,6 +193,8 @@ export function useConversationTimeline({
     else delete messageRefs.current[messageId];
   }, []);
 
+  const getMessageNode = useCallback((messageId: string) => messageRefs.current[messageId] ?? null, []);
+
   return {
     scrollerRef,
     showJumpToLatest,
@@ -204,5 +206,6 @@ export function useConversationTimeline({
     jumpToMessage,
     scrollToLatest,
     registerMessageRef,
+    getMessageNode,
   };
 }
