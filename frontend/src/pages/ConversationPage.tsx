@@ -15,6 +15,7 @@ import { MediaPreviewModal } from "../components/MediaPreviewModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ChatHeader, type ChatHeaderNotice } from "../components/conversation/ChatHeader";
 import { useAuth } from "../contexts/AuthContext";
+import { useActiveCall } from "../contexts/ActiveCallContext";
 import {
   decryptMessageTextResult,
   encryptAttachmentForConversation,
@@ -226,6 +227,7 @@ export function ConversationPage() {
   const { conversationId: routeConversationKey = "" } = useParams();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { activateCall, expectOutgoingCall, clearOutgoingCallExpectation } = useActiveCall();
   const navigate = useNavigate();
   const location = useLocation();
   const namedRoute = isNamedConversationRoute(routeConversationKey);
@@ -1651,6 +1653,7 @@ export function ConversationPage() {
     const recentCalls = recentCallsQuery.data ?? [];
     const existingConversationCall = findActiveCallForConversation(recentCalls, conversationId, currentUserIdentity);
     if (existingConversationCall) {
+      activateCall(existingConversationCall.id);
       navigate(`/calls/${existingConversationCall.id}`);
       return;
     }
@@ -1664,12 +1667,16 @@ export function ConversationPage() {
       setCallError(null);
       setStartingCallType(callType);
       await preflightCallMedia(callType);
+      expectOutgoingCall(conversationId);
       const call = await chatApi.startCall(conversationId, { call_type: callType });
+      if (!call.id) throw new Error("The call server did not return a call ID.");
+      activateCall(call.id);
       patchCallCaches(queryClient, call);
       navigate(`/calls/${call.id}`);
     } catch (error) {
       const activeCallId = getActiveCallIdFromError(error);
       if (activeCallId) {
+        activateCall(activeCallId);
         navigate(`/calls/${activeCallId}`);
       } else if (error instanceof DOMException || (error instanceof Error && /camera|microphone|media|https|permission/i.test(error.message))) {
         setCallError(await getCallMediaErrorMessage(error, callType));
@@ -1677,6 +1684,7 @@ export function ConversationPage() {
         setCallError(getErrorMessage(error, "Could not start the call."));
       }
     } finally {
+      clearOutgoingCallExpectation(conversationId);
       setStartingCallType(null);
     }
   };

@@ -17,6 +17,7 @@ import { claimCallAction, createCallActionChannel, createCallActionOwnerId, rele
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
 import { getRealtimeSyncMarker, markConversationReadInCaches, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
 import { CallRoomPage } from "../pages/CallRoomPage";
+import { ActiveCallProvider } from "../contexts/ActiveCallContext";
 
 
 function getCallActionError(error: unknown, fallback: string) {
@@ -127,15 +128,32 @@ export function AppShell() {
   const previousSocketStatusRef = useRef(socketStatus);
   const realtimeSyncInFlightRef = useRef(false);
   const incomingActionInFlightRef = useRef(false);
+  const outgoingCallConversationRef = useRef("");
   const callActionOwnerRef = useRef("");
   const callActionChannelRef = useRef<ReturnType<typeof createCallActionChannel> | null>(null);
   if (!callActionOwnerRef.current) callActionOwnerRef.current = createCallActionOwnerId();
 
+  const activateCall = useCallback((callId: string) => {
+    const normalizedCallId = String(callId || "");
+    if (!normalizedCallId) return;
+    setActiveCallId(normalizedCallId);
+    rememberActiveCallId(user?.id, normalizedCallId);
+  }, [user?.id]);
+
+  const expectOutgoingCall = useCallback((conversationId: string) => {
+    outgoingCallConversationRef.current = String(conversationId || "");
+  }, []);
+
+  const clearOutgoingCallExpectation = useCallback((conversationId: string) => {
+    if (outgoingCallConversationRef.current === String(conversationId || "")) {
+      outgoingCallConversationRef.current = "";
+    }
+  }, []);
+
   useEffect(() => {
     if (!routeCallId) return;
-    setActiveCallId(routeCallId);
-    rememberActiveCallId(user?.id, routeCallId);
-  }, [routeCallId, user?.id]);
+    activateCall(routeCallId);
+  }, [activateCall, routeCallId]);
 
   useEffect(() => {
     if (routeCallId || activeCallId || !user?.id) return;
@@ -154,12 +172,13 @@ export function AppShell() {
     setIncomingCallError(null);
     setIncomingCallAction(null);
     if (isForegroundBrowserTab()) {
+      activateCall(call.id);
       setShowCallOverlay(false);
       if (location.pathname !== callPath) navigate(callPath);
       return;
     }
     setShowCallOverlay(!/^\/calls\/[^/]+\/?$/.test(location.pathname));
-  }, [location.pathname, navigate]);
+  }, [activateCall, location.pathname, navigate]);
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
@@ -392,6 +411,7 @@ export function AppShell() {
               && isForegroundBrowserTab()
               && location.pathname !== `/calls/${callPayload.id}`
             ) {
+              activateCall(callPayload.id);
               navigate(`/calls/${callPayload.id}`);
             }
           }
@@ -484,7 +504,18 @@ export function AppShell() {
       }
       if (payload.event !== "call.started" && payload.event !== "call.created") return;
       const call = realtimeCallPayload ?? normalizeCall(payload.data || {});
-      if (!call.id || call.status !== "ringing" || isSameUserIdentity(call.initiated_by, user)) return;
+      if (!call.id || call.status !== "ringing") return;
+      if (isSameUserIdentity(call.initiated_by, user)) {
+        const conversationId = String(call.conversation || payload.data?.conversation_id || "");
+        if (conversationId && outgoingCallConversationRef.current === conversationId) {
+          outgoingCallConversationRef.current = "";
+          activateCall(call.id);
+          if (isForegroundBrowserTab() && location.pathname !== `/calls/${call.id}`) {
+            navigate(`/calls/${call.id}`);
+          }
+        }
+        return;
+      }
       void showChatActivityNotification({
         title: `${call.initiated_by?.display_name || call.initiated_by?.username || "Someone"} is calling`,
         body: `${call.call_type === "video" ? "Video" : "Voice"} call incoming`,
@@ -496,7 +527,7 @@ export function AppShell() {
     return () => {
       unsubscribe();
     };
-  }, [activeCallId, incomingCall?.id, location.pathname, navigate, presentIncomingCall, queryClient, socket, user?.id]);
+  }, [activateCall, activeCallId, incomingCall?.id, location.pathname, navigate, presentIncomingCall, queryClient, socket, user?.id]);
 
   const clearIncoming = () => {
     setIncomingCall(null);
@@ -525,6 +556,9 @@ export function AppShell() {
       if (action === "accept") {
         await preflightCallMedia(call.call_type);
         mediaReady = true;
+        activateCall(call.id);
+        setShowCallOverlay(false);
+        if (location.pathname !== `/calls/${call.id}`) navigate(`/calls/${call.id}`);
       }
       const updatedCall = action === "accept"
         ? await chatApi.acceptCall(call.id)
@@ -537,7 +571,10 @@ export function AppShell() {
         occurredAt: Date.now(),
       });
       clearIncoming();
-      if (action === "accept") navigate(`/calls/${call.id}`);
+      if (action === "accept") {
+        activateCall(call.id);
+        navigate(`/calls/${call.id}`);
+      }
     } catch (error) {
       const message = action === "accept" && !mediaReady
         ? await getCallMediaErrorMessage(error, call.call_type)
@@ -573,14 +610,21 @@ export function AppShell() {
   const userLabel = user?.profile?.display_name || user?.full_name || user?.username || "You";
   const isFocusedChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
   const isCallRoom = Boolean(routeCallId);
+  const activeCallContextValue = useMemo(() => ({
+    activeCallId,
+    activateCall,
+    expectOutgoingCall,
+    clearOutgoingCallExpectation,
+  }), [activeCallId, activateCall, clearOutgoingCallExpectation, expectOutgoingCall]);
   return (
-    <div
-      className={[
-        "ms-ui ms-app-shell",
-        isFocusedChat ? "ms-app-shell--focused-chat" : "",
-        isCallRoom ? "ms-app-shell--call-room" : "",
-      ].filter(Boolean).join(" ")}
-    >
+    <ActiveCallProvider value={activeCallContextValue}>
+      <div
+        className={[
+          "ms-ui ms-app-shell",
+          isFocusedChat ? "ms-app-shell--focused-chat" : "",
+          isCallRoom ? "ms-app-shell--call-room" : "",
+        ].filter(Boolean).join(" ")}
+      >
       <a className="ms-skip-link" href="#main-content">Skip to main content</a>
       {!isCallRoom ? (
         <DesktopNavigationRail userLabel={userLabel} userAvatar={user?.profile?.avatar} socketStatus={socketStatus} onLogout={logout} />
@@ -682,6 +726,7 @@ export function AppShell() {
           ))}
         </div>
       ) : null}
-    </div>
+      </div>
+    </ActiveCallProvider>
   );
 }

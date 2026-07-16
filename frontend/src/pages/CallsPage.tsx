@@ -7,6 +7,7 @@ import { UserAvatar } from "../components/UserAvatar";
 import { personPresenceText } from "../lib/personPresentation";
 import { conversationDisplayName } from "../components/conversations/conversationPresentation";
 import { useAuth } from "../contexts/AuthContext";
+import { useActiveCall } from "../contexts/ActiveCallContext";
 import {
   callDestination,
   callDirection,
@@ -58,6 +59,7 @@ export function CallsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { activateCall, expectOutgoingCall, clearOutgoingCallExpectation } = useActiveCall();
   const [startingCallKey, setStartingCallKey] = useState<string | null>(null);
   const [startingPhase, setStartingPhase] = useState<"permission" | "starting" | null>(null);
   const [callError, setCallError] = useState<{ message: string; activeCallId?: string } | null>(null);
@@ -98,6 +100,7 @@ export function CallsPage() {
 
     const conversationCall = findActiveCallForConversation(allCalls, conversationId, currentIdentity);
     if (conversationCall) {
+      activateCall(conversationCall.id);
       navigate(`/calls/${conversationCall.id}`);
       return;
     }
@@ -112,7 +115,10 @@ export function CallsPage() {
       setStartingPhase("permission");
       await preflightCallMedia(callType);
       setStartingPhase("starting");
+      expectOutgoingCall(conversationId);
       const call = await chatApi.startCall(conversationId, { call_type: callType, metadata: { source: "web" } });
+      if (!call.id) throw new Error("The call server did not return a call ID.");
+      activateCall(call.id);
       patchCallCaches(queryClient, call);
       navigate(`/calls/${call.id}`);
     } catch (error) {
@@ -125,6 +131,7 @@ export function CallsPage() {
         setCallError({ message: getErrorMessage(error) });
       }
     } finally {
+      clearOutgoingCallExpectation(conversationId);
       setStartingCallKey(null);
       setStartingPhase(null);
     }

@@ -6,6 +6,7 @@ const callsPage = read("src/pages/CallsPage.tsx");
 const conversationPage = read("src/pages/ConversationPage.tsx");
 const callRoom = read("src/pages/CallRoomPage.tsx");
 const appShell = read("src/components/AppShell.tsx");
+const activeCallContext = read("src/contexts/ActiveCallContext.tsx");
 const app = read("src/App.tsx");
 const callRoomCss = read("src/styles/pages/call-room.css");
 const callMediaProfile = read("src/components/call/callMediaProfile.ts");
@@ -42,6 +43,9 @@ assert.ok(callRoom.includes('if (call.status === "missed")'), "Unanswered calls 
 assert.ok(appShell.includes("handleIncomingCallAction"), "Incoming banner and overlay do not share one guarded action path.");
 assert.ok(appShell.includes("claimCallAction"), "Incoming acceptance is not coordinated across tabs.");
 assert.ok(appShell.includes("activeCallId") && appShell.includes("<CallRoomPage"), "The live call controller is not mounted above child routes.");
+assert.ok(activeCallContext.includes("activateCall") && activeCallContext.includes("expectOutgoingCall"), "Call launchers cannot atomically activate the persistent call controller.");
+assert.ok(conversationPage.includes("expectOutgoingCall(conversationId)") && callsPage.includes("expectOutgoingCall(conversationId)"), "Outgoing call launchers can still miss the server's started event.");
+assert.ok(appShell.includes("outgoingCallConversationRef.current === conversationId") && appShell.includes("activateCall(call.id)"), "The caller is not activated from the matching realtime started event.");
 assert.ok(appShell.includes("rememberActiveCallId") && appShell.includes("sessionStorage"), "An active call cannot be restored after an in-tab reload.");
 assert.ok(appShell.includes("presentIncomingCall") && appShell.includes("isForegroundBrowserTab"), "The foreground recipient is not brought into the incoming call room.");
 assert.ok(appShell.includes('payload.event === "call.accepted"') && appShell.includes('navigate(`/calls/${callPayload.id}`)'), "The connected caller is not restored to the shared call room after acceptance.");
