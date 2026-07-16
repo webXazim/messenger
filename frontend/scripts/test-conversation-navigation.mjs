@@ -67,6 +67,17 @@ assert.equal(conversationSnippet(ringingConversation, amina.id, amina), "You: Ou
 const presenceAware = applyKnownOnlinePresence([recent], [{ ...amina, is_online: true, active_devices: 1 }]);
 assert.equal(presenceAware[0].participants[1].user.is_online, true, "An online friend must not appear offline in the conversation row.");
 assert.equal(recent.participants[1].user.is_online, undefined, "Presence reconciliation must not mutate cached conversations.");
+const staleOnlineConversation = {
+  ...recent,
+  participants: recent.participants.map((participant) => participant.user.id === amina.id
+    ? { ...participant, user: { ...participant.user, is_online: true, presence_status: "active" } }
+    : participant),
+};
+const reconciledOffline = applyKnownOnlinePresence([staleOnlineConversation], [{ ...amina, is_online: false, presence_status: "offline", presence_visibility: "public" }]);
+assert.equal(reconciledOffline[0].participants[1].user.is_online, false, "A stale conversation presence must follow the authoritative friend snapshot.");
+const reconciledIdle = applyKnownOnlinePresence([recent], [{ ...amina, is_online: true, presence_status: "idle", presence_label: "idle", device_type: "mobile" }]);
+assert.equal(reconciledIdle[0].participants[1].user.presence_status, "idle", "Idle state must stay consistent between the online strip and conversation surfaces.");
+assert.equal(reconciledIdle[0].participants[1].user.device_type, "mobile", "Device presence must stay consistent between conversation surfaces.");
 assert.equal(conversationViewerParticipant(pinned, me.id, me)?.is_muted, true);
 assert.equal(conversationMatchesQuery(recent, "amina", me.id, me), true);
 assert.equal(conversationMatchesQuery(recent, "unknown", me.id, me), false);

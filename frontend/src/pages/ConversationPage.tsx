@@ -6,6 +6,7 @@ import { chatApi, normalizeConversation, normalizeMessage, type MessagePage } fr
 import { ForwardMessageModal } from "../components/ForwardMessageModal";
 import { ConversationDetailsPanel } from "../components/ConversationDetailsPanel";
 import { ConversationList, conversationDisplayName } from "../components/ConversationList";
+import { applyKnownOnlinePresence } from "../components/conversations/conversationPresentation";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageComposer } from "../components/MessageComposer";
 import { uploadPolicyFromCapabilities, validateComposerUpload } from "../components/composer/uploadPolicy";
@@ -489,6 +490,10 @@ export function ConversationPage() {
         return true;
       });
   }, [friendsQuery.data, user?.id]);
+  const presenceAwareConversation = useMemo(() => {
+    const conversation = conversationQuery.data;
+    return conversation ? applyKnownOnlinePresence([conversation], friends)[0] : undefined;
+  }, [conversationQuery.data, friends]);
   const conversationParticipantIds = useMemo(
     () => (conversationQuery.data?.participants ?? [])
       .filter((participant) => !participant.left_at && !participant.banned_at)
@@ -1458,24 +1463,24 @@ export function ConversationPage() {
   );
 
   const chatTitle = useMemo(() => {
-    const conversation = conversationQuery.data;
+    const conversation = presenceAwareConversation;
     if (!conversation) return "Conversation";
     return conversationDisplayName(conversation, String(user?.id || ""), currentUserIdentity);
-  }, [conversationQuery.data, currentUserIdentity, user?.id]);
+  }, [currentUserIdentity, presenceAwareConversation, user?.id]);
 
   const chatPeer = useMemo(
-    () => conversationQuery.data?.type === "direct"
-      ? conversationQuery.data.participants.find((participant) => !isSameUserIdentity(participant.user, user))?.user ?? null
+    () => presenceAwareConversation?.type === "direct"
+      ? presenceAwareConversation.participants.find((participant) => !isSameUserIdentity(participant.user, user))?.user ?? null
       : null,
-    [conversationQuery.data, user],
+    [presenceAwareConversation, user],
   );
   const chatSubtitle = useMemo(() => {
-    const conversation = conversationQuery.data;
+    const conversation = presenceAwareConversation;
     if (!conversation) return "Conversation";
     if (conversation.type === "group") return `${conversation.participants.length} participants`;
     return personPresenceText(chatPeer);
-  }, [chatPeer, conversationQuery.data]);
-  const isGroupConversation = conversationQuery.data?.type === "group";
+  }, [chatPeer, presenceAwareConversation]);
+  const isGroupConversation = presenceAwareConversation?.type === "group";
 
   const getReadByNames = (message: Message) => {
     const raw = message.metadata?.read_by;
@@ -2109,7 +2114,7 @@ export function ConversationPage() {
           <div className="ms-conversation-view__details">
             <ConversationDetailsPanel
               open
-              conversation={conversationQuery.data}
+              conversation={presenceAwareConversation}
               notifications={notificationsQuery.data}
               media={mediaQuery.data ?? []}
               allMedia={allMediaQuery.data ?? []}

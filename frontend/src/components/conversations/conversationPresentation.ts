@@ -5,31 +5,27 @@ export function applyKnownOnlinePresence(
   conversations: Conversation[],
   knownPeople: Array<Partial<UserLite> & { id: string | number }> = [],
 ) {
-  const onlineById = new Map(
-    knownPeople
-      .filter((person) => person.is_online && person.presence_visibility !== "hidden")
-      .map((person) => [String(person.id), person]),
-  );
-  if (!onlineById.size) return conversations;
+  const presenceById = new Map(knownPeople.map((person) => [String(person.id), person]));
+  if (!presenceById.size) return conversations;
 
   return conversations.map((conversation) => {
     let changed = false;
     const participants = conversation.participants.map((participant) => {
-      const onlinePerson = onlineById.get(String(participant.user.id));
-      if (!onlinePerson || participant.user.is_online) return participant;
+      const knownPerson = presenceById.get(String(participant.user.id));
+      if (!knownPerson) return participant;
       changed = true;
       return {
         ...participant,
         user: {
           ...participant.user,
-          is_online: true,
-          active_devices: Math.max(1, Number(onlinePerson.active_devices || 0)),
-          last_seen_at: onlinePerson.last_seen_at ?? participant.user.last_seen_at,
-          presence_label: onlinePerson.presence_label || "online",
-          presence_status: onlinePerson.presence_status || "active",
-          device_type: onlinePerson.device_type ?? participant.user.device_type,
-          device_types: onlinePerson.device_types ?? participant.user.device_types,
-          presence_visibility: "public" as const,
+          is_online: Boolean(knownPerson.is_online) && knownPerson.presence_visibility !== "hidden",
+          active_devices: knownPerson.presence_visibility === "hidden" ? 0 : knownPerson.active_devices ?? participant.user.active_devices,
+          last_seen_at: knownPerson.presence_visibility === "hidden" ? null : knownPerson.last_seen_at ?? participant.user.last_seen_at,
+          presence_label: knownPerson.presence_visibility === "hidden" ? "offline" : knownPerson.presence_label ?? participant.user.presence_label,
+          presence_status: knownPerson.presence_visibility === "hidden" ? "offline" : knownPerson.presence_status ?? participant.user.presence_status,
+          device_type: knownPerson.presence_visibility === "hidden" ? null : knownPerson.device_type ?? participant.user.device_type,
+          device_types: knownPerson.presence_visibility === "hidden" ? [] : knownPerson.device_types ?? participant.user.device_types,
+          presence_visibility: knownPerson.presence_visibility ?? participant.user.presence_visibility ?? "public",
         },
       };
     });
