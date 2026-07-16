@@ -321,8 +321,8 @@
   display: grid;
   gap: var(--ms-space-2);
   padding: var(--ms-space-3) clamp(var(--ms-space-3), 2vw, var(--ms-space-5)) max(var(--ms-space-3), env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--ms-color-line);
-  background: var(--ms-color-surface);
+  border-top: 0;
+  background: transparent;
 }
 
 .ms-chat-jump-latest {

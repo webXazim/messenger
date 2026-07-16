@@ -388,7 +388,7 @@ export function MessageComposer({
         </div>
       ) : null}
 
-      <div className={`ms-message-composer__surface ${voiceActive ? "is-voice-active" : ""} ${text.trim() || pendingUploads.length || editingMessage ? "has-draft" : ""}`}>
+      <div className={`ms-message-composer__surface ${voiceActive ? "is-voice-active" : ""} ${text.length ? "has-text" : ""} ${text.trim() || pendingUploads.length || editingMessage ? "has-draft" : ""}`}>
         {!voiceActive ? <>
         <label className={`ms-composer-icon-button ms-message-composer__attach ${editingMessage || composerDisabled ? "is-disabled" : ""}`} aria-label="Attach files" title={disabledReason || "Attach files"}>
           <input type="file" multiple onChange={handleFileChange} disabled={composerDisabled || Boolean(editingMessage)} />

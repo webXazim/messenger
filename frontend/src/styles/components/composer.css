@@ -27,7 +27,7 @@
   min-width: 0;
   display: grid;
   grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
-  align-items: center;
+  align-items: end;
   gap: 0.625rem;
   padding: 0;
   border: 0;
@@ -160,7 +160,7 @@
 
 .ms-message-composer__input-shell {
   min-width: 0;
-  min-height: 2.875rem;
+  min-height: 3rem;
   display: flex;
   align-items: center;
   overflow: hidden;
@@ -190,21 +190,30 @@
   font-size: var(--ms-font-size-md);
   line-height: 1.45;
   scrollbar-width: thin;
-  scrollbar-color: #bcbcbc transparent;
+  scrollbar-color: rgb(17 17 17 / 0.2) transparent;
   scrollbar-gutter: auto;
 }
 
+.ms-message-composer__surface:not(.has-text) .ms-message-composer__input {
+  height: 2.75rem !important;
+}
+
 .ms-message-composer__input::-webkit-scrollbar {
-  width: 0.25rem;
+  width: 3px;
 }
 
 .ms-message-composer__input::-webkit-scrollbar-track {
   background: transparent;
+  margin-block: 0.75rem;
 }
 
 .ms-message-composer__input::-webkit-scrollbar-thumb {
   border-radius: var(--ms-radius-pill);
-  background: #bcbcbc;
+  background: rgb(17 17 17 / 0.2);
+}
+
+.ms-message-composer__input::-webkit-scrollbar-thumb:hover {
+  background: rgb(17 17 17 / 0.34);
 }
 
 .ms-message-composer__input::placeholder {
@@ -794,7 +803,7 @@
 
   .ms-message-composer__surface {
     grid-template-columns: 2.75rem minmax(0, 1fr) 2.875rem;
-    align-items: center;
+    align-items: end;
     gap: 0.5rem;
     min-height: 2.875rem;
     padding: 0;
