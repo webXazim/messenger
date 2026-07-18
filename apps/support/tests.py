@@ -743,7 +743,7 @@ class SupportFoundationTests(APITestCase):
 
     @override_settings(UPLOAD_SCAN_ASYNC=True)
     @patch("apps.support.api.views.dispatch_pending_upload_scan")
-    def test_visitor_can_send_image_immediately_while_async_scan_is_queued(self, mock_dispatch_scan):
+    def test_visitor_image_is_scanned_before_it_can_be_sent(self, mock_dispatch_scan):
         account = self.active_account()
         website = SupportWebsite.objects.create(
             support_account=account,
@@ -766,8 +766,8 @@ class SupportFoundationTests(APITestCase):
         )
         self.assertEqual(upload_response.status_code, 201)
         upload_id = upload_response.data["id"]
-        self.assertEqual(upload_response.data["scan_status"], PendingUpload.ScanStatus.PENDING)
-        mock_dispatch_scan.assert_called_once()
+        self.assertEqual(upload_response.data["scan_status"], PendingUpload.ScanStatus.CLEAN)
+        mock_dispatch_scan.assert_not_called()
 
         sent = self.client.post(
             f"/api/v1/support/widget/{website.site_key}/sessions/{session['id']}/conversation/messages/",

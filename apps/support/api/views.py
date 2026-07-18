@@ -1138,7 +1138,11 @@ def _create_support_pending_upload(*, serializer, support_conversation, owner: S
         support_conversation=support_conversation,
         owner=owner,
     )
-    if getattr(settings, "UPLOAD_SCAN_ASYNC", True):
+    # The public widget has no long-lived upload worker like the signed-in
+    # Messenger composer. Finish its scan in this request so a visitor cannot
+    # race the background scanner by pressing Send as soon as the upload chip
+    # appears.
+    if getattr(settings, "UPLOAD_SCAN_ASYNC", True) and owner.source == SupportPendingUpload.Source.TEAM:
         dispatch_pending_upload_scan(pending)
     else:
         scan_upload_file(pending, initial_bytes=initial_bytes)

@@ -84,6 +84,9 @@ assert.ok(supportInbox.includes("draftInsertion"), "Support canned-reply inserti
 assert.ok(supportMedia.includes("fetchMediaBlob"), "Private Support media previews do not use authenticated delivery.");
 assert.ok(supportMedia.includes("ms-support-media-video"), "Support image/video/audio rendering is missing.");
 assert.ok(widgetLoader.includes("/conversation/uploads/"), "Widget visitor attachment uploads are missing.");
+assert.ok(widgetLoader.includes("xhr.upload.onprogress"), "Widget attachment upload progress is missing.");
+assert.ok(widgetLoader.includes("cs-upload-preview"), "Widget attachment previews are missing.");
+assert.ok(widgetLoader.includes("Ready to send"), "Widget attachment readiness state is missing.");
 assert.ok(widgetLoader.includes("MediaRecorder"), "Widget visitor voice recording is missing.");
 assert.ok(widgetLoader.includes("authorizedBlob"), "Widget private media rendering is missing.");
 assert.ok(css.includes(".ms-support-composer-row"), "Responsive Support media composer layout is missing.");
