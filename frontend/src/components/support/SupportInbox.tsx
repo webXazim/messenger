@@ -85,6 +85,22 @@ function serviceTargetLabel(value?: string | null) {
   return value ? value.replace(/_/g, " ") : "Service target";
 }
 
+function SupportBackIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>;
+}
+
+function SupportPhoneIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.7 4.5h2.6c.4 0 .8.3.9.7l.6 2.7a1 1 0 0 1-.3 1l-1.8 1.5a13.2 13.2 0 0 0 3.4 3.4l1.5-1.8a1 1 0 0 1 1-.3l2.7.6c.4.1.7.5.7.9v2.6c0 .6-.4 1-.9 1.1-.7.1-1.3.2-2 .2-7 0-12.6-5.6-12.6-12.6 0-.7.1-1.3.2-2 .1-.5.5-.9 1.1-.9Z" /></svg>;
+}
+
+function SupportVideoIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="6.5" width="12" height="11" rx="2.5" /><path d="m15.5 10 5-2.5v9l-5-2.5" /></svg>;
+}
+
+function SupportInfoIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 10.5v5" /><circle cx="12" cy="7.8" r="1" /></svg>;
+}
+
 function ConversationRow({
   conversation,
   active,
@@ -210,7 +226,6 @@ function MessageBubble({ message }: { message: SupportMessage }) {
     >
       <div className="ms-support-message-meta">
         <strong>{message.sender.display_name}</strong>
-        <time>{formatCompactTime(message.created_at)}</time>
       </div>
       <div
         className={`ms-support-message-bubble${message.is_own ? " is-own" : ""}`}
@@ -222,6 +237,7 @@ function MessageBubble({ message }: { message: SupportMessage }) {
           attachments={message.attachments || []}
           voiceNote={message.voice_note}
         />
+        <time className="ms-support-message-time">{formatCompactTime(message.created_at)}</time>
       </div>
     </div>
   );
@@ -404,6 +420,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   const [uploadingCount, setUploadingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [activeCall, setActiveCall] = useState<SupportCall | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(true);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -739,10 +756,14 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
 
   return (
     <section
-      className={`ms-support-inbox${selectedId ? " has-selection" : ""}`}
+      className={`ms-support-inbox${selectedId ? " has-selection" : ""}${detailsOpen ? " details-open" : ""}`}
       aria-label="Support Chat inbox"
     >
       <aside className="ms-support-inbox__list">
+        <header className="ms-support-inbox__list-header">
+          <div><span>Support Chat</span><h1>Inbox</h1></div>
+          {listQuery.data?.unread_total ? <strong aria-label={`${listQuery.data.unread_total} unread support messages`}>{Math.min(99, listQuery.data.unread_total)}</strong> : null}
+        </header>
         <div className="ms-support-inbox__filters">
           <div className="ms-support-saved-view-row">
             <select aria-label="Saved inbox view" value={selectedSavedViewId} onChange={(event) => { setSelectedSavedViewId(event.target.value); applySavedView(event.target.value); }}>
@@ -878,39 +899,33 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
             <header className="ms-support-conversation-header">
               <button
                 type="button"
-                className="ms-support-mobile-back"
+                className="ms-icon-button ms-support-mobile-back"
                 onClick={() => openConversation("")}
                 aria-label="Back to support conversations"
               >
-                ‹
+                <SupportBackIcon />
               </button>
-              <div>
-                <strong>{visitorName(selectedConversation)}</strong>
+              <button type="button" className="ms-support-conversation-profile" onClick={() => setDetailsOpen((value) => !value)} aria-expanded={detailsOpen}>
+                <span className="ms-support-conversation-row__avatar" aria-hidden="true">{visitorName(selectedConversation).slice(0, 1).toUpperCase()}</span>
                 <span>
-                  {selectedConversation.website.name} ·{" "}
-                  {selectedConversation.status.replace(/_/g, " ")}
+                  <strong>{visitorName(selectedConversation)}</strong>
+                  <small>{selectedConversation.website.name} · {selectedConversation.status.replace(/_/g, " ")}</small>
                 </span>
+              </button>
+              <div className="ms-support-conversation-actions">
+                {bootstrap.role === "agent" && !selectedConversation.assigned_agent ? (
+                  <button type="button" className="ms-button ms-button--ghost ms-button--compact ms-support-take-button" disabled={claimMutation.isPending} onClick={() => claimMutation.mutate()} aria-label="Take conversation" title="Take conversation">
+                    Take
+                  </button>
+                ) : null}
+                {callsEnabled && selectedConversation.status !== "closed" ? (
+                  <>
+                    {audioCallsEnabled ? <button type="button" className="ms-icon-button ms-support-call-action" disabled={startCallMutation.isPending || Boolean(activeCall)} onClick={() => startCallMutation.mutate("voice")} aria-label="Start audio call" title="Start audio call"><SupportPhoneIcon /></button> : null}
+                    {videoCallsEnabled ? <button type="button" className="ms-icon-button ms-support-call-action" disabled={startCallMutation.isPending || Boolean(activeCall)} onClick={() => startCallMutation.mutate("video")} aria-label="Start video call" title="Start video call"><SupportVideoIcon /></button> : null}
+                  </>
+                ) : null}
+                <button type="button" className={`ms-icon-button ms-support-info-action${detailsOpen ? " is-active" : ""}`} onClick={() => setDetailsOpen((value) => !value)} aria-label={detailsOpen ? "Close visitor details" : "Open visitor details"} aria-pressed={detailsOpen}><SupportInfoIcon /></button>
               </div>
-              {callsEnabled && selectedConversation.status !== "closed" ? (
-                <div className="ms-support-call-actions" aria-label="Support call actions">
-                  {audioCallsEnabled ? <button type="button" className="ms-support-call-action" disabled={startCallMutation.isPending || Boolean(activeCall)} onClick={() => startCallMutation.mutate("voice")} aria-label="Start audio call" title="Start audio call">☎</button> : null}
-                  {videoCallsEnabled ? <button type="button" className="ms-support-call-action" disabled={startCallMutation.isPending || Boolean(activeCall)} onClick={() => startCallMutation.mutate("video")} aria-label="Start video call" title="Start video call">▣</button> : null}
-                </div>
-              ) : null}
-              <span className={`ms-support-live-state is-${socketStatus}`}>
-                {socketStatus === "open" ? "Live" : "Reconnecting"}
-              </span>
-              {bootstrap.role === "agent" &&
-              !selectedConversation.assigned_agent ? (
-                <button
-                  type="button"
-                  className="ms-button ms-button--ghost ms-button--compact"
-                  disabled={claimMutation.isPending}
-                  onClick={() => claimMutation.mutate()}
-                >
-                  Take conversation
-                </button>
-              ) : null}
             </header>
             <details className="ms-support-mobile-details">
               <summary>Visitor and conversation details</summary>
@@ -974,6 +989,38 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                   ))}
                 </div>
               ) : null}
+              <div className="ms-support-composer-shortcuts">
+                <select
+                  className="ms-support-canned-select"
+                  aria-label="Insert canned reply"
+                  value=""
+                  onChange={(event) => {
+                    const reply = cannedRepliesQuery.data?.find((item) => item.id === event.target.value);
+                    if (reply) setDraft((current) => current ? `${current}
+${reply.body}` : reply.body);
+                    event.target.value = "";
+                  }}
+                  disabled={selectedConversation.status === "closed" || sendMutation.isPending}
+                >
+                  <option value="">Quick replies</option>
+                  {cannedRepliesQuery.data?.map((reply) => <option value={reply.id} key={reply.id}>{reply.shortcut} · {reply.title}</option>)}
+                </select>
+                <select
+                  className="ms-support-canned-select ms-support-knowledge-select"
+                  aria-label="Insert knowledge answer"
+                  value=""
+                  onChange={(event) => {
+                    const article = knowledgeArticlesQuery.data?.find((item) => item.id === event.target.value);
+                    if (article) setDraft((current) => current ? `${current}
+${article.body}` : article.body);
+                    event.target.value = "";
+                  }}
+                  disabled={selectedConversation.status === "closed" || sendMutation.isPending}
+                >
+                  <option value="">Knowledge</option>
+                  {knowledgeArticlesQuery.data?.map((article) => <option value={article.id} key={article.id}>{article.title}</option>)}
+                </select>
+              </div>
               <div className="ms-support-composer-row">
                 <input
                   ref={fileInputRef}
@@ -1000,36 +1047,6 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                 >
                   +
                 </button>
-                <select
-                  className="ms-support-canned-select"
-                  aria-label="Insert canned reply"
-                  value=""
-                  onChange={(event) => {
-                    const reply = cannedRepliesQuery.data?.find((item) => item.id === event.target.value);
-                    if (reply) setDraft((current) => current ? `${current}
-${reply.body}` : reply.body);
-                    event.target.value = "";
-                  }}
-                  disabled={selectedConversation.status === "closed" || sendMutation.isPending}
-                >
-                  <option value="">Replies</option>
-                  {cannedRepliesQuery.data?.map((reply) => <option value={reply.id} key={reply.id}>{reply.shortcut} · {reply.title}</option>)}
-                </select>
-                <select
-                  className="ms-support-canned-select ms-support-knowledge-select"
-                  aria-label="Insert knowledge answer"
-                  value=""
-                  onChange={(event) => {
-                    const article = knowledgeArticlesQuery.data?.find((item) => item.id === event.target.value);
-                    if (article) setDraft((current) => current ? `${current}
-${article.body}` : article.body);
-                    event.target.value = "";
-                  }}
-                  disabled={selectedConversation.status === "closed" || sendMutation.isPending}
-                >
-                  <option value="">Knowledge</option>
-                  {knowledgeArticlesQuery.data?.map((article) => <option value={article.id} key={article.id}>{article.title}</option>)}
-                </select>
                 <textarea
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
@@ -1075,13 +1092,19 @@ ${article.body}` : article.body);
 
       <aside className="ms-support-inbox__details">
         {selectedConversation ? (
-          <ConversationDetails
-            conversation={selectedConversation}
-            bootstrap={bootstrap}
-            disabled={updateMutation.isPending}
-            onUpdate={(payload) => updateMutation.mutate(payload)}
-            defaultFollowUpMinutes={serviceSettingsQuery.data?.default_follow_up_minutes || 1440}
-          />
+          <>
+            <header className="ms-support-details-header">
+              <div><span>Conversation</span><strong>Details</strong></div>
+              <button type="button" className="ms-icon-button" onClick={() => setDetailsOpen(false)} aria-label="Close visitor details">×</button>
+            </header>
+            <ConversationDetails
+              conversation={selectedConversation}
+              bootstrap={bootstrap}
+              disabled={updateMutation.isPending}
+              onUpdate={(payload) => updateMutation.mutate(payload)}
+              defaultFollowUpMinutes={serviceSettingsQuery.data?.default_follow_up_minutes || 1440}
+            />
+          </>
         ) : null}
       </aside>
       {activeCall ? <SupportGuestCall initialCall={activeCall} onFinished={() => { setActiveCall(null); queryClient.setQueryData(["support-active-call"], { call: null }); }} /> : null}

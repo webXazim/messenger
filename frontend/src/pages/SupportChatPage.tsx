@@ -575,6 +575,7 @@ export function SupportChatPage() {
 
   const bootstrap = bootstrapQuery.data;
   if (bootstrap.access !== "active") return <SupportAccessState bootstrap={bootstrap} />;
+  if (section === "inbox") return <SupportInbox bootstrap={bootstrap} />;
 
   return (
     <div className="ms-workspace-page ms-support-page">
@@ -587,7 +588,6 @@ export function SupportChatPage() {
           { label: "Agent seats", value: `${bootstrap.limits.agents.used}/${bootstrap.limits.agents.limit}` },
         ] : []}
       />
-      {section === "inbox" ? <SupportInbox bootstrap={bootstrap} /> : null}
       {section === "websites" ? <WebsitesSection bootstrap={bootstrap} /> : null}
       {section === "agents" ? <AgentsSection bootstrap={bootstrap} /> : null}
       {section === "analytics" ? <SupportAnalytics bootstrap={bootstrap} /> : null}

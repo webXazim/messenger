@@ -630,10 +630,17 @@ export function AppShell() {
   };
 
   const userLabel = user?.profile?.display_name || user?.full_name || user?.username || "You";
-  const isFocusedChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
+  const isDirectChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
+  const isSupportInbox = location.pathname.startsWith("/support/inbox");
+  const isFocusedChat = isDirectChat || isSupportInbox;
   const productMode = location.pathname.startsWith("/support") ? "support" : "messenger";
   const activeCallIsExpanded = Boolean(activeCallId && (routeCallId === activeCallId || expandedCallId === activeCallId));
   const isCallRoom = Boolean(routeCallId || activeCallIsExpanded);
+  const hideMobileNavigation =
+    isDirectChat ||
+    isCallRoom ||
+    (isSupportInbox &&
+      new URLSearchParams(location.search).has("conversation"));
   const activeCallContextValue = useMemo(() => ({
     activeCallId,
     activateCall,
@@ -700,7 +707,7 @@ export function AppShell() {
           </div>
         </div>
       </main>
-      {!isFocusedChat && !isCallRoom ? <MobileBottomNavigation mode={productMode} supportUnread={supportRealtime.unreadTotal + supportRealtime.alertUnread} /> : null}
+      {!hideMobileNavigation ? <MobileBottomNavigation mode={productMode} supportUnread={supportRealtime.unreadTotal + supportRealtime.alertUnread} /> : null}
       {incomingCall && showCallOverlay ? (
         <IncomingCallOverlay
           call={incomingCall}
