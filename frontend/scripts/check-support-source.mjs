@@ -22,6 +22,7 @@ const supportSocket = read("src/lib/supportSocket.ts");
 const supportRealtime = read("src/hooks/useSupportRealtime.ts");
 const appShell = read("src/components/AppShell.tsx");
 const widgetLoader = read("public/support-widget/v1/widget.js");
+const frontendNginx = read("nginx.conf");
 const dockerCompose = read("../docker-compose.yml");
 const api = read("src/api/support.ts");
 const css = read("src/styles/pages/support.css");
@@ -156,6 +157,20 @@ assert.ok(widgetLoader.includes("function renderCall"), "Widget incoming-call ex
 assert.ok(widgetLoader.includes("RTCPeerConnection"), "Widget WebRTC guest calling is missing.");
 assert.ok(widgetLoader.includes("/calls/turn-credentials/"), "Widget TURN credential retrieval is missing.");
 assert.ok(widgetLoader.includes("lastReceiptAckStatus"), "Widget receipt acknowledgement deduplication is missing.");
+assert.ok(widgetLoader.includes("function updateLauncherUnread"), "Widget unread badge must update without rebuilding the launcher.");
+assert.ok(
+  widgetLoader.includes('!state.open && !state.closing && shadow.querySelector(".cs-launcher")'),
+  "Closed widget renders must preserve the existing launcher element.",
+);
+assert.ok(!widgetLoader.includes('.cs-launcher{animation:'), "Widget launcher must not replay an entrance animation during background updates.");
+assert.ok(
+  !widgetLoader.includes('payload.event === "support.message.created" || payload.event === "support.conversation.updated"'),
+  "Background conversation updates must not be treated as new visitor-visible messages.",
+);
+assert.ok(
+  frontendNginx.includes('add_header Cache-Control "no-cache, must-revalidate"'),
+  "The fixed widget loader URL must revalidate instead of serving stale code.",
+);
 assert.ok(widgetLoader.includes(".cs-bubble-text{display:inline}"), "Widget message metadata must remain inline with text.");
 assert.ok(dockerCompose.includes("SUPPORT_CALLS_ENABLED: ${SUPPORT_CALLS_ENABLED:-true}"), "Production Support calls are not enabled.");
 assert.ok(css.includes(".ms-support-call-overlay"), "Responsive Support call overlay styles are missing.");

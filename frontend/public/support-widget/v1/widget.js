@@ -122,7 +122,7 @@
       var changed = JSON.stringify(nextMessages) !== JSON.stringify(state.messages);
       state.messages = nextMessages;
       acknowledgeLatestTeamMessage();
-      if (changed) {
+      if (changed && state.open) {
         render();
         if (state.followLatest) scrollMessages();
       }
@@ -219,7 +219,7 @@
       var nextCSAT = payload || null;
       var changed = JSON.stringify(nextCSAT) !== JSON.stringify(state.csat);
       state.csat = nextCSAT;
-      if (changed) render();
+      if (changed && state.open) render();
       return state.csat;
     });
   }
@@ -625,25 +625,25 @@
       if (state.socket !== socket) return;
       try {
         var payload = JSON.parse(event.data || "{}");
-        if (payload.event === "support.message.created" || payload.event === "support.conversation.updated") {
+        if (payload.event === "support.message.created") {
           var senderKind = payload.data && payload.data.sender ? payload.data.sender.kind : "";
-          if (payload.event === "support.message.created" && senderKind !== "visitor" && payload.data && payload.data.id) {
+          if (senderKind !== "visitor" && payload.data && payload.data.id) {
             sendRealtime("support.message.delivered", { message_id: payload.data.id });
             if (state.open && document.visibilityState === "visible") sendRealtime("support.message.read", { message_id: payload.data.id });
           }
-          if (!state.open && senderKind !== "visitor") { state.hasUnread = true; render(); return; }
+          if (!state.open && senderKind !== "visitor") { updateLauncherUnread(true); return; }
           if (state.open) loadMessages().catch(function () {});
         } else if (payload.event === "support.typing.started" || payload.event === "support.typing.stopped") {
           var teamTyping = payload.event === "support.typing.started";
           if (state.teamTyping !== teamTyping) {
             state.teamTyping = teamTyping;
-            render();
+            if (state.open) render();
           }
         } else if (payload.event === "support.message.delivered" || payload.event === "support.message.read") {
           loadMessages().catch(function () {});
         } else if (payload.event === "support.csat.updated") {
           if (state.open) loadCSAT().catch(function () {});
-          else { state.hasUnread = true; render(); }
+          else updateLauncherUnread(true);
         } else if (payload.event === "support.call.ringing" || payload.event === "support.call.accepted" || payload.event === "support.call.media_updated") {
           state.call = payload.data || state.call;
           if (state.call && state.call.status === "ongoing" && !state.callPeer) beginVisitorCall().catch(function () {});
@@ -651,7 +651,7 @@
         } else if (payload.event === "support.call.signal") {
           if (payload.data && payload.data.signal) processCallSignal(payload.data.signal).catch(function () {});
         } else if (payload.event === "support.call.ended") {
-          cleanupCall(true); render();
+          cleanupCall(true); if (state.open) render();
         }
       } catch (_) {}
     };
@@ -693,7 +693,11 @@
     },
     resumeSession: resumeSession,
     updateSession: function (changes) {
-      return request(sessionPath("/"), { method: "PATCH", body: JSON.stringify(changes || {}) }).then(function (result) { state.session = result; render(); return result; });
+      return request(sessionPath("/"), { method: "PATCH", body: JSON.stringify(changes || {}) }).then(function (result) {
+        state.session = result;
+        if (state.open) render();
+        return result;
+      });
     },
     refreshSession: function () {
       return request(sessionPath("/refresh/"), { method: "POST" }).then(function (result) { storeSession(result); closeRealtime(false); connectRealtime(); return result; });
@@ -784,7 +788,6 @@
       .cs-send:disabled{opacity:.38;cursor:default}
       .cs-jump{position:absolute;z-index:4;right:18px;bottom:78px;width:48px;height:48px;display:grid;place-items:center;border:1px solid #d7d7da;border-radius:50%;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"};color:${state.config && state.config.theme === "dark" ? "#fff" : "#111"};box-shadow:0 5px 18px rgba(0,0,0,.11);cursor:pointer}
       .cs-jump svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-      .cs-launcher{animation:cs-panel-in 160ms ease}
       @media(max-width:520px){
         .cs-panel{position:fixed;inset:0;width:100vw;height:100dvh;border:0;border-radius:0;box-shadow:none;transform-origin:bottom center}
         .cs-wrap{left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom))}
@@ -792,7 +795,7 @@
         .cs-body{padding-top:14px}
         .cs-composer{padding-bottom:max(10px,env(safe-area-inset-bottom))}
       }
-      @media(prefers-reduced-motion:reduce){.cs-panel,.cs-panel.is-closing,.cs-launcher{animation:none}}
+      @media(prefers-reduced-motion:reduce){.cs-panel,.cs-panel.is-closing{animation:none}}
     `;
   }
 
@@ -825,6 +828,16 @@
     var jump = shadow.querySelector(".cs-jump");
     if (jump) jump.hidden = true;
     if (body) window.requestAnimationFrame(function () { body.scrollTop = body.scrollHeight; });
+  }
+
+  function updateLauncherUnread(hasUnread) {
+    state.hasUnread = Boolean(hasUnread);
+    if (!shadow || state.open) return;
+    var launcher = shadow.querySelector(".cs-launcher");
+    if (!launcher) return;
+    var badge = launcher.querySelector(".cs-unread");
+    if (state.hasUnread && !badge) launcher.appendChild(node("span", "cs-unread", "1"));
+    if (!state.hasUnread && badge) badge.remove();
   }
 
   function renderAttachment(container, attachment) {
@@ -962,6 +975,10 @@
 
   function render() {
     if (!shadow || !state.config) return;
+    if (!state.open && !state.closing && shadow.querySelector(".cs-launcher")) {
+      updateLauncherUnread(state.hasUnread);
+      return;
+    }
     var previousBody = shadow.querySelector(".cs-body");
     var distanceFromBottom = previousBody ? Math.max(0, previousBody.scrollHeight - previousBody.scrollTop - previousBody.clientHeight) : 0;
     var followLatest = state.followLatest !== false;
