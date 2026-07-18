@@ -26,7 +26,7 @@
         if (response.status === 204) return {};
         return response.json().catch(function () { return {}; }).then(function (payload) {
           if (!response.ok) {
-            var error = new Error(payload.detail || "Support Chat request failed.");
+            var error = new Error(payload.detail || "Support Chat request failed (HTTP " + response.status + ").");
             error.code = payload.code || "request_failed";
             error.status = response.status;
             throw error;
@@ -50,6 +50,7 @@
           if (!response.ok) {
             var error = new Error(payload.detail || "The file could not be uploaded.");
             error.code = payload.code || "upload_failed";
+            error.status = response.status;
             throw error;
           }
           return payload;
@@ -293,7 +294,10 @@
           message.receipt_status = "failed";
           return message;
         });
-        throw error;
+        var failure = new Error("Message could not be sent. " + (error.message || "Please try again."));
+        failure.code = error.code || "message_send_failed";
+        failure.status = error.status;
+        throw failure;
       });
   }
 
@@ -309,7 +313,7 @@
         state.pendingUploads.push({ id: upload.id, name: upload.original_name || file.name, kind: upload.media_kind });
       });
     })).catch(function (error) {
-      state.error = error.message || "A file could not be uploaded.";
+      state.error = "Attachment upload failed. " + (error.message || "Please try again.");
     }).then(function () {
       state.uploading = false;
       render();
@@ -428,11 +432,26 @@
     if (remote && state.callRemoteStream && remote.srcObject !== state.callRemoteStream) remote.srcObject = state.callRemoteStream;
   }
 
+  function acquireCallMedia(callType) {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+      return Promise.reject(new Error("Audio and video calls are not supported in this browser."));
+    }
+    return navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: callType === "video" ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } : false
+    }).catch(function (error) {
+      var denied = error && (error.name === "NotAllowedError" || error.name === "SecurityError");
+      throw new Error(denied
+        ? (callType === "video" ? "Camera and microphone permission is required." : "Microphone permission is required.")
+        : "The browser could not access your " + (callType === "video" ? "camera and microphone." : "microphone."));
+    });
+  }
+
   function beginVisitorCall() {
     if (!state.call || state.callPeer) return Promise.resolve(state.call);
     return Promise.all([
       request(sessionPath("/calls/turn-credentials/"), { method: "GET" }),
-      navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: state.call.call_type === "video" ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } : false })
+      state.callLocalStream ? Promise.resolve(state.callLocalStream) : acquireCallMedia(state.call.call_type)
     ]).then(function (results) {
       var credentials = results[0] || {};
       var stream = results[1];
@@ -490,13 +509,21 @@
   }
 
   function acceptIncomingCall() {
-    if (!state.call) return;
+    if (!state.call || state.callStarting) return;
+    var incomingCall = state.call;
+    state.callStarting = true;
     state.error = "";
-    request(callPath(state.call.id, "/accept/"), { method: "POST" }).then(function (payload) {
+    render();
+    acquireCallMedia(incomingCall.call_type).then(function (stream) {
+      state.callLocalStream = stream;
+      return request(callPath(incomingCall.id, "/accept/"), { method: "POST" });
+    }).then(function (payload) {
       state.call = payload;
+      state.callStarting = false;
       return beginVisitorCall();
     }).catch(function (error) {
-      state.error = error.message || "The call could not be accepted.";
+      state.callStarting = false;
+      state.error = "The call could not be accepted. " + (error.message || "Please try again.");
       var activeCallId = state.call && state.call.id;
       var finish = activeCallId ? request(callPath(activeCallId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {}) : Promise.resolve();
       finish.then(function () { cleanupCall(true); render(); });
@@ -505,24 +532,28 @@
 
   function startVisitorCall(callType) {
     if (!state.session || state.callStarting || (state.call && !callTerminal(state.call))) return;
+    var createdCallId = "";
     state.callStarting = true;
     state.error = "";
     render();
-    request(sessionPath("/calls/"), {
-      method: "POST",
-      body: JSON.stringify({ call_type: callType }),
+    acquireCallMedia(callType).then(function (stream) {
+      state.callLocalStream = stream;
+      return request(sessionPath("/calls/"), {
+        method: "POST",
+        body: JSON.stringify({ call_type: callType }),
+      });
     }).then(function (payload) {
       state.call = payload;
+      createdCallId = payload.id;
       state.callStarting = false;
       state.open = true;
       render();
       return beginVisitorCall();
     }).catch(function (error) {
       state.callStarting = false;
-      state.error = error.message || "The support call could not be started.";
-      var callId = state.call && state.call.id;
-      var cleanup = callId
-        ? request(callPath(callId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {})
+      state.error = "The " + callType + " call could not be started. " + (error.message || "Please try again.");
+      var cleanup = createdCallId
+        ? request(callPath(createdCallId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {})
         : Promise.resolve();
       cleanup.then(function () { cleanupCall(true); render(); });
     });

@@ -1,3 +1,4 @@
+import base64
 import re
 from datetime import timedelta
 from unittest.mock import patch
@@ -739,6 +740,49 @@ class SupportFoundationTests(APITestCase):
             HTTP_AUTHORIZATION=f"Bearer {session['token']}",
         )
         self.assertEqual(wrong_origin.status_code, 403)
+
+    @override_settings(UPLOAD_SCAN_ASYNC=True)
+    @patch("apps.support.api.views.dispatch_pending_upload_scan")
+    def test_visitor_can_send_image_immediately_while_async_scan_is_queued(self, mock_dispatch_scan):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+            "/x8AAusB9Y9Z4SAAAAAASUVORK5CYII="
+        )
+
+        upload_response = self._visitor_upload(
+            website,
+            session,
+            name="screenshot.png",
+            content=png,
+            mime="image/png",
+        )
+        self.assertEqual(upload_response.status_code, 201)
+        upload_id = upload_response.data["id"]
+        self.assertEqual(upload_response.data["scan_status"], PendingUpload.ScanStatus.PENDING)
+        mock_dispatch_scan.assert_called_once()
+
+        sent = self.client.post(
+            f"/api/v1/support/widget/{website.site_key}/sessions/{session['id']}/conversation/messages/",
+            {"text": "", "attachment_ids": [upload_id]},
+            format="json",
+            HTTP_ORIGIN="https://main.example.com",
+            HTTP_AUTHORIZATION=f"Bearer {session['token']}",
+        )
+
+        self.assertEqual(sent.status_code, 201)
+        self.assertEqual(sent.data["message"]["type"], "image")
+        self.assertEqual(len(sent.data["message"]["attachments"]), 1)
+        pending = PendingUpload.objects.get(pk=upload_id)
+        self.assertEqual(pending.scan_status, PendingUpload.ScanStatus.CLEAN)
+        self.assertEqual(pending.status, PendingUpload.UploadStatus.ATTACHED)
 
     def test_owner_can_send_support_attachment_and_other_website_agent_cannot_open_it(self):
         account = self.active_account()

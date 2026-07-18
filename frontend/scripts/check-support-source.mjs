@@ -156,6 +156,15 @@ assert.ok(api.includes("/support/calls/active/"), "Global Support call recovery 
 assert.ok(widgetLoader.includes("function renderCall"), "Widget incoming-call experience is missing.");
 assert.ok(widgetLoader.includes("RTCPeerConnection"), "Widget WebRTC guest calling is missing.");
 assert.ok(widgetLoader.includes("/calls/turn-credentials/"), "Widget TURN credential retrieval is missing.");
+assert.ok(widgetLoader.includes("function acquireCallMedia"), "Widget calls must acquire browser media before ringing support.");
+assert.ok(
+  widgetLoader.indexOf("acquireCallMedia(callType)") < widgetLoader.indexOf('request(sessionPath("/calls/")'),
+  "Visitor calls must obtain camera or microphone access before creating a ringing call.",
+);
+assert.ok(
+  widgetLoader.indexOf("acquireCallMedia(incomingCall.call_type)") < widgetLoader.indexOf('request(callPath(incomingCall.id, "/accept/")'),
+  "Incoming calls must obtain camera or microphone access before being accepted.",
+);
 assert.ok(widgetLoader.includes("lastReceiptAckStatus"), "Widget receipt acknowledgement deduplication is missing.");
 assert.ok(widgetLoader.includes("function updateLauncherUnread"), "Widget unread badge must update without rebuilding the launcher.");
 assert.ok(
