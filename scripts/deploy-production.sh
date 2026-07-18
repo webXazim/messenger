@@ -10,8 +10,8 @@ if [[ -z "$python_bin" ]]; then
 fi
 [[ -n "$python_bin" ]] || { echo "python3 is required by the deployment status parser." >&2; exit 1; }
 
-./scripts/update-cloudflare-ips.sh
-./scripts/production-readiness.sh --preflight
+bash ./scripts/update-cloudflare-ips.sh
+bash ./scripts/production-readiness.sh --preflight
 
 mkdir -p backups secrets/tls
 compose=(docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml)
@@ -71,7 +71,7 @@ if [[ -n "$unhealthy" ]]; then
   exit 1
 fi
 
-./scripts/production-readiness.sh --probe
+bash ./scripts/production-readiness.sh --probe
 
 domain="$(sed -n 's/^APP_DOMAIN=//p' .env | tail -n 1 | tr -d '\r"' | tr -d "'")"
 echo "Deployment completed: https://${domain}"

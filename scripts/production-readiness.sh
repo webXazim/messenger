@@ -113,8 +113,8 @@ if [[ -z "$python_bin" ]]; then
 fi
 [[ -n "$python_bin" ]] || failures+=("Required command is not installed: python3")
 
-if [[ -x scripts/check-tls-certificate.sh ]]; then
-  if ! tls_output="$(./scripts/check-tls-certificate.sh secrets/tls/origin.crt secrets/tls/origin.key "$app_domain" 2>&1)"; then
+if [[ -f scripts/check-tls-certificate.sh ]]; then
+  if ! tls_output="$(bash ./scripts/check-tls-certificate.sh secrets/tls/origin.crt secrets/tls/origin.key "$app_domain" 2>&1)"; then
     failures+=("TLS certificate check failed: $tls_output")
   else
     echo "$tls_output"
