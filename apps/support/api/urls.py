@@ -9,6 +9,7 @@ from apps.support.api.views import (
     SupportAgentInvitationPreviewView,
     SupportAgentInvitationResendView,
     SupportBootstrapView,
+    SupportPlanActivateView,
     SupportConversationClaimView,
     SupportConversationDetailView,
     SupportConversationListView,
@@ -89,6 +90,7 @@ from apps.support.api.views import (
 )
 
 urlpatterns = [
+    path("plans/activate/", SupportPlanActivateView.as_view(), name="support-plan-activate"),
     path("call-settings/", SupportCallSettingsView.as_view(), name="support-call-settings"),
     path("calls/active/", SupportActiveCallView.as_view(), name="support-call-active"),
     path("calls/turn-credentials/", SupportCallTurnCredentialsView.as_view(), name="support-call-turn-credentials"),

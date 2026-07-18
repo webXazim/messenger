@@ -66,6 +66,26 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["access"], "upgrade_required")
 
+    def test_user_can_activate_support_trial(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post("/api/v1/support/plans/activate/", {"plan_code": "growth"}, format="json")
+        self.assertEqual(response.status_code, 201)
+        account = SupportAccount.objects.get(owner=self.owner)
+        self.assertEqual(account.status, SupportAccount.Status.TRIALING)
+        self.assertEqual(account.plan_code, "support-growth")
+        self.assertEqual(account.website_limit, 5)
+        self.assertEqual(account.agent_limit, 15)
+        self.assertTrue(account.has_product_access)
+
+        bootstrap = self.client.get("/api/v1/support/bootstrap/")
+        self.assertEqual(bootstrap.data["access"], "active")
+
+    def test_support_trial_rejects_invalid_plan(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.post("/api/v1/support/plans/activate/", {"plan_code": "unknown"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(SupportAccount.objects.filter(owner=self.owner).exists())
+
     def test_owner_can_create_website_with_active_support_access(self):
         account = self.active_account(website_limit=1)
         self.client.force_authenticate(self.owner)
@@ -791,4 +811,3 @@ class SupportFoundationTests(APITestCase):
         )
         self.assertEqual(messenger_send.status_code, 400)
         self.assertFalse(Message.objects.filter(conversation=personal).exists())
-

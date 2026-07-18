@@ -79,4 +79,4 @@ export const SUPPORT_WS_URL = envSupportWsUrl
 
 export const APP_NAME = import.meta.env.VITE_APP_NAME ?? "Crescentsphere";
 export const SOCIAL_BASE_URL = trimTrailingSlash(envSocialBaseUrl || "https://crescentsphere.com");
-export const SUPPORT_PLANS_URL = envSupportPlansUrl || "/settings";
+export const SUPPORT_PLANS_URL = envSupportPlansUrl || "/support/plans";

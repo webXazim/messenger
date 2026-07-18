@@ -49,6 +49,11 @@ import type {
 
 export const supportApi = {
 
+  async activatePlan(planCode: string) {
+    const response = await http.post("/support/plans/activate/", { plan_code: planCode });
+    return unwrapData<{ message: string; trial_ends_at: string }>(response.data);
+  },
+
   async getCallSettings(signal?: AbortSignal) {
     const response = await http.get("/support/call-settings/", { signal });
     return unwrapData<SupportCallSettings>(response.data);

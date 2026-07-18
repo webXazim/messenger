@@ -69,8 +69,10 @@ class SupportAccount(BaseUUIDModel):
 
     @property
     def has_product_access(self) -> bool:
-        if self.status in {self.Status.ACTIVE, self.Status.TRIALING}:
+        if self.status == self.Status.ACTIVE:
             return True
+        if self.status == self.Status.TRIALING:
+            return not self.current_period_end or self.current_period_end > timezone.now()
         if self.status == self.Status.PAST_DUE and self.grace_ends_at:
             return self.grace_ends_at > timezone.now()
         return False

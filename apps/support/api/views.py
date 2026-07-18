@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -78,6 +79,7 @@ from apps.support.api.serializers import (
     invitation_preview_payload,
 )
 from apps.support.models import (
+    SupportAccount,
     SupportAgent,
     SupportAgentInvitation,
     SupportConversation,
@@ -104,6 +106,12 @@ from apps.support.models import (
     SupportCallSession,
     SupportCallParticipant,
 )
+
+SUPPORT_TRIAL_PLANS = {
+    "starter": {"plan_code": "support-starter", "website_limit": 1, "agent_limit": 3},
+    "growth": {"plan_code": "support-growth", "website_limit": 5, "agent_limit": 15},
+    "scale": {"plan_code": "support-scale", "website_limit": 20, "agent_limit": 50},
+}
 from apps.support.conversation_services import (
     SupportConversationError,
     can_reply,
@@ -448,6 +456,64 @@ class SupportBootstrapView(APIView):
             "agents": SupportAgentSerializer(agents, many=True).data,
             "invitations": SupportAgentInvitationSerializer(invitations, many=True).data,
         })
+
+
+class SupportPlanActivateView(APIView):
+    """Temporary self-service trial activation until paid checkout is connected."""
+
+    @transaction.atomic
+    def post(self, request):
+        if not support_chat_enabled():
+            return Response({"detail": "Support Chat is not enabled."}, status=status.HTTP_403_FORBIDDEN)
+
+        plan_key = str(request.data.get("plan_code") or "").strip().lower()
+        plan = SUPPORT_TRIAL_PLANS.get(plan_key)
+        if not plan:
+            return Response(
+                {"detail": "Choose a valid Support Chat plan.", "code": "invalid_plan"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if SupportAgent.objects.filter(user=request.user, is_active=True).exists():
+            return Response(
+                {"detail": "Support agents cannot create a separate Support Chat account.", "code": "agent_account"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        account = SupportAccount.objects.select_for_update().filter(owner=request.user).first()
+        if account and account.has_product_access:
+            return Response(
+                {"detail": "Your Support Chat plan is already active.", "code": "already_active"},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        trial_ends_at = timezone.now() + timedelta(days=14)
+        created = account is None
+        if created:
+            account = SupportAccount(owner=request.user)
+
+        metadata = dict(account.metadata or {})
+        metadata.update({
+            "activation_source": "self_service_trial",
+            "trial_started_at": timezone.now().isoformat(),
+        })
+        account.status = SupportAccount.Status.TRIALING
+        account.plan_code = plan["plan_code"]
+        account.website_limit = plan["website_limit"]
+        account.agent_limit = plan["agent_limit"]
+        account.current_period_end = trial_ends_at
+        account.grace_ends_at = None
+        account.metadata = metadata
+        account.save()
+
+        return Response(
+            {
+                "account": SupportAccountSerializer(account).data,
+                "trial_ends_at": trial_ends_at,
+                "message": "Your 14-day Support Chat trial is active.",
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class SupportWebsiteListCreateView(APIView):

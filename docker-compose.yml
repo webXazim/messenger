@@ -173,7 +173,7 @@ services:
         VITE_SUPPORT_WS_URL: ${VITE_SUPPORT_WS_URL:-}
         VITE_APP_NAME: ${VITE_APP_NAME:-Crescentsphere Messenger}
         VITE_SOCIAL_BASE_URL: ${VITE_SOCIAL_BASE_URL:-http://localhost:8080}
-        VITE_SUPPORT_PLANS_URL: ${VITE_SUPPORT_PLANS_URL:-/settings}
+        VITE_SUPPORT_PLANS_URL: ${VITE_SUPPORT_PLANS_URL:-/support/plans}
     restart: unless-stopped
     expose:
       - "80"

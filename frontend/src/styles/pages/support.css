@@ -75,6 +75,262 @@
   line-height: 1.65;
 }
 
+.ms-support-plans-page {
+  width: min(100% - 2rem, 76rem);
+  margin-inline: auto;
+  padding: clamp(2rem, 5vw, 4.5rem) 0;
+}
+
+.ms-support-plans-hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--ms-space-6);
+  margin-bottom: clamp(2rem, 5vw, 3.5rem);
+}
+
+.ms-support-plans-hero__copy {
+  max-width: 47rem;
+}
+
+.ms-support-plans-hero h1 {
+  max-width: 43rem;
+  margin: 0;
+  color: var(--ms-color-ink);
+  font-size: clamp(2rem, 5vw, 3.75rem);
+  line-height: 1.02;
+  letter-spacing: -0.055em;
+}
+
+.ms-support-plans-hero p {
+  max-width: 42rem;
+  margin: var(--ms-space-4) 0 0;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-md);
+  line-height: 1.65;
+}
+
+.ms-support-billing-toggle {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-surface-subtle);
+}
+
+.ms-support-billing-toggle button {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.85rem;
+  border: 0;
+  border-radius: var(--ms-radius-pill);
+  background: transparent;
+  color: var(--ms-color-ink-muted);
+  font: inherit;
+  font-size: var(--ms-font-size-xs);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.ms-support-billing-toggle button.is-active {
+  background: var(--ms-color-surface);
+  color: var(--ms-color-ink);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.ms-support-billing-toggle span {
+  margin-left: 0.25rem;
+  color: var(--ms-color-success, #247044);
+  font-size: var(--ms-font-size-2xs);
+}
+
+.ms-support-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--ms-space-4);
+  align-items: stretch;
+}
+
+.ms-support-plan-card {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-lg);
+  background: var(--ms-color-surface);
+}
+
+.ms-support-plan-card.is-featured {
+  border-color: var(--ms-color-ink);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.09);
+}
+
+.ms-support-plan-card__badge {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--ms-radius-pill);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
+  font-size: var(--ms-font-size-2xs);
+  font-weight: 800;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.ms-support-plan-card__heading h2 {
+  margin: 0;
+  color: var(--ms-color-ink);
+  font-size: var(--ms-font-size-xl);
+}
+
+.ms-support-plan-card__heading p {
+  min-height: 3.25rem;
+  margin: var(--ms-space-2) 0 0;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-xs);
+  line-height: 1.55;
+}
+
+.ms-support-plan-price {
+  display: flex;
+  align-items: baseline;
+  margin-top: var(--ms-space-5);
+  color: var(--ms-color-ink);
+}
+
+.ms-support-plan-price > span {
+  align-self: flex-start;
+  margin-top: 0.55rem;
+  font-size: var(--ms-font-size-md);
+  font-weight: 800;
+}
+
+.ms-support-plan-price strong {
+  font-size: clamp(2.6rem, 5vw, 3.75rem);
+  line-height: 1;
+  letter-spacing: -0.055em;
+}
+
+.ms-support-plan-price small {
+  margin-left: 0.25rem;
+  color: var(--ms-color-ink-muted);
+}
+
+.ms-support-plan-billing {
+  min-height: 2.5rem;
+  margin-top: var(--ms-space-2);
+  color: var(--ms-color-ink-faint);
+  font-size: var(--ms-font-size-2xs);
+  line-height: 1.45;
+}
+
+.ms-support-plan-limits {
+  display: grid;
+  gap: var(--ms-space-3);
+  margin: var(--ms-space-5) 0;
+  padding: var(--ms-space-5) 0 0;
+  border-top: 1px solid var(--ms-color-line);
+  list-style: none;
+}
+
+.ms-support-plan-limits li {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-space-2);
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-support-plan-limits li > span,
+.ms-support-plan-feature-grid article > span {
+  color: var(--ms-color-success, #247044);
+  font-weight: 900;
+}
+
+.ms-support-plan-limits strong { color: var(--ms-color-ink); }
+.ms-support-plan-card > .ms-button { width: 100%; margin-top: auto; }
+.ms-support-plan-error { margin: var(--ms-space-4) 0 0; }
+
+.ms-support-plan-included {
+  margin-top: clamp(3rem, 7vw, 5.5rem);
+  padding: clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid var(--ms-color-line);
+  border-radius: var(--ms-radius-lg);
+  background: var(--ms-color-surface-subtle);
+}
+
+.ms-support-plan-included__heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--ms-space-5);
+}
+
+.ms-support-plan-included h2 {
+  margin: 0;
+  color: var(--ms-color-ink);
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  letter-spacing: -0.04em;
+}
+
+.ms-support-plan-included__heading > p {
+  max-width: 26rem;
+  margin: 0;
+  color: var(--ms-color-ink-muted);
+  line-height: 1.55;
+}
+
+.ms-support-plan-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ms-space-5);
+  margin-top: var(--ms-space-6);
+}
+
+.ms-support-plan-feature-grid article {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ms-space-3);
+}
+
+.ms-support-plan-feature-grid article > div {
+  min-width: 0;
+  display: grid;
+  gap: var(--ms-space-1);
+}
+
+.ms-support-plan-feature-grid strong { color: var(--ms-color-ink); }
+
+.ms-support-plan-feature-grid p {
+  margin: 0;
+  color: var(--ms-color-ink-muted);
+  font-size: var(--ms-font-size-xs);
+  line-height: 1.55;
+}
+
+.ms-support-plan-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ms-space-5);
+  margin-top: var(--ms-space-5);
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border-radius: var(--ms-radius-lg);
+  background: var(--ms-color-ink);
+  color: var(--ms-color-inverse);
+}
+
+.ms-support-plan-notice strong { font-size: var(--ms-font-size-md); }
+.ms-support-plan-notice p { max-width: 44rem; margin: var(--ms-space-1) 0 0; color: rgba(255, 255, 255, 0.7); line-height: 1.55; }
+.ms-support-plan-notice__actions { flex: 0 0 auto; display: flex; gap: var(--ms-space-2); }
+.ms-support-plan-notice .ms-button--primary { background: var(--ms-color-inverse); color: var(--ms-color-ink); }
+.ms-support-plan-notice .ms-button--ghost { border-color: rgba(255, 255, 255, 0.3); color: var(--ms-color-inverse); }
+
 .ms-support-usage-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -206,6 +462,20 @@
     justify-content: flex-start;
     padding-left: calc(2.5rem + var(--ms-space-3));
   }
+
+  .ms-support-plans-hero,
+  .ms-support-plan-included__heading,
+  .ms-support-plan-notice {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ms-support-plan-grid { grid-template-columns: minmax(0, 1fr); }
+  .ms-support-plan-card__heading p,
+  .ms-support-plan-billing { min-height: 0; }
+  .ms-support-plan-feature-grid { grid-template-columns: minmax(0, 1fr); }
+  .ms-support-plan-notice__actions { width: 100%; }
+  .ms-support-plan-notice__actions .ms-button { flex: 1; }
 }
 
 @media (max-width: 480px) {
@@ -221,6 +491,12 @@
   .ms-support-usage-grid {
     gap: var(--ms-space-4);
   }
+
+  .ms-support-plans-page { width: min(100% - 1.5rem, 76rem); padding-top: 1.5rem; }
+  .ms-support-billing-toggle { width: 100%; }
+  .ms-support-billing-toggle button { flex: 1; }
+  .ms-support-billing-toggle span { display: block; margin: 0; }
+  .ms-support-plan-notice__actions { flex-direction: column; }
 }
 
 .ms-support-usage__detail {

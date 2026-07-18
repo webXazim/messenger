@@ -50,7 +50,7 @@ the controlled rollout.
 SUPPORT_CHAT_ENABLED=True
 SUPPORT_CHAT_PRODUCT_CODE=support-chat
 SUPPORT_AGENT_INVITE_TTL_HOURS=168
-VITE_SUPPORT_PLANS_URL=/settings
+VITE_SUPPORT_PLANS_URL=/support/plans
 # Optional; normally derived from VITE_API_BASE_URL
 VITE_SUPPORT_WS_URL=
 ```
@@ -61,9 +61,10 @@ After deploying this upgrade, apply the committed migration:
 docker compose exec web python manage.py migrate
 ```
 
-Until payment activation is connected in a later upgrade, create or update the
-owner's `Support Chat account` from Django admin and set its status to `Active`
-or `Trialing`. Website and agent limits are stored on that hidden support account.
+Until payment checkout is connected, signed-in owners can select a plan at
+`/support/plans` to activate a 14-day trial. Administrators can still create or
+update the owner's `Support Chat account` from Django admin and set its status to
+`Active` or `Trialing`. Website and agent limits are stored on that hidden support account.
 The owner can invite agents from **Support Chat → Agents**, assign one or more
 websites, and grant limited support permissions. Pending invitations reserve plan
 seats until accepted, revoked, or expired. Invitation links are stored as hashes,

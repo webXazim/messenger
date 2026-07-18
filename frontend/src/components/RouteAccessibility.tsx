@@ -17,6 +17,7 @@ function routeLabel(pathname: string) {
   if (pathname === "/support/knowledge") return "Support knowledge";
   if (pathname === "/support/websites") return "Support websites";
   if (pathname === "/support/settings") return "Support settings";
+  if (pathname === "/support/plans") return "Support Chat plans";
   if (pathname === "/support") return "Support Chat";
   if (pathname === "/register") return "Create account";
   if (pathname === "/forgot-password") return "Reset password";

@@ -13,6 +13,7 @@ import { FriendsPage } from "./pages/FriendsPage";
 import { GroupsPage } from "./pages/GroupsPage";
 import { SupportChatPage } from "./pages/SupportChatPage";
 import { SupportInvitationPage } from "./pages/SupportInvitationPage";
+import { SupportPlansPage } from "./pages/SupportPlansPage";
 import { safeAppReturnPath } from "./lib/returnPath";
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="saved" element={<Navigate to="/chat" replace />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="support" element={<SupportChatPage />} />
+          <Route path="support/plans" element={<SupportPlansPage />} />
           <Route path="support/inbox" element={<SupportChatPage />} />
           <Route path="support/websites" element={<SupportChatPage />} />
           <Route path="support/agents" element={<SupportChatPage />} />
