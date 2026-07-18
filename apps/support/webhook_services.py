@@ -111,7 +111,10 @@ def queue_support_webhook_event(*, account, event_type: str, payload: dict) -> i
         return created
 
     if transaction.get_connection().in_atomic_block:
-        transaction.on_commit(_create_deliveries)
+        # Webhook fan-out is deliberately isolated from the primary support
+        # action. Endpoint persistence or queue failures are retried by the
+        # delivery worker and must not turn a sent message into an HTTP 500.
+        transaction.on_commit(_create_deliveries, robust=True)
         return 0
     return _create_deliveries()
 

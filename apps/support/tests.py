@@ -1,5 +1,6 @@
 import re
 from datetime import timedelta
+from unittest.mock import patch
 from urllib.parse import unquote
 
 from django.contrib.auth import get_user_model
@@ -543,6 +544,38 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(widget_history.status_code, 200)
         self.assertEqual([item["text"] for item in widget_history.data["messages"]], ["Can you help?", "Yes, we can help."])
         self.assertEqual(widget_history.data["messages"][-1]["sender"]["kind"], "owner")
+
+    def test_owner_reply_succeeds_when_realtime_delivery_is_unavailable(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        created = self._visitor_message(website, session, "Can you help?")
+        conversation_id = created.data["conversation"]["id"]
+
+        self.client.force_authenticate(self.owner)
+        with patch(
+            "apps.support.realtime._send",
+            side_effect=RuntimeError("channel layer unavailable"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                reply = self.client.post(
+                    f"/api/v1/support/conversations/{conversation_id}/messages/",
+                    {"text": "This reply must still be saved."},
+                    format="json",
+                )
+
+        self.assertEqual(reply.status_code, 201)
+        self.assertTrue(
+            Message.objects.filter(
+                conversation__support_conversation__id=conversation_id,
+                text="This reply must still be saved.",
+            ).exists()
+        )
 
     def test_agent_cannot_access_another_website_conversation(self):
         account = self.active_account()

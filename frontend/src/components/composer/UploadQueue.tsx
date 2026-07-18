@@ -39,7 +39,7 @@ export function UploadQueue({
   uploads: PendingComposerUpload[];
   onRetry: (localId: string) => void;
   onRemove: (localId: string) => void;
-  onToggleViewOnce: (localId: string) => void;
+  onToggleViewOnce?: (localId: string) => void;
 }) {
   const [hiddenControls, setHiddenControls] = useState<Record<string, boolean>>({});
   if (!uploads.length) return null;
@@ -113,7 +113,7 @@ export function UploadQueue({
               ) : null}
             </div>
             <div className="ms-upload-card__actions">
-              {(mime.startsWith("image/") || mime.startsWith("video/")) ? (
+              {onToggleViewOnce && (mime.startsWith("image/") || mime.startsWith("video/")) ? (
                 <button
                   type="button"
                   className={upload.viewOnce ? "is-active" : ""}

@@ -67,6 +67,8 @@ export function MessageComposer({
   disabled = false,
   disabledReason,
   autoFocus = false,
+  draftInsertion,
+  allowViewOnce = true,
 }: {
   onUpload: (file: File, options: ComposerUploadRequestOptions) => Promise<ComposerUploadResult>;
   onDiscardUpload?: (uploadId: string) => void;
@@ -83,6 +85,8 @@ export function MessageComposer({
   disabled?: boolean;
   disabledReason?: string | null;
   autoFocus?: boolean;
+  draftInsertion?: { id: string; text: string } | null;
+  allowViewOnce?: boolean;
 }) {
   const [text, setText] = useState("");
   const [pendingUploads, setPendingUploads] = useState<PendingComposerUpload[]>([]);
@@ -116,6 +120,17 @@ export function MessageComposer({
   useEffect(() => {
     if (autoFocus) focusTextarea();
   }, [autoFocus, draftKey]);
+
+  useEffect(() => {
+    if (!draftInsertion?.text) return;
+    draftRevisionRef.current += 1;
+    setText((current) =>
+      current.trim()
+        ? `${current.replace(/\s+$/, "")}\n${draftInsertion.text}`
+        : draftInsertion.text,
+    );
+    focusTextarea();
+  }, [draftInsertion?.id]);
 
   useEffect(() => {
     setSubmitError(null);
@@ -393,7 +408,7 @@ export function MessageComposer({
         />
       ) : null}
 
-      <UploadQueue uploads={pendingUploads} onRetry={retryUpload} onRemove={removeUpload} onToggleViewOnce={toggleViewOnce} />
+      <UploadQueue uploads={pendingUploads} onRetry={retryUpload} onRemove={removeUpload} onToggleViewOnce={allowViewOnce ? toggleViewOnce : undefined} />
 
       {disabledReason ? (
         <div className="ms-message-composer__disabled-note" role="status" aria-live="polite">

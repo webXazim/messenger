@@ -12,7 +12,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function collectMessages(value: unknown): string[] {
-  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!normalized || /<(?:!doctype|html|head|body|title|h1)\b/i.test(normalized)) {
+      return [];
+    }
+    return [normalized];
+  }
   if (Array.isArray(value)) return value.flatMap(collectMessages);
   if (isRecord(value)) return Object.values(value).flatMap(collectMessages);
   return [];

@@ -52,4 +52,10 @@ def publish_support_event(
             groups.add(support_user_group(user_id))
     if not groups:
         return
-    transaction.on_commit(lambda: _send(groups, event_name, data))
+    # Realtime delivery is a best-effort enhancement. A temporary Channels or
+    # Redis outage must never make an already-committed support reply look like
+    # it failed to the agent or visitor.
+    transaction.on_commit(
+        lambda: _send(groups, event_name, data),
+        robust=True,
+    )

@@ -68,13 +68,17 @@ assert.ok(supportInbox.includes("ms-support-inbox"), "Responsive Support inbox s
 assert.ok(supportInbox.includes("Take conversation"), "Agent conversation claiming is missing.");
 assert.ok(supportInbox.includes("All websites"), "Cross-website inbox filter is missing.");
 assert.ok(supportInbox.includes("refetchInterval"), "Support inbox polling fallback is missing.");
+assert.ok(supportInbox.includes("ms-conversation-view"), "Support inbox does not use the Messenger conversation frame.");
+assert.ok(supportInbox.includes("ChatHeader"), "Support inbox does not use the Messenger chat header.");
+assert.ok(supportInbox.includes("MessengerMessageBubble"), "Support inbox does not use Messenger message bubbles.");
+assert.ok(supportInbox.includes("MessageComposer"), "Support inbox does not use the Messenger composer.");
 assert.ok(widgetLoader.includes("/conversation/messages/"), "Widget conversation messaging endpoint is missing.");
 assert.ok(widgetLoader.includes("cs-panel"), "Functional public widget panel is missing.");
-assert.ok(css.includes(".ms-support-inbox.has-selection"), "Mobile queue-to-conversation switching is missing.");
+assert.ok(css.includes(".ms-support-conversation-view.has-selection"), "Mobile queue-to-conversation switching is missing.");
 
 assert.ok(supportInbox.includes("uploadConversationFile"), "Support team attachment uploads are missing.");
-assert.ok(supportInbox.includes("VoiceNoteRecorder"), "Support team voice-note recording is missing.");
-assert.ok(supportInbox.includes("pendingUploads"), "Responsive Support attachment staging is missing.");
+assert.ok(supportInbox.includes("onSendVoiceNote"), "Support team voice-note recording is missing.");
+assert.ok(supportInbox.includes("draftInsertion"), "Support canned-reply insertion is missing.");
 assert.ok(supportMedia.includes("fetchMediaBlob"), "Private Support media previews do not use authenticated delivery.");
 assert.ok(supportMedia.includes("ms-support-media-video"), "Support image/video/audio rendering is missing.");
 assert.ok(widgetLoader.includes("/conversation/uploads/"), "Widget visitor attachment uploads are missing.");

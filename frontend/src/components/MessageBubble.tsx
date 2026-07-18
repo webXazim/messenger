@@ -49,6 +49,7 @@ export type MessageBubbleProps = {
   actionError?: string | null;
   actionPending?: boolean;
   warmMedia?: boolean;
+  actionsEnabled?: boolean;
 };
 
 export function MessageBubble({
@@ -73,6 +74,7 @@ export function MessageBubble({
   actionError,
   actionPending = false,
   warmMedia = false,
+  actionsEnabled = true,
 }: MessageBubbleProps) {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [swipeOffset, setSwipeOffset] = useState(0);
@@ -205,23 +207,23 @@ export function MessageBubble({
 
         <article
           className={`ms-message-card ${hasCopySurface && hasRichContent ? "has-attachment-caption" : ""} ${hasCopySurface && media.length ? "has-media-caption" : ""} ${actionPending ? "is-action-pending" : ""}`}
-          onContextMenu={(event) => {
+          onContextMenu={actionsEnabled ? (event) => {
             event.preventDefault();
             setShowContextMenu(true);
-          }}
+          } : undefined}
           onMouseLeave={() => {
             clearLongPress();
             setSwipeOffset(0);
           }}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={() => {
+          onTouchStart={actionsEnabled ? handleTouchStart : undefined}
+          onTouchMove={actionsEnabled ? handleTouchMove : undefined}
+          onTouchEnd={actionsEnabled ? handleTouchEnd : undefined}
+          onTouchCancel={actionsEnabled ? () => {
             clearLongPress();
             resetSwipe();
-          }}
+          } : undefined}
         >
-          <MessageActions
+          {actionsEnabled ? <MessageActions
             message={message}
             own={own}
             canForward={canForward}
@@ -235,7 +237,7 @@ export function MessageBubble({
             onDelete={onDelete}
             onReport={onReport}
             disabled={actionPending}
-          />
+          /> : null}
           {callEvent ? (
             <CallEventMessage
               event={callEvent}
@@ -351,7 +353,7 @@ export function MessageBubble({
             />
           ) : null}
 
-          {!message.is_deleted && !isFailed && !isLocalUnsent ? (
+          {actionsEnabled && !message.is_deleted && !isFailed && !isLocalUnsent ? (
             <ReactionBar
               message={message}
               currentUserId={currentUserId}

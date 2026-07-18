@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { UserAvatar } from "../UserAvatar";
 import type { UserLite } from "../../types/chat";
 export type ChatHeaderNotice = {
@@ -14,6 +15,9 @@ type ChatHeaderProps = {
   notices: ChatHeaderNotice[];
   detailsOpen: boolean;
   startingCallType: "voice" | "video" | null;
+  voiceCallEnabled?: boolean;
+  videoCallEnabled?: boolean;
+  actionsBefore?: ReactNode;
   onBack: () => void;
   onToggleDetails: () => void;
   onStartVoiceCall: () => void;
@@ -44,6 +48,9 @@ export function ChatHeader({
   notices,
   detailsOpen,
   startingCallType,
+  voiceCallEnabled = true,
+  videoCallEnabled = true,
+  actionsBefore,
   onBack,
   onToggleDetails,
   onStartVoiceCall,
@@ -78,7 +85,8 @@ export function ChatHeader({
         </button>
 
         <div className="ms-chat-header__actions" aria-label="Conversation actions">
-          <button
+          {actionsBefore}
+          {voiceCallEnabled ? <button
             type="button"
             className="ms-icon-button"
             title="Start a voice call"
@@ -87,8 +95,8 @@ export function ChatHeader({
             aria-label="Start voice call"
           >
             {startingCallType === "voice" ? <span className="ms-chat-header__busy">…</span> : <PhoneIcon />}
-          </button>
-          <button
+          </button> : null}
+          {videoCallEnabled ? <button
             type="button"
             className="ms-icon-button"
             title="Start a video call"
@@ -97,7 +105,7 @@ export function ChatHeader({
             aria-label="Start video call"
           >
             {startingCallType === "video" ? <span className="ms-chat-header__busy">…</span> : <VideoIcon />}
-          </button>
+          </button> : null}
           <button
             type="button"
             className={`ms-icon-button ${detailsOpen ? "is-active" : ""}`}

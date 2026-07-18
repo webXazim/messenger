@@ -3500,3 +3500,54 @@ button.ms-support-tag.is-selected {
     padding-inline: 0.8rem;
   }
 }
+
+/* Support Inbox now uses the same conversation frame, header, timeline,
+   message cards, composer, resizers, and responsive panel behavior as
+   Messenger. These rules only adapt the Support-specific queue and details. */
+.ms-support-conversation-view .ms-support-inbox__list {
+  height: 100%;
+  overflow: hidden;
+  border-right: 0;
+}
+
+.ms-support-conversation-view .ms-support-composer-shortcuts {
+  padding-inline: 3rem 0;
+}
+
+.ms-support-conversation-view .ms-chat-header__actions .ms-support-take-button {
+  width: auto;
+  height: 2.375rem;
+  padding-inline: 0.75rem;
+  border-radius: var(--ms-radius-pill);
+}
+
+.ms-support-shared-details {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--ms-color-surface);
+}
+
+@media (max-width: 900px) {
+  .ms-support-conversation-view:not(.has-selection) .ms-conversation-view__inbox {
+    display: grid;
+    width: 100%;
+    height: 100%;
+  }
+
+  .ms-support-conversation-view:not(.has-selection) .ms-chat-surface {
+    display: none;
+  }
+
+  .ms-support-conversation-view.has-selection .ms-conversation-view__inbox {
+    display: none;
+  }
+
+  .ms-support-conversation-view.has-selection .ms-chat-surface {
+    display: grid;
+  }
+
+  .ms-support-conversation-view .ms-support-composer-shortcuts {
+    padding-inline: 0;
+  }
+}

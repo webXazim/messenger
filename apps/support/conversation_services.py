@@ -366,7 +366,10 @@ def send_team_message(
     voice_note: bool = False,
 ) -> Message:
     support_conversation = (
-        SupportConversation.objects.select_for_update()
+        # Lock only the SupportConversation row. `assigned_agent` is nullable,
+        # so PostgreSQL rejects an unrestricted FOR UPDATE when select_related
+        # adds its outer join.
+        SupportConversation.objects.select_for_update(of=("self",))
         .select_related("conversation", "assigned_agent", "website", "website__support_account", "visitor")
         .get(pk=support_conversation.pk)
     )

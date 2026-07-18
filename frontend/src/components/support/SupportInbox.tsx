@@ -3,8 +3,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
-  type FormEvent,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -18,11 +16,13 @@ import type {
   SupportMessage,
   SupportCall,
 } from "../../types/support";
-import { UserAvatar } from "../UserAvatar";
+import type { Message } from "../../types/chat";
 import { useSupportSocketStatus } from "../../hooks/useSupportRealtime";
-import { SupportMessageMedia } from "./SupportMessageMedia";
 import { SupportConversationTools } from "./SupportConversationTools";
-import { VoiceNoteRecorder, type VoiceNotePayload } from "../VoiceNoteRecorder";
+import { MessageBubble as MessengerMessageBubble } from "../MessageBubble";
+import { MessageComposer } from "../MessageComposer";
+import { ChatHeader, type ChatHeaderNotice } from "../conversation/ChatHeader";
+import type { VoiceNotePayload } from "../VoiceNoteRecorder";
 import { SupportGuestCall } from "./SupportGuestCall";
 
 const QUEUES: Array<{
@@ -83,22 +83,6 @@ function toLocalDateTimeInput(value?: string | null) {
 
 function serviceTargetLabel(value?: string | null) {
   return value ? value.replace(/_/g, " ") : "Service target";
-}
-
-function SupportBackIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>;
-}
-
-function SupportPhoneIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.7 4.5h2.6c.4 0 .8.3.9.7l.6 2.7a1 1 0 0 1-.3 1l-1.8 1.5a13.2 13.2 0 0 0 3.4 3.4l1.5-1.8a1 1 0 0 1 1-.3l2.7.6c.4.1.7.5.7.9v2.6c0 .6-.4 1-.9 1.1-.7.1-1.3.2-2 .2-7 0-12.6-5.6-12.6-12.6 0-.7.1-1.3.2-2 .1-.5.5-.9 1.1-.9Z" /></svg>;
-}
-
-function SupportVideoIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="6.5" width="12" height="11" rx="2.5" /><path d="m15.5 10 5-2.5v9l-5-2.5" /></svg>;
-}
-
-function SupportInfoIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 10.5v5" /><circle cx="12" cy="7.8" r="1" /></svg>;
 }
 
 function ConversationRow({
@@ -218,28 +202,62 @@ function SupportCSATPanel({ conversation, disabled }: { conversation: SupportCon
   );
 }
 
-function MessageBubble({ message }: { message: SupportMessage }) {
-  const teamMessage = message.sender.kind !== "visitor";
+function toMessengerMessage(message: SupportMessage): Message {
+  const voiceAttachment = message.attachments.find(
+    (attachment) => attachment.media_kind === "audio",
+  );
+  return {
+    id: message.id,
+    type: message.type,
+    text: message.text,
+    created_at: message.created_at,
+    updated_at: message.updated_at,
+    delivery_status: message.delivery_status,
+    sender: {
+      id: message.sender.id || `${message.sender.kind}-${message.id}`,
+      username: message.sender.username || message.sender.kind,
+      display_name: message.sender.display_name,
+      avatar: message.sender.avatar,
+    },
+    attachments: message.attachments.map((attachment) => ({
+      ...attachment,
+      file_url: attachment.download_url,
+      preview_url: attachment.preview_url || undefined,
+      thumbnail_url: attachment.thumbnail_url,
+    })),
+    voice_note: message.voice_note
+      ? {
+          is_voice_note: true,
+          duration_seconds: voiceAttachment?.duration_seconds,
+        }
+      : null,
+    can_edit: false,
+    is_deleted: false,
+    is_encrypted: false,
+  };
+}
+
+function SupportMessageBubble({
+  message,
+  groupPosition,
+}: {
+  message: SupportMessage;
+  groupPosition: "single" | "start" | "middle" | "end";
+}) {
+  const messengerMessage = toMessengerMessage(message);
   return (
-    <div
-      className={`ms-support-message-row ${teamMessage ? "is-team" : "is-visitor"}`}
-    >
-      <div className="ms-support-message-meta">
-        <strong>{message.sender.display_name}</strong>
-      </div>
-      <div
-        className={`ms-support-message-bubble${message.is_own ? " is-own" : ""}`}
-      >
-        {message.text ? (
-          <p className="ms-support-message-text">{message.text}</p>
-        ) : null}
-        <SupportMessageMedia
-          attachments={message.attachments || []}
-          voiceNote={message.voice_note}
-        />
-        <time className="ms-support-message-time">{formatCompactTime(message.created_at)}</time>
-      </div>
-    </div>
+    <MessengerMessageBubble
+      message={messengerMessage}
+      own={message.sender.kind !== "visitor"}
+      groupPosition={groupPosition}
+      showSenderIdentity={false}
+      actionsEnabled={false}
+      onReply={() => undefined}
+      onForward={() => undefined}
+      onToggleReaction={() => undefined}
+      onEdit={() => undefined}
+      onDelete={() => undefined}
+    />
   );
 }
 
@@ -413,16 +431,16 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   const [selectedId, setSelectedId] = useState(
     () => searchParams.get("conversation") || "",
   );
-  const [draft, setDraft] = useState("");
-  const [pendingUploads, setPendingUploads] = useState<
-    Array<{ localId: string; file: File; uploadId?: string; error?: string }>
-  >([]);
-  const [uploadingCount, setUploadingCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [activeCall, setActiveCall] = useState<SupportCall | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth > 1180,
+  );
+  const [composerInsertion, setComposerInsertion] = useState<{
+    id: string;
+    text: string;
+  } | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filters = useMemo(
     () => ({
@@ -495,6 +513,9 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
 
   const openConversation = (conversationId: string) => {
     setSelectedId(conversationId);
+    if (conversationId && typeof window !== "undefined" && window.innerWidth <= 1180) {
+      setDetailsOpen(false);
+    }
     const next = new URLSearchParams(searchParams);
     if (conversationId) next.set("conversation", conversationId);
     else next.delete("conversation");
@@ -513,8 +534,6 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   }, [listQuery.data?.results, selectedId]);
 
   useEffect(() => {
-    setDraft("");
-    setPendingUploads([]);
     setError(null);
   }, [selectedId]);
 
@@ -563,11 +582,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
       voice_note?: boolean;
     }) => supportApi.sendConversationMessage(selectedId, payload),
     onMutate: () => setError(null),
-    onSuccess: async () => {
-      setDraft("");
-      setPendingUploads([]);
-      await refreshConversation();
-    },
+    onSuccess: refreshConversation,
     onError: (mutationError) =>
       setError(
         parseApiError(mutationError, "The message could not be sent.").message,
@@ -660,53 +675,6 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     openConversation("");
   };
 
-  const addFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    if (!selectedId || !files.length) return;
-    const availableSlots = Math.max(0, 8 - pendingUploads.length);
-    const accepted = files.slice(0, availableSlots);
-    if (accepted.length < files.length)
-      setError("A message can contain up to 8 attachments.");
-    const queued = accepted.map((file) => ({
-      localId: `${Date.now()}-${crypto.randomUUID?.() || Math.random()}`,
-      file,
-    }));
-    setPendingUploads((current) => [...current, ...queued]);
-    setUploadingCount((count) => count + queued.length);
-    await Promise.all(
-      queued.map(async (item) => {
-        try {
-          const upload = await supportApi.uploadConversationFile(
-            selectedId,
-            item.file,
-          );
-          setPendingUploads((current) =>
-            current.map((candidate) =>
-              candidate.localId === item.localId
-                ? { ...candidate, uploadId: upload.id }
-                : candidate,
-            ),
-          );
-        } catch (uploadError) {
-          const message = parseApiError(
-            uploadError,
-            `${item.file.name} could not be uploaded.`,
-          ).message;
-          setPendingUploads((current) =>
-            current.map((candidate) =>
-              candidate.localId === item.localId
-                ? { ...candidate, error: message }
-                : candidate,
-            ),
-          );
-        } finally {
-          setUploadingCount((count) => Math.max(0, count - 1));
-        }
-      }),
-    );
-  };
-
   const sendVoiceNote = async (payload: VoiceNotePayload) => {
     if (!selectedId) throw new Error("Select a conversation first.");
     setError(null);
@@ -734,32 +702,20 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     }
   };
 
-  const send = (event: FormEvent) => {
-    event.preventDefault();
-    const attachmentIds = pendingUploads.flatMap((item) =>
-      item.uploadId ? [item.uploadId] : [],
-    );
-    if (
-      !selectedId ||
-      (!draft.trim() && !attachmentIds.length) ||
-      uploadingCount > 0 ||
-      sendMutation.isPending
-    )
-      return;
-    sendMutation.mutate({ text: draft.trim(), attachment_ids: attachmentIds });
-  };
-
   const selectedWebsiteSettings = bootstrap.websites.find((item) => item.id === selectedConversation?.website.id)?.widget_settings;
   const audioCallsEnabled = Boolean(callSettingsQuery.data?.enabled && selectedWebsiteSettings?.allow_audio_calls);
   const videoCallsEnabled = Boolean(callSettingsQuery.data?.enabled && callSettingsQuery.data?.allow_video && selectedWebsiteSettings?.allow_video_calls);
-  const callsEnabled = audioCallsEnabled || videoCallsEnabled;
+  const headerNotices = useMemo<ChatHeaderNotice[]>(() => {
+    if (!error) return [];
+    return [{ id: "support-error", tone: "danger", message: error }];
+  }, [error]);
 
   return (
-    <section
-      className={`ms-support-inbox${selectedId ? " has-selection" : ""}${detailsOpen ? " details-open" : ""}`}
+    <div
+      className={`ms-conversation-view ms-support-conversation-view${selectedId ? " has-selection" : ""}${detailsOpen && selectedConversation ? " ms-conversation-view--details-open" : ""}`}
       aria-label="Support Chat inbox"
     >
-      <aside className="ms-support-inbox__list">
+      <aside className="ms-conversation-view__inbox ms-support-inbox__list">
         <header className="ms-support-inbox__list-header">
           <div><span>Support Chat</span><h1>Inbox</h1></div>
           {listQuery.data?.unread_total ? <strong aria-label={`${listQuery.data.unread_total} unread support messages`}>{Math.min(99, listQuery.data.unread_total)}</strong> : null}
@@ -889,106 +845,69 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
         </div>
       </aside>
 
-      <main className="ms-support-inbox__conversation">
+      <span className="ms-conversation-resizer ms-conversation-resizer--inbox" aria-hidden="true" />
+
+      <section className="ms-chat-surface">
         {!selectedConversation ? (
           <div className="ms-support-inbox-state ms-support-inbox-state--center">
             Select a support conversation.
           </div>
         ) : (
           <>
-            <header className="ms-support-conversation-header">
-              <button
-                type="button"
-                className="ms-icon-button ms-support-mobile-back"
-                onClick={() => openConversation("")}
-                aria-label="Back to support conversations"
-              >
-                <SupportBackIcon />
-              </button>
-              <button type="button" className="ms-support-conversation-profile" onClick={() => setDetailsOpen((value) => !value)} aria-expanded={detailsOpen}>
-                <span className="ms-support-conversation-row__avatar" aria-hidden="true">{visitorName(selectedConversation).slice(0, 1).toUpperCase()}</span>
-                <span>
-                  <strong>{visitorName(selectedConversation)}</strong>
-                  <small>{selectedConversation.website.name} · {selectedConversation.status.replace(/_/g, " ")}</small>
-                </span>
-              </button>
-              <div className="ms-support-conversation-actions">
-                {bootstrap.role === "agent" && !selectedConversation.assigned_agent ? (
-                  <button type="button" className="ms-button ms-button--ghost ms-button--compact ms-support-take-button" disabled={claimMutation.isPending} onClick={() => claimMutation.mutate()} aria-label="Take conversation" title="Take conversation">
-                    Take
-                  </button>
-                ) : null}
-                {callsEnabled && selectedConversation.status !== "closed" ? (
-                  <>
-                    {audioCallsEnabled ? <button type="button" className="ms-icon-button ms-support-call-action" disabled={startCallMutation.isPending || Boolean(activeCall)} onClick={() => startCallMutation.mutate("voice")} aria-label="Start audio call" title="Start audio call"><SupportPhoneIcon /></button> : null}
-                    {videoCallsEnabled ? <button type="button" className="ms-icon-button ms-support-call-action" disabled={startCallMutation.isPending || Boolean(activeCall)} onClick={() => startCallMutation.mutate("video")} aria-label="Start video call" title="Start video call"><SupportVideoIcon /></button> : null}
-                  </>
-                ) : null}
-                <button type="button" className={`ms-icon-button ms-support-info-action${detailsOpen ? " is-active" : ""}`} onClick={() => setDetailsOpen((value) => !value)} aria-label={detailsOpen ? "Close visitor details" : "Open visitor details"} aria-pressed={detailsOpen}><SupportInfoIcon /></button>
-              </div>
-            </header>
-            <details className="ms-support-mobile-details">
-              <summary>Visitor and conversation details</summary>
-              <ConversationDetails
-                conversation={selectedConversation}
-                bootstrap={bootstrap}
-                disabled={updateMutation.isPending}
-                onUpdate={(payload) => updateMutation.mutate(payload)}
-                defaultFollowUpMinutes={serviceSettingsQuery.data?.default_follow_up_minutes || 1440}
-              />
-            </details>
-            <div
-              className="ms-support-message-timeline"
+            <ChatHeader
+              title={visitorName(selectedConversation)}
+              subtitle={`${selectedConversation.website.name} · ${selectedConversation.status.replace(/_/g, " ")}`}
+              avatarPerson={{
+                id: selectedConversation.visitor.id,
+                username: "website-visitor",
+                display_name: visitorName(selectedConversation),
+                is_online: Boolean(selectedConversation.visitor.last_seen_at),
+              }}
+              notices={headerNotices}
+              detailsOpen={detailsOpen}
+              startingCallType={startCallMutation.isPending ? (startCallMutation.variables || null) : null}
+              voiceCallEnabled={audioCallsEnabled && selectedConversation.status !== "closed"}
+              videoCallEnabled={videoCallsEnabled && selectedConversation.status !== "closed"}
+              actionsBefore={bootstrap.role === "agent" && !selectedConversation.assigned_agent ? (
+                <button type="button" className="ms-button ms-button--ghost ms-button--compact ms-support-take-button" disabled={claimMutation.isPending} onClick={() => claimMutation.mutate()} aria-label="Take conversation" title="Take conversation">
+                  Take
+                </button>
+              ) : null}
+              onBack={() => openConversation("")}
+              onToggleDetails={() => setDetailsOpen((value) => !value)}
+              onStartVoiceCall={() => startCallMutation.mutate("voice")}
+              onStartVideoCall={() => startCallMutation.mutate("video")}
+            />
+            <section
+              className="ms-chat-timeline"
               ref={timelineRef}
+              aria-label="Messages"
               aria-live="polite"
             >
               {messagesQuery.isLoading ? (
-                <div className="ms-support-inbox-state">Loading messages…</div>
+                <div className="ms-chat-state">Loading messages…</div>
               ) : null}
-              {messagesQuery.data?.messages.map((message) => (
-                <MessageBubble message={message} key={message.id} />
-              ))}
-            </div>
-            {error ? (
-              <div className="ms-page-error" role="alert">
-                {error}
-              </div>
-            ) : null}
-            <form className="ms-support-composer" onSubmit={send}>
-              {pendingUploads.length ? (
-                <div
-                  className="ms-support-composer-uploads"
-                  aria-label="Pending attachments"
-                >
-                  {pendingUploads.map((item) => (
-                    <span
-                      className={`ms-support-upload-chip${item.error ? " is-error" : ""}`}
-                      key={item.localId}
-                    >
-                      <span>
-                        <strong>{item.file.name}</strong>
-                        <small>
-                          {item.error ||
-                            (item.uploadId ? "Ready" : "Uploading…")}
-                        </small>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPendingUploads((current) =>
-                            current.filter(
-                              (candidate) => candidate.localId !== item.localId,
-                            ),
-                          )
-                        }
-                        aria-label={`Remove ${item.file.name}`}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+              {messagesQuery.data?.messages.map((message, index, messages) => {
+                const previous = messages[index - 1];
+                const next = messages[index + 1];
+                const sameSender = (candidate?: SupportMessage) =>
+                  Boolean(candidate && candidate.sender.kind === message.sender.kind);
+                const groupedBefore = sameSender(previous);
+                const groupedAfter = sameSender(next);
+                const groupPosition = groupedBefore
+                  ? (groupedAfter ? "middle" : "end")
+                  : (groupedAfter ? "start" : "single");
+                const showDate = !previous ||
+                  new Date(previous.created_at).toDateString() !== new Date(message.created_at).toDateString();
+                return (
+                  <div className={`ms-message-block is-group-${groupPosition}${groupedBefore ? " is-group-continuation" : ""}`} key={message.id}>
+                    {showDate ? <div className="ms-timeline-chip">{new Date(message.created_at).toLocaleDateString()}</div> : null}
+                    <SupportMessageBubble message={message} groupPosition={groupPosition} />
+                  </div>
+                );
+              })}
+            </section>
+            <footer className="ms-chat-composer-dock">
               <div className="ms-support-composer-shortcuts">
                 <select
                   className="ms-support-canned-select"
@@ -996,8 +915,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                   value=""
                   onChange={(event) => {
                     const reply = cannedRepliesQuery.data?.find((item) => item.id === event.target.value);
-                    if (reply) setDraft((current) => current ? `${current}
-${reply.body}` : reply.body);
+                    if (reply) setComposerInsertion({ id: `${Date.now()}-${reply.id}`, text: reply.body });
                     event.target.value = "";
                   }}
                   disabled={selectedConversation.status === "closed" || sendMutation.isPending}
@@ -1011,8 +929,7 @@ ${reply.body}` : reply.body);
                   value=""
                   onChange={(event) => {
                     const article = knowledgeArticlesQuery.data?.find((item) => item.id === event.target.value);
-                    if (article) setDraft((current) => current ? `${current}
-${article.body}` : article.body);
+                    if (article) setComposerInsertion({ id: `${Date.now()}-${article.id}`, text: article.body });
                     event.target.value = "";
                   }}
                   disabled={selectedConversation.status === "closed" || sendMutation.isPending}
@@ -1021,78 +938,54 @@ ${article.body}` : article.body);
                   {knowledgeArticlesQuery.data?.map((article) => <option value={article.id} key={article.id}>{article.title}</option>)}
                 </select>
               </div>
-              <div className="ms-support-composer-row">
-                <input
-                  ref={fileInputRef}
-                  className="ms-support-file-input"
-                  type="file"
-                  multiple
-                  onChange={addFiles}
-                  disabled={
-                    selectedConversation.status === "closed" ||
-                    sendMutation.isPending
+              <MessageComposer
+                draftKey={`support:${selectedId}`}
+                draftInsertion={composerInsertion}
+                replyTo={null}
+                onClearReply={() => undefined}
+                editingMessage={null}
+                onCancelEdit={() => undefined}
+                allowViewOnce={false}
+                disabled={selectedConversation.status === "closed"}
+                disabledReason={selectedConversation.status === "closed" ? "This support conversation is closed." : null}
+                onUpload={async (file, options) => {
+                  if (options.signal.aborted) throw new Error("Upload cancelled.");
+                  const upload = await supportApi.uploadConversationFile(selectedId, file);
+                  options.onProgress(100);
+                  return {
+                    uploadId: upload.id,
+                    mediaKind: upload.media_kind,
+                    width: upload.width || undefined,
+                    height: upload.height || undefined,
+                    rotation: upload.rotation || undefined,
+                    durationSeconds: upload.duration_seconds || undefined,
+                  };
+                }}
+                onSend={async (payload) => {
+                  try {
+                    await sendMutation.mutateAsync({
+                      text: String(payload.text || "").trim(),
+                      attachment_ids: Array.isArray(payload.attachment_ids)
+                        ? payload.attachment_ids.map(String)
+                        : [],
+                    });
+                  } catch (reason) {
+                    throw new Error(parseApiError(reason, "The message could not be sent.").message);
                   }
-                />
-                <button
-                  type="button"
-                  className="ms-support-composer-tool"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={
-                    selectedConversation.status === "closed" ||
-                    sendMutation.isPending ||
-                    pendingUploads.length >= 8
-                  }
-                  aria-label="Attach files"
-                  title="Attach files"
-                >
-                  +
-                </button>
-                <textarea
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder="Reply to this visitor"
-                  rows={1}
-                  disabled={
-                    selectedConversation.status === "closed" ||
-                    sendMutation.isPending
-                  }
-                />
-                <VoiceNoteRecorder
-                  onSendVoiceNote={sendVoiceNote}
-                  variant="inline"
-                  disabled={
-                    selectedConversation.status === "closed" ||
-                    sendMutation.isPending ||
-                    uploadingCount > 0
-                  }
-                />
-                <button
-                  type="submit"
-                  className="ms-button ms-button--primary"
-                  disabled={
-                    (!draft.trim() &&
-                      !pendingUploads.some((item) => item.uploadId)) ||
-                    uploadingCount > 0 ||
-                    pendingUploads.some((item) => item.error) ||
-                    selectedConversation.status === "closed" ||
-                    sendMutation.isPending
-                  }
-                >
-                  {sendMutation.isPending
-                    ? "Sending…"
-                    : uploadingCount > 0
-                      ? "Uploading…"
-                      : "Send"}
-                </button>
-              </div>
-            </form>
+                }}
+                onSendVoiceNote={sendVoiceNote}
+              />
+            </footer>
           </>
         )}
-      </main>
+      </section>
 
-      <aside className="ms-support-inbox__details">
-        {selectedConversation ? (
-          <>
+      {detailsOpen && selectedConversation ? (
+        <>
+          <span className="ms-conversation-resizer ms-conversation-resizer--details" aria-hidden="true" />
+          <button type="button" className="ms-conversation-details-backdrop" onClick={() => setDetailsOpen(false)} aria-label="Close conversation details" />
+          <div className="ms-conversation-view__details">
+            <aside className="ms-support-shared-details">
             <header className="ms-support-details-header">
               <div><span>Conversation</span><strong>Details</strong></div>
               <button type="button" className="ms-icon-button" onClick={() => setDetailsOpen(false)} aria-label="Close visitor details">×</button>
@@ -1104,10 +997,11 @@ ${article.body}` : article.body);
               onUpdate={(payload) => updateMutation.mutate(payload)}
               defaultFollowUpMinutes={serviceSettingsQuery.data?.default_follow_up_minutes || 1440}
             />
-          </>
-        ) : null}
-      </aside>
+            </aside>
+          </div>
+        </>
+      ) : null}
       {activeCall ? <SupportGuestCall initialCall={activeCall} onFinished={() => { setActiveCall(null); queryClient.setQueryData(["support-active-call"], { call: null }); }} /> : null}
-    </section>
+    </div>
   );
 }
