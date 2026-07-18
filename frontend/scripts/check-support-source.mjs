@@ -163,6 +163,7 @@ assert.ok(
   "Closed widget renders must preserve the existing launcher element.",
 );
 assert.ok(!widgetLoader.includes('.cs-launcher{animation:'), "Widget launcher must not replay an entrance animation during background updates.");
+assert.ok(!widgetLoader.includes("animation:cs-panel-in"), "Open widget renders must not replay the panel entrance animation.");
 assert.ok(
   !widgetLoader.includes('payload.event === "support.message.created" || payload.event === "support.conversation.updated"'),
   "Background conversation updates must not be treated as new visitor-visible messages.",

@@ -749,9 +749,8 @@
 
   function messengerStyles() {
     return `
-      @keyframes cs-panel-in{from{opacity:0;transform:translateY(12px) scale(.975)}to{opacity:1;transform:none}}
       @keyframes cs-panel-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.985)}}
-      .cs-panel{position:relative;width:min(400px,calc(100vw - 24px));height:min(650px,calc(100dvh - 88px));animation:cs-panel-in 160ms cubic-bezier(.2,.8,.2,1);transform-origin:bottom right}
+      .cs-panel{position:relative;width:min(400px,calc(100vw - 24px));height:min(650px,calc(100dvh - 88px));transform-origin:bottom right}
       .cs-panel.is-closing{animation:cs-panel-out 150ms ease forwards;pointer-events:none}
       .cs-header{min-height:72px;padding:10px 12px;gap:10px}
       .cs-back,.cs-header-call{display:grid;place-items:center;width:38px;height:38px;flex:0 0 auto;border:0;border-radius:50%;background:transparent;color:${state.config && state.config.text_color ? state.config.text_color : "#111"};font:800 21px/1 inherit;cursor:pointer}
@@ -795,7 +794,7 @@
         .cs-body{padding-top:14px}
         .cs-composer{padding-bottom:max(10px,env(safe-area-inset-bottom))}
       }
-      @media(prefers-reduced-motion:reduce){.cs-panel,.cs-panel.is-closing{animation:none}}
+      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing{animation:none}}
     `;
   }
 
@@ -1056,7 +1055,7 @@
       event.preventDefault();
       var text = state.draft.trim(); var attachmentIds = state.pendingUploads.map(function (upload) { return upload.id; }); if (!text && !attachmentIds.length) return;
       reportVisitorTyping(false);
-      state.loading = true; state.error = ""; render();
+      state.loading = true; state.error = "";
       sendMessage(text, attachmentIds, false).then(function () { state.loading = false; render(); scrollMessages(); }).catch(function (error) { state.loading = false; state.error = error.message; render(); });
     });
     panel.appendChild(composer);
