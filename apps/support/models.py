@@ -1712,6 +1712,10 @@ class SupportCallSession(BaseUUIDModel):
         ENDED = "ended", "Ended"
         FAILED = "failed", "Failed"
 
+    class InitiatorKind(models.TextChoices):
+        TEAM = "team", "Support team"
+        VISITOR = "visitor", "Website visitor"
+
     support_conversation = models.ForeignKey(
         SupportConversation,
         on_delete=models.CASCADE,
@@ -1721,6 +1725,11 @@ class SupportCallSession(BaseUUIDModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="initiated_support_calls",
+    )
+    initiator_kind = models.CharField(
+        max_length=16,
+        choices=InitiatorKind.choices,
+        default=InitiatorKind.TEAM,
     )
     call_type = models.CharField(max_length=16, choices=CallType.choices)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.RINGING, db_index=True)

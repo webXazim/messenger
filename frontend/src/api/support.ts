@@ -89,6 +89,16 @@ export const supportApi = {
     return unwrapData<SupportCall>(response.data);
   },
 
+  async acceptCall(callId: string) {
+    const response = await http.post(`/support/calls/${callId}/accept/`);
+    return unwrapData<SupportCall>(response.data);
+  },
+
+  async declineCall(callId: string, reason = "declined") {
+    const response = await http.post(`/support/calls/${callId}/decline/`, { reason });
+    return unwrapData<SupportCall>(response.data);
+  },
+
   async listCallSignals(callId: string, signal?: AbortSignal) {
     const response = await http.get(`/support/calls/${callId}/signals/`, { signal });
     return unwrapData<{ signals: SupportCallSignal[] }>(response.data);

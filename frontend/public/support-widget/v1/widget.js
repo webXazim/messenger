@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws/support/widget/" + encodeURIComponent(siteKey) + "/";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], call: null, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -444,6 +444,15 @@
       };
       var queuedSignals = (state.call.pending_signals || []).concat(state.callDeferredSignals.splice(0));
       queuedSignals.forEach(function (signal) { processCallSignal(signal).catch(function () {}); });
+      if (state.call.initiator_kind === "visitor" && !peer.localDescription) {
+        peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: state.call.call_type === "video" })
+          .then(function (offer) {
+            return peer.setLocalDescription(offer).then(function () {
+              return sendCallSignal("offer", { type: offer.type, sdp: offer.sdp });
+            });
+          })
+          .catch(function (error) { state.error = error.message || "The call could not connect."; render(); });
+      }
       state.callSignalTimer = window.setInterval(pollCallSignals, 1200);
       render(); window.requestAnimationFrame(bindCallStreams);
       return state.call;
@@ -480,6 +489,31 @@
     });
   }
 
+  function startVisitorCall(callType) {
+    if (!state.session || state.callStarting || (state.call && !callTerminal(state.call))) return;
+    state.callStarting = true;
+    state.error = "";
+    render();
+    request(sessionPath("/calls/"), {
+      method: "POST",
+      body: JSON.stringify({ call_type: callType }),
+    }).then(function (payload) {
+      state.call = payload;
+      state.callStarting = false;
+      state.open = true;
+      render();
+      return beginVisitorCall();
+    }).catch(function (error) {
+      state.callStarting = false;
+      state.error = error.message || "The support call could not be started.";
+      var callId = state.call && state.call.id;
+      var cleanup = callId
+        ? request(callPath(callId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {})
+        : Promise.resolve();
+      cleanup.then(function () { cleanupCall(true); render(); });
+    });
+  }
+
   function declineIncomingCall() {
     if (!state.call) return;
     request(callPath(state.call.id, "/decline/"), { method: "POST", body: JSON.stringify({ reason: "declined" }) }).catch(function () {}).then(function () { cleanupCall(true); render(); });
@@ -494,7 +528,7 @@
 
   function renderCall(body) {
     if (!state.call || callTerminal(state.call)) return false;
-    if (state.call.status === "ringing") {
+    if (state.call.status === "ringing" && state.call.initiator_kind !== "visitor") {
       var incoming = node("section", "cs-call-incoming");
       incoming.appendChild(node("span", "cs-call-avatar", (state.call.initiated_by.display_name || "S").slice(0,1).toUpperCase()));
       incoming.appendChild(node("strong", "", state.call.initiated_by.display_name || "Support team"));
@@ -503,6 +537,14 @@
       var decline = node("button", "cs-call-decline", "Decline"); decline.type = "button"; decline.onclick = declineIncomingCall;
       var accept = node("button", "cs-call-accept", "Accept"); accept.type = "button"; accept.onclick = acceptIncomingCall;
       actions.appendChild(decline); actions.appendChild(accept); incoming.appendChild(actions); body.appendChild(incoming); return true;
+    }
+    if (state.call.status === "ringing" && state.call.initiator_kind === "visitor") {
+      var outgoing = node("section", "cs-call-incoming");
+      outgoing.appendChild(node("span", "cs-call-avatar", (state.config.brand_name || "S").slice(0,1).toUpperCase()));
+      outgoing.appendChild(node("strong", "", "Calling " + (state.config.brand_name || "Support")));
+      outgoing.appendChild(node("small", "", "Waiting for the support team to answer your " + state.call.call_type + " call"));
+      var cancel = node("button", "cs-call-decline", "Cancel call"); cancel.type = "button"; cancel.onclick = endVisitorCall;
+      var outgoingActions = node("div", "cs-call-actions"); outgoingActions.appendChild(cancel); outgoing.appendChild(outgoingActions); body.appendChild(outgoing); return true;
     }
     var stage = node("section", "cs-call-stage " + state.call.call_type);
     if (state.call.call_type === "video") {
@@ -652,8 +694,21 @@
     sendMessage: sendMessage,
     uploadFile: uploadConversationFile,
     markRead: function () { return state.session ? request(sessionPath("/conversation/read/"), { method: "POST" }) : Promise.resolve(); },
-    open: function () { state.open = true; state.hasUnread = false; render(); connectRealtime(); reportVisitorActivity(true); acknowledgeLatestTeamMessage(); if (state.session) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); } startPolling(); },
-    close: function () { if (state.call && !callTerminal(state.call)) return; state.open = false; reportVisitorTyping(false); render(); stopPolling(); },
+    open: function () {
+      if (state.closeTimer) window.clearTimeout(state.closeTimer);
+      state.closeTimer = 0; state.closing = false; state.open = true; state.hasUnread = false;
+      render(); connectRealtime(); reportVisitorActivity(true); acknowledgeLatestTeamMessage();
+      if (state.session) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); }
+      startPolling();
+    },
+    close: function () {
+      if (state.call && !callTerminal(state.call)) return;
+      if (!state.open || state.closing) return;
+      reportVisitorTyping(false); state.closing = true; render(); stopPolling();
+      state.closeTimer = window.setTimeout(function () {
+        state.open = false; state.closing = false; state.closeTimer = 0; render();
+      }, 150);
+    },
     clearSession: function () { closeRealtime(true); clearSession(); render(); }
   };
 
@@ -669,11 +724,61 @@
     return `:host{all:initial;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:${text}}*{box-sizing:border-box}.cs-wrap{position:fixed;z-index:2147483000;bottom:max(18px,env(safe-area-inset-bottom));${side}:18px;display:grid;justify-items:${side === "left" ? "start" : "end"};gap:10px}.cs-launcher{position:relative;min-width:54px;height:54px;padding:0 18px;border:0;border-radius:18px;background:${primary};color:#fff;font:800 14px/1 inherit;box-shadow:0 14px 38px rgba(0,0,0,.22);cursor:pointer}.cs-unread{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;display:grid;place-items:center;padding:0 4px;border:2px solid #fff;border-radius:999px;background:#d92d20;color:#fff;font:800 10px/1 inherit}.cs-panel{width:min(380px,calc(100vw - 24px));height:min(620px,calc(100dvh - 100px));display:${state.open ? "grid" : "none"};grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;border:1px solid ${line};border-radius:20px;background:${surface};box-shadow:0 24px 70px rgba(0,0,0,.24)}.cs-header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid ${line};background:${surface}}.cs-mark{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:${primary};color:#fff;font-weight:850}.cs-title{min-width:0;display:grid;flex:1}.cs-title strong,.cs-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-title strong{font-size:14px}.cs-title small{color:${muted};font-size:11px}.cs-close{width:34px;height:34px;border:0;border-radius:50%;background:${canvas};color:${text};font-size:20px;cursor:pointer}.cs-body{min-height:0;overflow-y:auto;padding:16px;background:${canvas}}.cs-welcome{margin:0 0 14px;color:${muted};font-size:13px;line-height:1.55}.cs-form{display:grid;gap:10px}.cs-field,.cs-composer textarea{width:100%;min-height:44px;padding:11px 12px;border:1px solid ${line};border-radius:12px;background:${surface};color:${text};font:inherit}.cs-primary{min-height:44px;border:0;border-radius:12px;background:${primary};color:#fff;font:800 13px inherit;cursor:pointer}.cs-error{padding:10px 12px;border:1px solid #d98c8c;border-radius:10px;background:#fff0f0;color:#8d1b1b;font-size:12px}.cs-messages{display:flex;flex-direction:column;gap:12px}.cs-message{max-width:86%;display:grid;gap:3px}.cs-message.visitor{align-self:flex-end;justify-items:end}.cs-message.team{align-self:flex-start;justify-items:start}.cs-meta{color:${muted};font-size:10px}.cs-typing{padding:7px 2px;color:${muted};font:700 11px inherit}.cs-bubble{padding:9px 11px;border:1px solid ${line};border-radius:13px;background:${surface};color:${text};font-size:13px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cs-message.visitor .cs-bubble{border-color:${primary};background:${primary};color:#fff}.cs-empty{padding:30px 10px;color:${muted};font-size:13px;text-align:center}.cs-composer{display:${state.session ? "grid" : "none"};grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:12px;border-top:1px solid ${line};background:${surface}}.cs-composer textarea{min-height:42px;max-height:110px;resize:none}.cs-send{min-width:62px;border:0;border-radius:12px;background:${primary};color:#fff;font:800 12px inherit;cursor:pointer}.cs-note{margin:8px 0 0;color:${muted};font-size:10px;line-height:1.4}.cs-bubble-text:empty{display:none}.cs-media{display:grid;gap:7px;min-width:190px}.cs-media img,.cs-media video{display:block;width:100%;max-height:260px;border-radius:9px;object-fit:contain;background:rgba(0,0,0,.08)}.cs-media audio{width:100%;min-width:210px}.cs-file{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid currentColor;border-radius:9px}.cs-file span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-download{justify-self:start;padding:0;border:0;background:transparent;color:inherit;font:800 10px inherit;text-decoration:underline;cursor:pointer}.cs-composer{grid-template-columns:auto minmax(0,1fr) auto auto}.cs-tool{width:42px;height:42px;border:1px solid ${line};border-radius:12px;background:${surface};color:${text};font:800 18px inherit;cursor:pointer}.cs-tool.recording{border-color:#d92d20;color:#d92d20}.cs-upload-list{grid-column:1/-1;display:flex;gap:6px;overflow-x:auto}.cs-upload-chip{display:flex;align-items:center;gap:5px;max-width:150px;padding:5px 7px;border:1px solid ${line};border-radius:8px;background:${canvas};font-size:10px}.cs-upload-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-upload-chip button{border:0;background:transparent;color:${text};cursor:pointer}.cs-hidden{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}.cs-csat{display:grid;gap:10px;margin-top:14px;padding:14px;border:1px solid ${line};border-radius:14px;background:${surface}}.cs-csat strong{font-size:13px}.cs-csat p{margin:0;color:${muted};font-size:11px;line-height:1.45}.cs-csat-stars{display:flex;gap:6px}.cs-csat-star{width:36px;height:36px;border:1px solid ${line};border-radius:10px;background:${canvas};color:${text};font-size:20px;cursor:pointer}.cs-csat-star.is-selected{border-color:${primary};background:${primary};color:#fff}.cs-csat textarea{width:100%;min-height:70px;padding:9px 10px;border:1px solid ${line};border-radius:10px;background:${canvas};color:${text};font:inherit;resize:vertical}.cs-csat-actions{display:flex;justify-content:flex-end;gap:8px}.cs-csat-secondary{border:0;background:transparent;color:${muted};font:700 11px inherit;cursor:pointer}.cs-csat-submit{min-height:36px;padding:0 13px;border:0;border-radius:10px;background:${primary};color:#fff;font:800 11px inherit;cursor:pointer}.cs-csat-thanks{display:grid;gap:5px;margin-top:14px;padding:14px;border:1px solid ${line};border-radius:14px;background:${surface};text-align:center}.cs-csat-thanks strong{font-size:18px;letter-spacing:2px;color:${primary}}.cs-kb{display:grid;gap:10px;margin-bottom:16px}.cs-kb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.cs-kb-head strong{font-size:13px}.cs-kb-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.cs-kb-search input{min-width:0;min-height:40px;padding:9px 10px;border:1px solid ${line};border-radius:10px;background:${surface};color:${text};font:inherit}.cs-kb-search button,.cs-kb-back{min-height:40px;padding:0 12px;border:1px solid ${line};border-radius:10px;background:${surface};color:${text};font:800 11px inherit;cursor:pointer}.cs-kb-categories{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}.cs-kb-category{flex:0 0 auto;padding:6px 9px;border:1px solid ${line};border-radius:999px;background:${surface};color:${text};font:700 10px inherit;cursor:pointer}.cs-kb-list{display:grid;gap:7px}.cs-kb-item{display:grid;gap:3px;width:100%;padding:10px;border:1px solid ${line};border-radius:11px;background:${surface};color:${text};text-align:left;cursor:pointer}.cs-kb-item strong{font-size:12px}.cs-kb-item span{color:${muted};font-size:10px;line-height:1.4}.cs-kb-article{display:grid;gap:10px;padding:12px;border:1px solid ${line};border-radius:13px;background:${surface}}.cs-kb-article h2{margin:0;font-size:15px;line-height:1.35}.cs-kb-article p{margin:0;color:${text};font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.cs-kb-article small{color:${muted};font-size:10px}.cs-kb-feedback{display:flex;align-items:center;gap:7px;padding-top:8px;border-top:1px solid ${line}}.cs-kb-feedback span{margin-right:auto;color:${muted};font-size:10px}.cs-kb-feedback button{width:34px;height:32px;border:1px solid ${line};border-radius:9px;background:${canvas};color:${text};cursor:pointer}.cs-kb-divider{display:flex;align-items:center;gap:8px;margin:14px 0;color:${muted};font-size:10px}.cs-kb-divider:before,.cs-kb-divider:after{content:"";height:1px;flex:1;background:${line}}.cs-privacy-actions{display:flex;align-items:center;justify-content:center;margin-top:14px;padding-top:12px;border-top:1px solid ${line}}.cs-privacy-delete{border:0;background:transparent;color:${muted};font:700 10px inherit;text-decoration:underline;cursor:pointer}.cs-privacy-delete:disabled{opacity:.55;cursor:default}.cs-privacy-confirmed{margin:0 0 12px;padding:10px 12px;border:1px solid ${line};border-radius:10px;background:${surface};color:${muted};font-size:11px;line-height:1.45}.cs-call-incoming{display:grid;justify-items:center;gap:9px;padding:22px 14px;border:1px solid ${line};border-radius:16px;background:${surface};text-align:center}.cs-call-incoming small{color:${muted}}.cs-call-avatar{display:grid;place-items:center;width:72px;height:72px;border-radius:50%;background:${primary};color:#fff;font-size:24px;font-weight:850}.cs-call-actions{display:flex;gap:9px;margin-top:5px}.cs-call-actions button,.cs-call-controls button{min-height:40px;padding:0 15px;border:0;border-radius:999px;color:#fff;font:800 11px inherit;cursor:pointer}.cs-call-decline,.cs-call-end{background:#c62828}.cs-call-accept{background:#198754}.cs-call-stage{position:relative;min-height:360px;height:100%;overflow:hidden;border-radius:14px;background:#090909;color:#fff}.cs-call-remote{width:100%;height:100%;object-fit:cover;background:#090909}.cs-call-local{position:absolute;right:10px;bottom:66px;width:30%;aspect-ratio:3/4;object-fit:cover;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:#1c1c1c}.cs-call-audio{height:100%;display:grid;place-content:center;justify-items:center;gap:8px;background:radial-gradient(circle,#292929,#080808 72%)}.cs-call-audio small{color:rgba(255,255,255,.65)}.cs-call-controls{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:7px;padding:12px;background:rgba(0,0,0,.62)}.cs-call-controls button{background:rgba(255,255,255,.16)}.cs-call-controls .cs-call-end{background:#c62828}@media(max-width:520px){.cs-wrap{left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));justify-items:stretch}.cs-panel{width:100%;height:min(72dvh,620px);border-radius:18px}.cs-launcher{justify-self:${side === "left" ? "start" : "end"}}`;
   }
 
+  function messengerStyles() {
+    return `
+      @keyframes cs-panel-in{from{opacity:0;transform:translateY(12px) scale(.975)}to{opacity:1;transform:none}}
+      @keyframes cs-panel-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.985)}}
+      .cs-panel{animation:cs-panel-in 160ms cubic-bezier(.2,.8,.2,1);transform-origin:bottom right}
+      .cs-panel.is-closing{animation:cs-panel-out 150ms ease forwards;pointer-events:none}
+      .cs-header{min-height:68px;padding:10px 12px;gap:9px}
+      .cs-back,.cs-header-call{display:grid;place-items:center;width:38px;height:38px;flex:0 0 auto;border:0;border-radius:50%;background:transparent;color:${state.config && state.config.text_color ? state.config.text_color : "#111"};font:800 21px/1 inherit;cursor:pointer}
+      .cs-back:hover,.cs-header-call:hover{background:rgba(127,127,127,.12)}
+      .cs-mark{width:42px;height:42px;border-radius:50%;font-size:15px}
+      .cs-title strong{font-size:15px}.cs-title small{font-size:11px}
+      .cs-header-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
+      .cs-header-call:disabled{opacity:.35;cursor:default}
+      .cs-body{padding:14px 12px;scroll-behavior:smooth;background-image:radial-gradient(rgba(0,0,0,.025) .7px,transparent .7px);background-size:14px 14px}
+      .cs-messages{gap:5px;min-height:100%}
+      .cs-message{max-width:84%;gap:2px;margin-top:5px}
+      .cs-bubble{padding:9px 11px 7px;border-radius:17px;box-shadow:0 1px 1px rgba(0,0,0,.035)}
+      .cs-message.team .cs-bubble{border-bottom-left-radius:5px}
+      .cs-message.visitor .cs-bubble{border-bottom-right-radius:5px}
+      .cs-meta{display:block;margin-top:4px;text-align:right;white-space:nowrap;opacity:.72}
+      .cs-message.visitor .cs-meta{color:rgba(255,255,255,.82)}
+      .cs-composer{grid-template-columns:auto minmax(0,1fr) auto auto;align-items:end;padding:10px 12px;gap:7px}
+      .cs-composer textarea{min-height:44px;max-height:108px;padding:11px 14px;border-radius:23px;line-height:20px;overflow-y:auto}
+      .cs-tool,.cs-send{width:44px;height:44px;min-width:44px;padding:0;border-radius:50%}
+      .cs-back svg,.cs-header-call svg,.cs-tool svg,.cs-send svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+      .cs-send{font-size:0}.cs-send svg{width:18px;height:18px;fill:currentColor;stroke:none}
+      .cs-send:disabled{opacity:.38;cursor:default}
+      .cs-launcher{animation:cs-panel-in 160ms ease}
+      @media(max-width:520px){
+        .cs-panel{height:min(78dvh,680px);border-radius:20px}
+        .cs-wrap{left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom))}
+      }
+      @media(prefers-reduced-motion:reduce){.cs-panel,.cs-panel.is-closing,.cs-launcher{animation:none}}
+    `;
+  }
+
   function node(tag, className, text) {
     var element = document.createElement(tag);
     if (className) element.className = className;
     if (text !== undefined) element.textContent = text;
     return element;
+  }
+
+  function buttonIcon(button, kind) {
+    var icons = {
+      back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>',
+      audio: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.8 9 3.2l2.1 5-1.7 1.4a15 15 0 0 0 5 5l1.4-1.7 5 2.1-.6 2.4c-.3 1.2-1.4 2-2.6 1.9A15.8 15.8 0 0 1 4.7 6.4c-.1-1.2.7-2.3 1.9-2.6Z"/></svg>',
+      video: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/></svg>',
+      attach: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 12.5 6.7-6.7a3.2 3.2 0 0 1 4.5 4.5l-9 9a5 5 0 0 1-7.1-7.1l8.4-8.4"/><path d="m6.4 14.3 7.7-7.7"/></svg>',
+      mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg>',
+      stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>',
+      send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 20 18-8L3 4l3 7 9 1-9 1-3 7Z"/></svg>',
+    };
+    button.innerHTML = icons[kind] || "";
+    return button;
   }
 
   function scrollMessages() {
@@ -719,10 +824,10 @@
       var timeLabel = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
       var receiptLabel = visitor ? String(message.receipt_status || message.delivery_status || "sent") : "";
       if (receiptLabel) receiptLabel = receiptLabel.slice(0, 1).toUpperCase() + receiptLabel.slice(1);
-      row.appendChild(node("div", "cs-meta", (visitor ? timeLabel : (message.sender && message.sender.display_name ? message.sender.display_name : "Support team") + (timeLabel ? " · " + timeLabel : "")) + (visitor && receiptLabel ? " · " + receiptLabel : "")));
       var bubble = node("div", "cs-bubble");
       bubble.appendChild(node("div", "cs-bubble-text", message.text || ""));
       (message.attachments || []).forEach(function (attachment) { renderAttachment(bubble, attachment); });
+      bubble.appendChild(node("span", "cs-meta", timeLabel + (visitor && receiptLabel ? " · " + receiptLabel : "")));
       row.appendChild(bubble);
       list.appendChild(row);
     });
@@ -811,13 +916,24 @@
     if (!shadow || !state.config) return;
     clearObjectUrls();
     shadow.innerHTML = "";
-    var style = node("style"); style.textContent = styles(); shadow.appendChild(style);
+    var style = node("style"); style.textContent = styles() + messengerStyles(); shadow.appendChild(style);
     var wrap = node("div", "cs-wrap");
-    var panel = node("section", "cs-panel"); panel.setAttribute("aria-label", state.config.brand_name || "Support Chat");
+    var panel = node("section", "cs-panel" + (state.closing ? " is-closing" : "")); panel.setAttribute("aria-label", state.config.brand_name || "Support Chat");
     var header = node("header", "cs-header");
+    var back = buttonIcon(node("button", "cs-back"), "back"); back.type = "button"; back.setAttribute("aria-label", "Close support chat"); back.disabled = Boolean(state.call && !callTerminal(state.call)); back.onclick = api.close; header.appendChild(back);
     header.appendChild(node("span", "cs-mark", (state.config.brand_name || "S").slice(0, 1).toUpperCase()));
-    var title = node("span", "cs-title"); title.appendChild(node("strong", "", state.config.brand_name)); title.appendChild(node("small", "", state.session ? "Support conversation" : state.config.website_name)); header.appendChild(title);
-    var close = node("button", "cs-close", "×"); close.type = "button"; close.setAttribute("aria-label", "Close support chat"); close.disabled = Boolean(state.call && !callTerminal(state.call)); close.title = close.disabled ? "End the call before closing Support Chat" : "Close Support Chat"; close.onclick = api.close; header.appendChild(close); panel.appendChild(header);
+    var title = node("span", "cs-title"); title.appendChild(node("strong", "", state.config.brand_name)); title.appendChild(node("small", "", state.session ? (state.socketState === "open" ? "Online · Support" : "Connecting…") : state.config.website_name)); header.appendChild(title);
+    if (state.session && state.config.calls_enabled) {
+      var headerActions = node("span", "cs-header-actions");
+      if (state.config.allow_audio_calls) {
+        var audioCall = buttonIcon(node("button", "cs-header-call"), "audio"); audioCall.type = "button"; audioCall.title = "Start audio call"; audioCall.setAttribute("aria-label", "Start audio call"); audioCall.disabled = state.callStarting || Boolean(state.call && !callTerminal(state.call)); audioCall.onclick = function () { startVisitorCall("voice"); }; headerActions.appendChild(audioCall);
+      }
+      if (state.config.allow_video_calls) {
+        var videoCall = buttonIcon(node("button", "cs-header-call"), "video"); videoCall.type = "button"; videoCall.title = "Start video call"; videoCall.setAttribute("aria-label", "Start video call"); videoCall.disabled = state.callStarting || Boolean(state.call && !callTerminal(state.call)); videoCall.onclick = function () { startVisitorCall("video"); }; headerActions.appendChild(videoCall);
+      }
+      header.appendChild(headerActions);
+    }
+    panel.appendChild(header);
     var body = node("div", "cs-body");
     if (state.error) body.appendChild(node("div", "cs-error", state.error));
     if (state.session) {
@@ -845,10 +961,24 @@
     }
     var fileInput = node("input", "cs-hidden"); fileInput.type = "file"; fileInput.multiple = true; fileInput.disabled = state.loading || state.uploading;
     fileInput.onchange = function () { addPendingFiles(fileInput.files); };
-    var attach = node("button", "cs-tool", "+"); attach.type = "button"; attach.title = "Attach files"; attach.setAttribute("aria-label", "Attach files"); attach.disabled = state.loading || state.uploading || !state.config.allow_attachments; attach.onclick = function () { fileInput.click(); };
-    var textarea = node("textarea"); textarea.placeholder = "Write a message"; textarea.rows = 1; textarea.value = state.draft; textarea.disabled = state.loading || state.uploading; textarea.oninput = function () { state.draft = textarea.value; reportVisitorTyping(Boolean(state.draft.trim())); }; textarea.onblur = function () { reportVisitorTyping(false); };
-    var voice = node("button", "cs-tool" + (state.recording ? " recording" : ""), state.recording ? "■" : "●"); voice.type = "button"; voice.title = state.recording ? "Send voice message" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
-    var send = node("button", "cs-send", state.loading || state.uploading ? "…" : "Send"); send.type = "submit"; send.disabled = state.loading || state.uploading || (!state.draft.trim() && !state.pendingUploads.length);
+    var attach = buttonIcon(node("button", "cs-tool"), "attach"); attach.type = "button"; attach.title = "Attach files"; attach.setAttribute("aria-label", "Attach files"); attach.disabled = state.loading || state.uploading || !state.config.allow_attachments; attach.onclick = function () { fileInput.click(); };
+    var textarea = node("textarea"); textarea.placeholder = "Write a message…"; textarea.rows = 1; textarea.value = state.draft; textarea.disabled = state.loading || state.uploading;
+    var voice = buttonIcon(node("button", "cs-tool" + (state.recording ? " recording" : "")), state.recording ? "stop" : "mic"); voice.type = "button"; voice.title = state.recording ? "Send voice message" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
+    var send = buttonIcon(node("button", "cs-send"), "send"); send.type = "submit"; send.setAttribute("aria-label", "Send"); send.disabled = state.loading || state.uploading || (!state.draft.trim() && !state.pendingUploads.length);
+    textarea.oninput = function () {
+      state.draft = textarea.value;
+      textarea.style.height = "auto";
+      textarea.style.height = Math.min(108, textarea.scrollHeight) + "px";
+      send.disabled = state.loading || state.uploading || (!state.draft.trim() && !state.pendingUploads.length);
+      reportVisitorTyping(Boolean(state.draft.trim()));
+    };
+    textarea.onblur = function () { reportVisitorTyping(false); };
+    textarea.onkeydown = function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        if (!send.disabled) composer.requestSubmit();
+      }
+    };
     composer.appendChild(fileInput); composer.appendChild(attach); composer.appendChild(textarea); composer.appendChild(voice); composer.appendChild(send);
     composer.addEventListener("submit", function (event) {
       event.preventDefault();
@@ -859,7 +989,9 @@
     });
     panel.appendChild(composer);
     wrap.appendChild(panel);
-    var launcher = node("button", "cs-launcher", state.open ? "Close" : state.config.launcher_text || "Chat"); launcher.type = "button"; launcher.onclick = state.open ? api.close : api.open; if (state.hasUnread && !state.open) launcher.appendChild(node("span", "cs-unread", "1")); wrap.appendChild(launcher);
+    if (!state.open) {
+      var launcher = node("button", "cs-launcher", state.config.launcher_text || "Chat"); launcher.type = "button"; launcher.onclick = api.open; if (state.hasUnread) launcher.appendChild(node("span", "cs-unread", "1")); wrap.appendChild(launcher);
+    }
     shadow.appendChild(wrap);
   }
 

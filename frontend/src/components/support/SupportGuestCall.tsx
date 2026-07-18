@@ -45,7 +45,13 @@ export function SupportGuestCall({ initialCall, onFinished }: { initialCall: Sup
       return;
     }
     try {
-      if (signal.signal_type === "answer" && signal.payload.sdp) {
+      if (signal.signal_type === "offer" && signal.payload.sdp) {
+        await peer.setRemoteDescription({ type: "offer", sdp: String(signal.payload.sdp) });
+        for (const candidate of deferredIce.current.splice(0)) await peer.addIceCandidate(candidate);
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        await sendSignal("answer", { sdp: answer.sdp, type: answer.type });
+      } else if (signal.signal_type === "answer" && signal.payload.sdp) {
         await peer.setRemoteDescription({ type: "answer", sdp: String(signal.payload.sdp) });
         for (const candidate of deferredIce.current.splice(0)) await peer.addIceCandidate(candidate);
       } else if (signal.signal_type === "ice_candidate" && signal.payload.candidate) {
@@ -84,6 +90,7 @@ export function SupportGuestCall({ initialCall, onFinished }: { initialCall: Sup
   }, [call.call_type, sendSignal]);
 
   useEffect(() => {
+    if (call.initiator_kind === "visitor" && call.status === "ringing") return;
     let cancelled = false;
     const initialize = async () => {
       try {
@@ -125,7 +132,7 @@ export function SupportGuestCall({ initialCall, onFinished }: { initialCall: Sup
           }
           if (peer.connectionState === "connected") { setError(""); setRemoteConnected(true); }
         };
-        await createOffer();
+        if (call.initiator_kind === "team") await createOffer();
         const queued = deferredSignals.current.splice(0);
         for (const signal of queued) await processSignal(signal);
       } catch (mediaError) {
@@ -139,7 +146,7 @@ export function SupportGuestCall({ initialCall, onFinished }: { initialCall: Sup
     };
     void initialize();
     return () => { cancelled = true; };
-  }, [call.call_type, createOffer, processSignal, sendSignal]);
+  }, [call.call_type, call.initiator_kind, call.status, createOffer, processSignal, sendSignal]);
 
   useEffect(() => supportSocket.subscribe((event: SupportSocketEvent) => {
     if (String(event.data?.call_id || event.data?.id || "") !== initialCall.id) return;
@@ -201,6 +208,49 @@ export function SupportGuestCall({ initialCall, onFinished }: { initialCall: Sup
     try { await sendSignal("hangup", { reason: "ended" }); } catch { /* REST end still closes */ }
     try { setCall(await supportApi.endCall(call.id)); } catch { cleanup(); }
   };
+
+  const acceptIncoming = async () => {
+    setError("");
+    try {
+      await supportApi.acceptCall(call.id);
+      const accepted = await supportApi.getCall(call.id);
+      (accepted.pending_signals || []).forEach((signal) => {
+        if (!deferredSignals.current.some((item) => item.signal_id === signal.signal_id)) {
+          deferredSignals.current.push(signal);
+        }
+      });
+      setCall(accepted);
+    } catch (acceptError) {
+      setError(errorMessage(acceptError));
+    }
+  };
+
+  const declineIncoming = async () => {
+    try {
+      setCall(await supportApi.declineCall(call.id));
+    } catch (declineError) {
+      setError(errorMessage(declineError));
+    }
+  };
+
+  if (call.initiator_kind === "visitor" && call.status === "ringing") {
+    return (
+      <div className="ms-support-call-overlay" role="dialog" aria-modal="true" aria-label={`Incoming support call from ${call.visitor_name}`}>
+        <section className={`ms-support-call-stage is-${call.call_type}`}>
+          <div className="ms-support-call-audio">
+            <span>{call.visitor_name.slice(0, 1).toUpperCase()}</span>
+            <strong>{call.visitor_name}</strong>
+            <small>Incoming {call.call_type === "video" ? "video" : "audio"} call · {call.website_name}</small>
+          </div>
+          {error ? <div className="ms-support-call-error" role="alert">{error}</div> : null}
+          <footer>
+            <button type="button" className="is-end" onClick={declineIncoming}>Decline</button>
+            <button type="button" onClick={acceptIncoming}>Accept</button>
+          </footer>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="ms-support-call-overlay" role="dialog" aria-modal="true" aria-label={`Support call with ${call.visitor_name}`}>

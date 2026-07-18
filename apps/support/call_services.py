@@ -9,7 +9,10 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from apps.chat.services import get_turn_credentials
-from apps.support.conversation_services import get_context_conversation
+from apps.support.conversation_services import (
+    get_context_conversation,
+    get_or_create_visitor_conversation,
+)
 from apps.support.models import (
     SupportCallParticipant,
     SupportCallSession,
@@ -161,6 +164,112 @@ def start_support_call(*, context, actor, conversation_id, call_type: str) -> Su
     return call
 
 
+@transaction.atomic
+def start_visitor_support_call(
+    *,
+    session: SupportWidgetSession,
+    call_type: str,
+) -> SupportCallSession:
+    if call_type not in SupportCallSession.CallType.values:
+        raise SupportCallError("invalid_call_type", "Choose an audio or video call.")
+    conversation, _ = get_or_create_visitor_conversation(session)
+    conversation = (
+        SupportConversation.objects.select_for_update(of=("self",))
+        .select_related(
+            "website",
+            "website__support_account",
+            "website__support_account__owner",
+            "assigned_agent",
+            "assigned_agent__user",
+            "visitor",
+        )
+        .get(pk=conversation.pk)
+    )
+    if conversation.status == SupportConversation.Status.CLOSED:
+        raise SupportCallError("conversation_closed", "This support conversation is closed.", 409)
+    _ensure_call_feature(
+        conversation.website.support_account,
+        conversation.website,
+        call_type,
+    )
+    existing = SupportCallSession.objects.select_for_update().filter(
+        support_conversation=conversation,
+        status__in=ACTIVE_CALL_STATUSES,
+    ).first()
+    if existing:
+        _expire_if_stale(existing)
+        existing.refresh_from_db()
+        if existing.status in ACTIVE_CALL_STATUSES:
+            raise SupportCallError("active_call_exists", "This conversation already has an active call.", 409)
+
+    handler = (
+        conversation.assigned_agent.user
+        if conversation.assigned_agent
+        and conversation.assigned_agent.is_active
+        and conversation.assigned_agent.user.is_active
+        else conversation.website.support_account.owner
+    )
+    user_call = _active_user_call(handler)
+    if user_call:
+        _expire_if_stale(user_call)
+        user_call.refresh_from_db()
+        if user_call.status in ACTIVE_CALL_STATUSES:
+            raise SupportCallError("team_busy", "The support team is currently on another call. Please try again shortly.", 409)
+
+    now = timezone.now()
+    try:
+        call = SupportCallSession.objects.create(
+            support_conversation=conversation,
+            initiated_by=handler,
+            initiator_kind=SupportCallSession.InitiatorKind.VISITOR,
+            call_type=call_type,
+            status=SupportCallSession.Status.RINGING,
+            room_key=uuid4().hex,
+            metadata={
+                "product_scope": "support",
+                "website_id": str(conversation.website_id),
+                "initiator_kind": SupportCallSession.InitiatorKind.VISITOR,
+            },
+        )
+    except IntegrityError as exc:
+        raise SupportCallError("active_call_exists", "This conversation already has an active call.", 409) from exc
+    SupportCallParticipant.objects.bulk_create([
+        SupportCallParticipant(
+            call=call,
+            kind=SupportCallParticipant.Kind.TEAM,
+            user=handler,
+            state=SupportCallParticipant.State.RINGING,
+            video_enabled=call_type == SupportCallSession.CallType.VIDEO,
+        ),
+        SupportCallParticipant(
+            call=call,
+            kind=SupportCallParticipant.Kind.VISITOR,
+            visitor=conversation.visitor,
+            state=SupportCallParticipant.State.JOINED,
+            joined_at=now,
+            video_enabled=call_type == SupportCallSession.CallType.VIDEO,
+        ),
+    ])
+    record_audit_event(
+        account=conversation.website.support_account,
+        actor=None,
+        website=conversation.website,
+        support_conversation=conversation,
+        action="call.requested_by_visitor",
+        target_type="support_call",
+        target_id=call.id,
+        summary=f"A website visitor requested a {call_type} support call.",
+        metadata={"conversation_id": str(conversation.id), "visitor_id": str(conversation.visitor_id)},
+    )
+    publish_support_event(
+        event_name="support.call.ringing",
+        website_id=conversation.website_id,
+        user_ids=[handler.id],
+        data=call_event_payload(call),
+    )
+    return call
+
+
 
 def team_active_call_for_conversation(context, conversation_id, user) -> SupportCallSession | None:
     conversation = get_context_conversation(context, conversation_id)
@@ -287,6 +396,43 @@ def accept_support_call(*, call: SupportCallSession, visitor) -> SupportCallSess
 
 
 @transaction.atomic
+def accept_visitor_support_call(*, call: SupportCallSession, user) -> SupportCallSession:
+    call = SupportCallSession.objects.select_for_update().select_related(
+        "support_conversation",
+    ).get(pk=call.pk)
+    if call.initiator_kind != SupportCallSession.InitiatorKind.VISITOR:
+        raise SupportCallError("invalid_call_direction", "This call is waiting for the website visitor.", 409)
+    if call.initiated_by_id != user.id:
+        raise SupportCallError("not_participant", "This call is assigned to another team member.", 403)
+    if _expire_if_stale(call):
+        raise SupportCallError("call_expired", "This call has expired.", 410)
+    if call.status not in ACTIVE_CALL_STATUSES:
+        raise SupportCallError("call_closed", "This call can no longer be accepted.", 409)
+    participant = SupportCallParticipant.objects.select_for_update().get(
+        call=call,
+        kind=SupportCallParticipant.Kind.TEAM,
+        user=user,
+    )
+    now = timezone.now()
+    participant.state = SupportCallParticipant.State.JOINED
+    participant.joined_at = participant.joined_at or now
+    participant.left_at = None
+    participant.last_seen_at = now
+    participant.save(update_fields=["state", "joined_at", "left_at", "last_seen_at", "updated_at"])
+    call.status = SupportCallSession.Status.ONGOING
+    call.answered_at = call.answered_at or now
+    call.save(update_fields=["status", "answered_at", "updated_at"])
+    publish_support_event(
+        event_name="support.call.accepted",
+        website_id=call.support_conversation.website_id,
+        visitor_id=call.support_conversation.visitor_id,
+        user_ids=[user.id],
+        data=call_event_payload(call),
+    )
+    return call
+
+
+@transaction.atomic
 def decline_support_call(*, call: SupportCallSession, visitor, reason="declined") -> SupportCallSession:
     return end_support_call(
         call=call,
@@ -323,10 +469,15 @@ def end_support_call(
             state=SupportCallParticipant.State.MISSED, left_at=now, updated_at=now
         )
     elif final_status == SupportCallSession.Status.DECLINED:
-        participant_qs.filter(kind=SupportCallParticipant.Kind.VISITOR).update(
+        declining_kind = (
+            SupportCallParticipant.Kind.TEAM
+            if call.initiator_kind == SupportCallSession.InitiatorKind.VISITOR
+            else SupportCallParticipant.Kind.VISITOR
+        )
+        participant_qs.filter(kind=declining_kind).update(
             state=SupportCallParticipant.State.DECLINED, left_at=now, updated_at=now
         )
-        participant_qs.filter(kind=SupportCallParticipant.Kind.TEAM).update(
+        participant_qs.exclude(kind=declining_kind).update(
             state=SupportCallParticipant.State.LEFT, left_at=now, updated_at=now
         )
     else:
@@ -487,6 +638,7 @@ def call_event_payload(call: SupportCallSession):
             "display_name": getattr(profile, "display_name", "") or call.initiated_by.get_full_name() or call.initiated_by.username,
             "avatar": profile.avatar.url if profile and profile.avatar else None,
         },
+        "initiator_kind": call.initiator_kind,
         "call_type": call.call_type,
         "status": call.status,
         "started_at": call.started_at.isoformat(),

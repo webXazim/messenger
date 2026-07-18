@@ -141,6 +141,45 @@ class SupportGuestCallTests(APITestCase):
         )
         self.assertEqual(denied.status_code, 404)
 
+    def test_visitor_can_start_call_and_assigned_team_member_can_accept(self):
+        self.client.force_authenticate(user=None)
+        started = self.client.post(
+            f"/api/v1/support/widget/{self.website.site_key}/sessions/{self.session['id']}/calls/",
+            {"call_type": "video"},
+            format="json",
+            **self._widget_headers(self.website, self.session),
+        )
+        self.assertEqual(started.status_code, 201, started.data)
+        self.assertEqual(started.data["initiator_kind"], SupportCallSession.InitiatorKind.VISITOR)
+        call = SupportCallSession.objects.get(pk=started.data["id"])
+        self.assertEqual(call.initiated_by, self.owner)
+        self.assertEqual(
+            call.participants.get(kind=SupportCallParticipant.Kind.VISITOR).state,
+            SupportCallParticipant.State.JOINED,
+        )
+        self.assertEqual(
+            call.participants.get(kind=SupportCallParticipant.Kind.TEAM).state,
+            SupportCallParticipant.State.RINGING,
+        )
+
+        offer = self.client.post(
+            f"/api/v1/support/widget/{self.website.site_key}/sessions/{self.session['id']}/calls/{call.id}/signals/",
+            {"signal_type": "offer", "payload": {"signal_id": "visitor-offer", "sdp": "visitor-sdp"}},
+            format="json",
+            **self._widget_headers(self.website, self.session),
+        )
+        self.assertEqual(offer.status_code, 201, offer.data)
+
+        self.client.force_authenticate(self.owner)
+        active = self.client.get("/api/v1/support/calls/active/")
+        self.assertEqual(active.status_code, 200)
+        self.assertEqual(active.data["call"]["id"], str(call.id))
+        accepted = self.client.post(f"/api/v1/support/calls/{call.id}/accept/", {}, format="json")
+        self.assertEqual(accepted.status_code, 200, accepted.data)
+        self.assertEqual(accepted.data["status"], SupportCallSession.Status.ONGOING)
+        detail = self.client.get(f"/api/v1/support/calls/{call.id}/")
+        self.assertEqual(detail.data["pending_signals"][0]["signal_id"], "visitor-offer")
+
     def test_agent_from_another_website_cannot_access_or_signal_call(self):
         started = self._start()
         other_website = SupportWebsite.objects.create(
@@ -362,4 +401,3 @@ class SupportGuestCallTests(APITestCase):
         self.assertIn("Support Chat readiness summary", text)
         self.assertIn("Guest calls: enabled", text)
         self.assertIn("passed readiness checks", text)
-

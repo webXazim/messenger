@@ -208,6 +208,7 @@ from apps.support.webhook_services import (
 from apps.support.call_services import (
     SupportCallError,
     accept_support_call,
+    accept_visitor_support_call,
     call_event_payload,
     call_settings_for,
     create_call_signal,
@@ -216,6 +217,7 @@ from apps.support.call_services import (
     pending_call_signals,
     signal_payload,
     start_support_call,
+    start_visitor_support_call,
     support_calls_enabled,
     support_turn_credentials,
     team_turn_credentials,
@@ -2904,6 +2906,49 @@ class SupportCallEndView(APIView):
         return Response(call_event_payload(call))
 
 
+class SupportCallAcceptView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "support_call_action"
+
+    def post(self, request, call_id):
+        context, error = require_support_access(request)
+        if error:
+            return error
+        try:
+            call = team_call_for_context(context, call_id, request.user)
+            call = accept_visitor_support_call(call=call, user=request.user)
+        except (SupportCallError, SupportConversationError) as call_error:
+            if isinstance(call_error, SupportConversationError):
+                return support_conversation_error_response(call_error)
+            return support_call_error_response(call_error)
+        return Response(call_event_payload(call))
+
+
+class SupportCallDeclineView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "support_call_action"
+
+    def post(self, request, call_id):
+        context, error = require_support_access(request)
+        if error:
+            return error
+        try:
+            call = team_call_for_context(context, call_id, request.user)
+            if call.initiator_kind != SupportCallSession.InitiatorKind.VISITOR:
+                raise SupportCallError("invalid_call_direction", "This call is waiting for the website visitor.", 409)
+            call = end_support_call(
+                call=call,
+                actor_user=request.user,
+                reason=str(request.data.get("reason") or "declined"),
+                forced_status=SupportCallSession.Status.DECLINED,
+            )
+        except (SupportCallError, SupportConversationError) as call_error:
+            if isinstance(call_error, SupportConversationError):
+                return support_conversation_error_response(call_error)
+            return support_call_error_response(call_error)
+        return Response(call_event_payload(call))
+
+
 class SupportCallSignalView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "support_call_signal"
@@ -3018,6 +3063,28 @@ class SupportWidgetActiveCallView(APIView):
         payload = call_event_payload(call)
         payload["pending_signals"] = [signal_payload(item) for item in signals]
         return public_widget_response({"call": payload})
+
+
+class SupportWidgetCallStartView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "support_call_action"
+
+    def post(self, request, site_key, session_id):
+        serializer = SupportCallStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            session = _widget_call_session(request, site_key, session_id)
+            call = start_visitor_support_call(
+                session=session,
+                call_type=serializer.validated_data["call_type"],
+            )
+        except WidgetAccessError as widget_error:
+            return widget_error_response(widget_error)
+        except SupportCallError as call_error:
+            return support_call_error_response(call_error, public=True)
+        return public_widget_response(call_event_payload(call), status_code=status.HTTP_201_CREATED)
 
 
 class SupportWidgetCallDetailView(APIView):

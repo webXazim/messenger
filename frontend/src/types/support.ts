@@ -667,6 +667,7 @@ export type SupportCall = {
   visitor_id: string;
   visitor_name: string;
   initiated_by: SupportOwner;
+  initiator_kind: "team" | "visitor";
   call_type: "voice" | "video";
   status: "ringing" | "ongoing" | "declined" | "missed" | "ended" | "failed";
   started_at: string;

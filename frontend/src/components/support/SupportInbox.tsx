@@ -622,9 +622,18 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   }, [messagesQuery.data, queryClient, selectedId]);
 
   useEffect(() => {
-    if (!selectedId) return;
     return supportSocket.subscribe((payload) => {
       const conversationId = String(payload.data?.conversation_id || "");
+      if (
+        payload.event === "support.call.ringing" &&
+        String(payload.data?.initiator_kind || "") === "visitor"
+      ) {
+        const incomingCall = payload.data as unknown as SupportCall;
+        setActiveCall(incomingCall);
+        queryClient.setQueryData(["support-active-call"], { call: incomingCall });
+        if (conversationId && conversationId !== selectedId) openConversation(conversationId);
+        return;
+      }
       if (conversationId && conversationId !== selectedId) return;
 
       if (
