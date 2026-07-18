@@ -40,6 +40,96 @@ npm ci
 npm run dev
 ```
 
+## Support Chat foundation
+
+Support Chat is an isolated premium product inside the existing Messenger deployment.
+It is disabled by default so production Messenger behavior does not change during
+the controlled rollout.
+
+```env
+SUPPORT_CHAT_ENABLED=True
+SUPPORT_CHAT_PRODUCT_CODE=support-chat
+SUPPORT_AGENT_INVITE_TTL_HOURS=168
+VITE_SUPPORT_PLANS_URL=/settings
+# Optional; normally derived from VITE_API_BASE_URL
+VITE_SUPPORT_WS_URL=
+```
+
+After deploying this upgrade, apply the committed migration:
+
+```bash
+docker compose exec web python manage.py migrate
+```
+
+Until payment activation is connected in a later upgrade, create or update the
+owner's `Support Chat account` from Django admin and set its status to `Active`
+or `Trialing`. Website and agent limits are stored on that hidden support account.
+The owner can invite agents from **Support Chat → Agents**, assign one or more
+websites, and grant limited support permissions. Pending invitations reserve plan
+seats until accepted, revoked, or expired. Invitation links are stored as hashes,
+expire after the configured TTL, and must be accepted by the invited email address.
+Personal Messenger data, APIs, E2EE, calls, friends, unread state, and subscriptions
+remain independent.
+
+The Support inbox now connects signed website visitors to isolated Support
+conversations backed by the existing message storage layer. Visitors are not
+Messenger users and Support conversations have no Messenger participant rows.
+Enable public text messaging only after applying migrations and validating every
+website origin:
+
+```env
+SUPPORT_WIDGET_ENABLED=True
+SUPPORT_WIDGET_REQUIRE_ORIGIN=True
+SUPPORT_WIDGET_MESSAGE_RATE=60/min
+```
+
+See `docs/SUPPORT_CONVERSATIONS.md` for the access, assignment, read-state, and
+responsive inbox boundaries. Support-specific WebSockets now deliver messages,
+workflow changes, assignment refreshes, and cross-website unread notifications.
+Polling remains active only as the safe fallback when realtime is unavailable.
+See `docs/SUPPORT_REALTIME.md` for routes, event contracts, permission rechecks,
+and deployment boundaries.
+
+Support Chat now reuses the private Messenger upload and media pipeline for
+images, videos, documents, normal audio, and voice notes. Support uploads are
+explicitly scoped and stored under account, website, and conversation prefixes;
+they cannot be attached to personal Messenger messages. Configure the per-message
+limits and upload throttles before enabling visitor attachments:
+
+```env
+SUPPORT_MAX_ATTACHMENTS_PER_MESSAGE=8
+SUPPORT_MAX_MESSAGE_UPLOAD_BYTES=0
+SUPPORT_UPLOAD_CREATE_RATE=20/min
+SUPPORT_WIDGET_UPLOAD_RATE=12/min
+```
+
+See `docs/SUPPORT_MEDIA.md` for storage, scanning, authorization, voice-note, and
+responsive widget boundaries.
+
+Support Chat now includes permission-scoped service analytics and customer
+satisfaction feedback. Owners can report across all Support websites; agents must
+have analytics permission and remain limited to assigned websites. Resolving a
+conversation can request a one-time 1–5 rating from the origin-bound website
+visitor, with optional comments and realtime/polling updates. Apply migration
+`support.0008_analytics_and_customer_feedback`. See
+`docs/SUPPORT_ANALYTICS_FEEDBACK.md` for endpoint, privacy, reporting, CSAT, and
+responsive-interface boundaries.
+
+Support Chat now includes owner-only data governance: signed outbound webhooks,
+short-lived private exports, configurable retention, and visitor-data deletion.
+These operations are Support-scoped and cannot select or delete personal Messenger
+records. Configure delivery and export limits before enabling integrations:
+
+```env
+SUPPORT_WEBHOOK_TIMEOUT_SECONDS=10
+SUPPORT_WEBHOOK_MAX_ATTEMPTS=6
+SUPPORT_EXPORT_MAX_ATTACHMENT_BYTES=262144000
+```
+
+Apply migration `support.0010_integrations_data_governance` and keep both the Celery
+worker and Celery Beat running. See `docs/SUPPORT_DATA_GOVERNANCE.md` for security,
+privacy, retention, export, webhook, and deletion boundaries.
+
 ## Production architecture
 
 ```text
@@ -238,3 +328,28 @@ docker compose \
   -f docker-compose.yml \
   -f docker-compose.production.yml \
   up -d --no-build --remove-orphans
+## Support guest calling and final launch gate
+
+Support Chat can provide website-visitor audio/video calls through dedicated
+Support records and endpoints. Personal Messenger calling remains unchanged.
+Calling is disabled by default and should be enabled only after the widget,
+approved origins, Redis realtime, TURN authentication, Celery worker, and Celery
+Beat are verified.
+
+```env
+SUPPORT_CALLS_ENABLED=False
+SUPPORT_CALL_RING_TIMEOUT_SECONDS=45
+SUPPORT_CALL_SIGNAL_MAX_BYTES=131072
+SUPPORT_CALL_ACTION_RATE=30/min
+SUPPORT_CALL_SIGNAL_RATE=240/min
+```
+
+Deploy the migration and run the readiness command before changing the flag:
+
+```bash
+docker compose exec web python manage.py migrate
+docker compose exec web python manage.py check_support_readiness --fail-on-warning
+```
+
+Then enable audio/video only for a selected test website and validate calls from
+two external networks. See `UPGRADE_12.md` and `docs/SUPPORT_GUEST_CALLS.md`.

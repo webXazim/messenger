@@ -30,8 +30,10 @@
     "check:settings": "npm run typecheck && npm run test:settings",
     "test:accessibility": "node scripts/check-accessibility-source.mjs",
     "check:accessibility": "npm run typecheck && npm run test:accessibility",
-    "test:product": "npm run test:auth && npm run test:e2ee && npm run test:realtime && npm run test:pagination && npm run test:timeline && npm run test:composer-media && npm run test:navigation && npm run test:contacts-groups && npm run test:settings && npm run test:accessibility && npm run test:call",
-    "check:product": "npm run typecheck && npm run test:product && npm run build"
+    "test:product": "npm run test:auth && npm run test:e2ee && npm run test:realtime && npm run test:pagination && npm run test:timeline && npm run test:composer-media && npm run test:navigation && npm run test:contacts-groups && npm run test:settings && npm run test:accessibility && npm run test:support && npm run test:call",
+    "check:product": "npm run typecheck && npm run test:product && npm run build",
+    "test:support": "node scripts/check-support-source.mjs",
+    "check:support": "npm run typecheck && npm run test:support"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

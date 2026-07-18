@@ -157,6 +157,7 @@ done
 "${compose[@]}" exec -T web python manage.py check --deploy
 "${compose[@]}" exec -T web python manage.py migrate --check
 "${compose[@]}" exec -T web python manage.py check_chat_readiness
+"${compose[@]}" exec -T web python manage.py check_support_readiness
 "${compose[@]}" exec -T worker celery -A config inspect ping --timeout=10
 "${compose[@]}" exec -T web python manage.py check_object_storage
 

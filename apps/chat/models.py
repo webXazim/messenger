@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 
 from django.conf import settings
 from django.db import models
@@ -6,6 +7,58 @@ from django.utils import timezone
 
 from apps.common.models import BaseUUIDModel
 from apps.chat.storage import attachment_storage_factory, pending_upload_storage_factory
+
+
+def _safe_storage_name(filename: str) -> str:
+    return Path(str(filename or "upload")).name or "upload"
+
+
+def pending_upload_path(instance, filename: str) -> str:
+    name = _safe_storage_name(filename)
+    date_path = timezone.now().strftime("%Y/%m")
+    if getattr(instance, "purpose", "messenger") == "support":
+        metadata = dict(getattr(instance, "metadata", None) or {})
+        account_id = metadata.get("support_account_id") or "unassigned"
+        website_id = metadata.get("support_website_id") or "unassigned"
+        return f"support/{account_id}/{website_id}/pending/{date_path}/{name}"
+    return f"chat/pending/{date_path}/{name}"
+
+
+def pending_upload_thumbnail_path(instance, filename: str) -> str:
+    name = _safe_storage_name(filename)
+    date_path = timezone.now().strftime("%Y/%m")
+    if getattr(instance, "purpose", "messenger") == "support":
+        metadata = dict(getattr(instance, "metadata", None) or {})
+        account_id = metadata.get("support_account_id") or "unassigned"
+        website_id = metadata.get("support_website_id") or "unassigned"
+        return f"support/{account_id}/{website_id}/pending-thumbnails/{date_path}/{name}"
+    return f"chat/pending_thumbnails/{date_path}/{name}"
+
+
+def message_attachment_path(instance, filename: str) -> str:
+    name = _safe_storage_name(filename)
+    date_path = timezone.now().strftime("%Y/%m")
+    try:
+        support_conversation = instance.message.conversation.support_conversation
+    except Exception:
+        return f"chat/attachments/{date_path}/{name}"
+    return (
+        f"support/{support_conversation.website.support_account_id}/"
+        f"{support_conversation.website_id}/{support_conversation.id}/attachments/{date_path}/{name}"
+    )
+
+
+def message_attachment_thumbnail_path(instance, filename: str) -> str:
+    name = _safe_storage_name(filename)
+    date_path = timezone.now().strftime("%Y/%m")
+    try:
+        support_conversation = instance.message.conversation.support_conversation
+    except Exception:
+        return f"chat/attachments/thumbnails/{date_path}/{name}"
+    return (
+        f"support/{support_conversation.website.support_account_id}/"
+        f"{support_conversation.website_id}/{support_conversation.id}/thumbnails/{date_path}/{name}"
+    )
 
 
 def pending_upload_expiry_default():
@@ -74,6 +127,10 @@ class ConversationParticipant(BaseUUIDModel):
 
 
 class PendingUpload(BaseUUIDModel):
+    class Purpose(models.TextChoices):
+        MESSENGER = "messenger", "Messenger"
+        SUPPORT = "support", "Support Chat"
+
     class MediaKind(models.TextChoices):
         IMAGE = "image", "Image"
         VIDEO = "video", "Video"
@@ -92,8 +149,9 @@ class PendingUpload(BaseUUIDModel):
         INFECTED = "infected", "Infected"
         FAILED = "failed", "Failed"
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pending_uploads")
-    file = models.FileField(upload_to="chat/pending/%Y/%m/", storage=pending_upload_storage_factory)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name="pending_uploads")
+    purpose = models.CharField(max_length=16, choices=Purpose.choices, default=Purpose.MESSENGER, db_index=True)
+    file = models.FileField(upload_to=pending_upload_path, storage=pending_upload_storage_factory, max_length=500)
     original_name = models.CharField(max_length=255)
     media_kind = models.CharField(max_length=20, choices=MediaKind.choices, default=MediaKind.FILE)
     mime_type = models.CharField(max_length=255, blank=True)
@@ -104,8 +162,9 @@ class PendingUpload(BaseUUIDModel):
     rotation = models.IntegerField(null=True, blank=True)
     duration_seconds = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     thumbnail = models.ImageField(
-        upload_to="chat/pending_thumbnails/%Y/%m/",
+        upload_to=pending_upload_thumbnail_path,
         storage=pending_upload_storage_factory,
+        max_length=500,
         blank=True,
         null=True,
     )
@@ -121,6 +180,13 @@ class PendingUpload(BaseUUIDModel):
         indexes = [
             models.Index(fields=["user", "status", "created_at"]),
             models.Index(fields=["user", "expires_at"]),
+            models.Index(fields=["purpose", "status", "created_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(purpose="support") | models.Q(user__isnull=False),
+                name="chat_pending_messenger_user_required",
+            ),
         ]
 
 
@@ -197,7 +263,7 @@ class Message(BaseUUIDModel):
         SYSTEM = "system", "System"
 
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
-    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_messages")
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name="sent_messages")
     type = models.CharField(max_length=20, choices=MessageType.choices, default="text")
     text = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
@@ -272,7 +338,7 @@ class MessageAttachment(BaseUUIDModel):
         FAILED = "failed", "Failed"
 
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="attachments")
-    file = models.FileField(upload_to="chat/attachments/%Y/%m/", storage=attachment_storage_factory)
+    file = models.FileField(upload_to=message_attachment_path, storage=attachment_storage_factory, max_length=500)
     original_name = models.CharField(max_length=255)
     media_kind = models.CharField(max_length=20, choices=MediaKind.choices, default=MediaKind.FILE)
     mime_type = models.CharField(max_length=255, blank=True)
@@ -282,8 +348,9 @@ class MessageAttachment(BaseUUIDModel):
     rotation = models.IntegerField(null=True, blank=True)
     duration_seconds = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     thumbnail = models.ImageField(
-        upload_to="chat/attachments/thumbnails/%Y/%m/",
+        upload_to=message_attachment_thumbnail_path,
         storage=attachment_storage_factory,
+        max_length=500,
         blank=True,
         null=True,
     )

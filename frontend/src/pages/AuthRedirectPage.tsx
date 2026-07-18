@@ -5,6 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { APP_NAME } from "../lib/config";
 import { parseApiError, type ApiFieldErrors } from "../lib/apiErrors";
 import { authApi } from "../api/auth";
+import { safeAppReturnPath } from "../lib/returnPath";
 
 type AuthPageMode = CentralAuthMode | "reset-password";
 
@@ -84,6 +85,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
   const verificationStarted = useRef(false);
   const isSignup = mode === "signup";
   const token = searchParams.get("token")?.trim() || "";
+  const returnPath = safeAppReturnPath(searchParams.get("next"), "/chat");
   const passwordScore = useMemo(() => [
     password.length >= 8,
     /[A-Z]/.test(password) && /[a-z]/.test(password),
@@ -165,7 +167,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
       } else {
         await login({ username: identifier.trim(), password });
       }
-      navigate("/chat", { replace: true });
+      navigate(returnPath, { replace: true });
     } catch (reason) {
       const parsed = parseApiError(reason, isSignup ? "Unable to create the account." : "Unable to sign in with those details.");
       if (!isSignup && parsed.message.toLowerCase().includes("email verification") && identifier.includes("@")) {
@@ -188,7 +190,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
     try {
       await confirmRegistrationCode(verificationEmail, verificationCode);
       await login({ username: username.trim() || identifier.trim() || verificationEmail, password });
-      navigate("/chat", { replace: true });
+      navigate(returnPath, { replace: true });
     } catch (reason) {
       setError(parseApiError(reason, "That code is invalid or has expired.").message);
     } finally {
@@ -416,7 +418,7 @@ export function AuthRedirectPage({ mode = "login" }: { mode?: AuthPageMode }) {
 
         {!isSignup ? <div className="auth-form-meta"><span>Protected session</span><Link to="/forgot-password">Forgot password?</Link></div> : null}
         <button className="auth-submit" type="submit" disabled={busy || (isSignup ? !username.trim() || !email.trim() || (usernameCheckIsCurrent && ["checking", "unavailable"].includes(usernameAvailability.status)) : !identifier.trim()) || !password}>{busy ? <><span className="auth-spinner" />Please wait…</> : isSignup ? "Create account" : "Sign in"}</button>
-        <p className="auth-switch">{isSignup ? "Already have an account?" : "New to Crescentsphere?"} <Link to={isSignup ? "/login" : "/register"}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
+        <p className="auth-switch">{isSignup ? "Already have an account?" : "New to Crescentsphere?"} <Link to={`${isSignup ? "/login" : "/register"}${returnPath !== "/chat" ? `?next=${encodeURIComponent(returnPath)}` : ""}`}>{isSignup ? "Sign in" : "Create an account"}</Link></p>
         <p className="auth-legal">By continuing, you agree to responsible use and acknowledge our privacy practices.</p>
       </form>
     </AuthFormShell>

@@ -38,6 +38,24 @@ SECRET_KEY = env_str("SECRET_KEY", "change-me")
 DEBUG = env_bool("DEBUG", False)
 MESSENGER_ENVIRONMENT = env_str("MESSENGER_ENVIRONMENT", "development" if DEBUG else "production").strip().lower()
 MESSENGER_REQUIRE_SECURE_SETTINGS = env_bool("MESSENGER_REQUIRE_SECURE_SETTINGS", MESSENGER_ENVIRONMENT == "production")
+SUPPORT_CHAT_ENABLED = env_bool("SUPPORT_CHAT_ENABLED", False)
+SUPPORT_CHAT_PRODUCT_CODE = env_str("SUPPORT_CHAT_PRODUCT_CODE", "support-chat").strip() or "support-chat"
+SUPPORT_AGENT_INVITE_TTL_HOURS = max(1, env_int("SUPPORT_AGENT_INVITE_TTL_HOURS", 168))
+SUPPORT_WIDGET_ENABLED = env_bool("SUPPORT_WIDGET_ENABLED", False)
+SUPPORT_WIDGET_REQUIRE_ORIGIN = env_bool("SUPPORT_WIDGET_REQUIRE_ORIGIN", not DEBUG)
+SUPPORT_WIDGET_SESSION_TTL_HOURS = max(1, env_int("SUPPORT_WIDGET_SESSION_TTL_HOURS", 24 * 30))
+SUPPORT_MAX_ATTACHMENTS_PER_MESSAGE = max(1, env_int("SUPPORT_MAX_ATTACHMENTS_PER_MESSAGE", 8))
+SUPPORT_MAX_MESSAGE_UPLOAD_BYTES = max(0, env_int("SUPPORT_MAX_MESSAGE_UPLOAD_BYTES", 0))
+SUPPORT_WEBHOOK_TIMEOUT_SECONDS = max(2, env_int("SUPPORT_WEBHOOK_TIMEOUT_SECONDS", 10))
+SUPPORT_WEBHOOK_MAX_ATTEMPTS = max(1, env_int("SUPPORT_WEBHOOK_MAX_ATTEMPTS", 6))
+SUPPORT_EXPORT_MAX_ATTACHMENT_BYTES = max(0, env_int("SUPPORT_EXPORT_MAX_ATTACHMENT_BYTES", 250 * 1024 * 1024))
+SUPPORT_CALLS_ENABLED = env_bool("SUPPORT_CALLS_ENABLED", False)
+SUPPORT_CALL_RING_TIMEOUT_SECONDS = max(15, env_int("SUPPORT_CALL_RING_TIMEOUT_SECONDS", 45))
+SUPPORT_CALL_SIGNAL_MAX_BYTES = max(16384, env_int("SUPPORT_CALL_SIGNAL_MAX_BYTES", 131072))
+SUPPORT_WIDGET_SCRIPT_URL = env_str(
+    "SUPPORT_WIDGET_SCRIPT_URL",
+    f"{env_str('SITE_URL', 'https://dm.crescentsphere.com').rstrip('/')}/support-widget/v1/widget.js",
+).strip()
 NEARBY_LOCATION_TTL_HOURS = max(1, env_int("NEARBY_LOCATION_TTL_HOURS", 24))
 APP_DOMAIN = env_str("APP_DOMAIN", "").strip().lower()
 ALLOWED_HOSTS = env_csv("ALLOWED_HOSTS", "127.0.0.1,localhost,0.0.0.0,192.168.0.165")
@@ -88,6 +106,7 @@ INSTALLED_APPS = [
     "apps.common",
     "apps.accounts",
     "apps.chat",
+    "apps.support",
 ]
 
 MIDDLEWARE = [
@@ -254,6 +273,14 @@ REST_FRAMEWORK = {
         "block_write": env_str("BLOCK_WRITE_RATE", "30/min"),
         "device_write": env_str("DEVICE_WRITE_RATE", "30/min"),
         "media_token": env_str("MEDIA_TOKEN_RATE", "120/min"),
+        "support_widget_config": env_str("SUPPORT_WIDGET_CONFIG_RATE", "120/min"),
+        "support_widget_session": env_str("SUPPORT_WIDGET_SESSION_RATE", "30/min"),
+        "support_widget_resume": env_str("SUPPORT_WIDGET_RESUME_RATE", "120/min"),
+        "support_widget_message": env_str("SUPPORT_WIDGET_MESSAGE_RATE", "60/min"),
+        "support_upload_create": env_str("SUPPORT_UPLOAD_CREATE_RATE", "20/min"),
+        "support_widget_upload": env_str("SUPPORT_WIDGET_UPLOAD_RATE", "12/min"),
+        "support_call_action": env_str("SUPPORT_CALL_ACTION_RATE", "30/min"),
+        "support_call_signal": env_str("SUPPORT_CALL_SIGNAL_RATE", "240/min"),
     },
 }
 

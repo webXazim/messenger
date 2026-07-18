@@ -3,10 +3,12 @@
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string;
   readonly VITE_WS_BASE_URL?: string;
+  readonly VITE_SUPPORT_WS_URL?: string;
   readonly VITE_AUTH_BASE_URL?: string;
   readonly VITE_CENTRAL_AUTH_ORIGIN?: string;
   readonly VITE_SOCIAL_BASE_URL?: string;
   readonly VITE_APP_NAME?: string;
+  readonly VITE_SUPPORT_PLANS_URL?: string;
   readonly VITE_FIREBASE_API_KEY?: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN?: string;
   readonly VITE_FIREBASE_PROJECT_ID?: string;

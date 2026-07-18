@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
+import { useSupportRealtime } from "../hooks/useSupportRealtime";
 import { chatApi, normalizeCall, normalizeConversation, normalizeMessage } from "../api/chat";
 import type { Call, Conversation } from "../types/chat";
 import { IncomingCallBanner } from "./IncomingCallBanner";
@@ -114,6 +115,7 @@ async function resolveMessageNotificationBody(userId: string, message: ReturnTyp
 export function AppShell() {
   const { user, logout } = useAuth();
   const { socket, socketStatus } = useChatSocket();
+  const supportRealtime = useSupportRealtime();
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -629,6 +631,7 @@ export function AppShell() {
 
   const userLabel = user?.profile?.display_name || user?.full_name || user?.username || "You";
   const isFocusedChat = /^\/chat\/[^/]+\/?$/.test(location.pathname);
+  const productMode = location.pathname.startsWith("/support") ? "support" : "messenger";
   const activeCallIsExpanded = Boolean(activeCallId && (routeCallId === activeCallId || expandedCallId === activeCallId));
   const isCallRoom = Boolean(routeCallId || activeCallIsExpanded);
   const activeCallContextValue = useMemo(() => ({
@@ -648,7 +651,7 @@ export function AppShell() {
       >
       <a className="ms-skip-link" href="#main-content">Skip to main content</a>
       {!isCallRoom ? (
-        <DesktopNavigationRail userLabel={userLabel} userAvatar={user?.profile?.avatar} socketStatus={socketStatus} onLogout={logout} />
+        <DesktopNavigationRail mode={productMode} userLabel={userLabel} userAvatar={user?.profile?.avatar} socketStatus={productMode === "support" ? supportRealtime.socketStatus : socketStatus} supportUnread={supportRealtime.unreadTotal + supportRealtime.alertUnread} onLogout={logout} />
       ) : null}
       <main id="main-content" className="ms-app-main" tabIndex={-1}>
         {webPushBanner ? (
@@ -697,7 +700,7 @@ export function AppShell() {
           </div>
         </div>
       </main>
-      {!isFocusedChat && !isCallRoom ? <MobileBottomNavigation /> : null}
+      {!isFocusedChat && !isCallRoom ? <MobileBottomNavigation mode={productMode} supportUnread={supportRealtime.unreadTotal + supportRealtime.alertUnread} /> : null}
       {incomingCall && showCallOverlay ? (
         <IncomingCallOverlay
           call={incomingCall}
@@ -708,8 +711,38 @@ export function AppShell() {
           onAccept={() => void handleIncomingCallAction("accept")}
         />
       ) : null}
-      {messageToasts.length ? (
+      {messageToasts.length || supportRealtime.toasts.length ? (
         <div className="ms-toast-stack" role="status" aria-live="polite">
+          {supportRealtime.toasts.map((toast) => (
+            <article key={`support:${toast.id}`} className="ms-toast">
+              <button
+                type="button"
+                className="ms-toast__open"
+                onClick={() => {
+                  supportRealtime.dismissToast(toast.id);
+                  navigate(`/support/inbox?conversation=${encodeURIComponent(toast.conversationId)}`);
+                }}
+              >
+                <UserAvatar person={{ display_name: toast.visitorName }} size="sm" className="ms-toast__avatar" decorative />
+                <span className="ms-toast__copy">
+                  <strong>{toast.visitorName}</strong>
+                  <span>{toast.body}</span>
+                  <small className="ms-support-toast__site">{toast.websiteName}</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="ms-toast__reply"
+                onClick={() => {
+                  supportRealtime.dismissToast(toast.id);
+                  navigate(`/support/inbox?conversation=${encodeURIComponent(toast.conversationId)}`);
+                }}
+              >
+                Open
+              </button>
+              <button type="button" className="ms-toast__close" aria-label="Dismiss Support Chat notification" onClick={() => supportRealtime.dismissToast(toast.id)}>×</button>
+            </article>
+          ))}
           {messageToasts.map((toast) => (
             <article key={toast.id} className="ms-toast">
               <button

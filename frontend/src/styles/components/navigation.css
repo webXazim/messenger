@@ -348,3 +348,126 @@
     grid-template-rows: 1fr;
   }
 }
+
+/* Product-level switch: Messenger and Support Chat remain visually connected but operationally isolated. */
+.ms-desktop-rail {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.ms-desktop-product-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.ms-desktop-product-switch a,
+.ms-mobile-product-switch a {
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / 0.48);
+  text-decoration: none;
+}
+
+.ms-desktop-product-switch a {
+  min-width: 0;
+  height: 2rem;
+  border-radius: 0.5rem;
+}
+
+.ms-desktop-product-switch a:hover,
+.ms-desktop-product-switch a.is-active,
+.ms-mobile-product-switch a:hover,
+.ms-mobile-product-switch a.is-active {
+  background: #ffffff;
+  color: #111111;
+}
+
+.ms-desktop-product-switch svg,
+.ms-mobile-product-switch svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ms-desktop-product-switch span,
+.ms-mobile-product-switch span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ms-mobile-product-switch {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .ms-mobile-nav__links.is-support {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .ms-mobile-product-switch {
+    position: fixed;
+    right: max(0.75rem, env(safe-area-inset-right, 0px));
+    bottom: calc(var(--ms-mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 0.75rem);
+    z-index: 105;
+    display: grid;
+    grid-template-columns: repeat(2, 2.25rem);
+    gap: 0.25rem;
+    padding: 0.25rem;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 0.875rem;
+    background: #090909;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 0.2);
+  }
+
+  .ms-mobile-product-switch a {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.625rem;
+  }
+}
+
+.ms-desktop-product-switch a,
+.ms-mobile-product-switch a {
+  position: relative;
+}
+
+.ms-desktop-product-switch .ms-product-unread,
+.ms-mobile-product-switch .ms-product-unread {
+  position: absolute;
+  top: -0.32rem;
+  right: -0.32rem;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  display: grid;
+  place-items: center;
+  padding: 0 0.22rem;
+  border: 2px solid #090909;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 0.58rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.ms-desktop-product-switch a.is-active .ms-product-unread,
+.ms-mobile-product-switch a.is-active .ms-product-unread {
+  border-color: #ffffff;
+  background: #111111;
+  color: #ffffff;
+}

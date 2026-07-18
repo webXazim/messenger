@@ -29,6 +29,8 @@ x-backend-common: &backend-common
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
     FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
     SITE_URL: ${SITE_URL:-http://localhost:8080}
+    SUPPORT_CHAT_ENABLED: ${SUPPORT_CHAT_ENABLED:-false}
+    SUPPORT_CHAT_PRODUCT_CODE: ${SUPPORT_CHAT_PRODUCT_CODE:-support-chat}
   volumes:
     - private_media:/app/private_media
     - media:/app/media
@@ -90,6 +92,8 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
       SITE_URL: ${SITE_URL:-http://localhost:8080}
+    SUPPORT_CHAT_ENABLED: ${SUPPORT_CHAT_ENABLED:-false}
+    SUPPORT_CHAT_PRODUCT_CODE: ${SUPPORT_CHAT_PRODUCT_CODE:-support-chat}
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
       RUN_COLLECTSTATIC: "1"
     expose:
@@ -156,8 +160,10 @@ services:
         VITE_AUTH_BASE_URL: ${VITE_AUTH_BASE_URL:-/api/v1}
         VITE_CENTRAL_AUTH_ORIGIN: ${VITE_CENTRAL_AUTH_ORIGIN:-http://localhost:8080}
         VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
+        VITE_SUPPORT_WS_URL: ${VITE_SUPPORT_WS_URL:-}
         VITE_APP_NAME: ${VITE_APP_NAME:-Crescentsphere Messenger}
         VITE_SOCIAL_BASE_URL: ${VITE_SOCIAL_BASE_URL:-http://localhost:8080}
+        VITE_SUPPORT_PLANS_URL: ${VITE_SUPPORT_PLANS_URL:-/settings}
     restart: unless-stopped
     expose:
       - "80"

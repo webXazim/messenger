@@ -10,6 +10,14 @@ function routeLabel(pathname: string) {
   if (pathname === "/friends") return "Contacts";
   if (pathname === "/groups") return "Groups";
   if (pathname === "/settings") return "Settings";
+  if (pathname === "/support/invitations/accept") return "Support Chat invitation";
+  if (pathname === "/support/inbox") return "Support inbox";
+  if (pathname === "/support/agents") return "Support agents";
+  if (pathname === "/support/analytics") return "Support analytics";
+  if (pathname === "/support/knowledge") return "Support knowledge";
+  if (pathname === "/support/websites") return "Support websites";
+  if (pathname === "/support/settings") return "Support settings";
+  if (pathname === "/support") return "Support Chat";
   if (pathname === "/register") return "Create account";
   if (pathname === "/forgot-password") return "Reset password";
   if (pathname === "/auth/reset-password") return "Choose a new password";

@@ -2031,6 +2031,7 @@ def create_user_status(actor, *, text="", upload_id=None, background_color="#111
         upload = PendingUpload.objects.select_for_update().filter(
             id=upload_id,
             user=actor,
+            purpose=PendingUpload.Purpose.MESSENGER,
             status=PendingUpload.UploadStatus.PENDING,
         ).first()
         if upload is None:
@@ -2612,6 +2613,7 @@ def _validate_uploads_for_message(actor, attachment_ids):
         PendingUpload.objects.select_for_update().filter(
             id__in=attachment_ids,
             user=actor,
+            purpose=PendingUpload.Purpose.MESSENGER,
             status=PendingUpload.UploadStatus.PENDING,
         )
     )
@@ -2633,6 +2635,68 @@ def _validate_uploads_for_message(actor, attachment_ids):
             )
 
     return uploads
+
+
+def attach_pending_uploads_to_message(
+    *,
+    message: Message,
+    uploads: list[PendingUpload],
+    attachment_encryption_payloads: dict | None = None,
+    view_once_attachment_ids: set[str] | None = None,
+) -> list[MessageAttachment]:
+    """Copy clean pending uploads into immutable message attachments.
+
+    This is the shared finalization path for Messenger and Support Chat. Ownership
+    and product-scope validation must happen before calling this helper.
+    """
+    encryption_payloads = attachment_encryption_payloads or {}
+    view_once_ids = {str(value) for value in (view_once_attachment_ids or set())}
+    attachments: list[MessageAttachment] = []
+    for upload in uploads:
+        attachment = MessageAttachment(
+            message=message,
+            original_name=upload.original_name,
+            media_kind=upload.media_kind or media_kind_from_mime(upload.mime_type),
+            mime_type=upload.mime_type,
+            size=upload.size,
+            width=upload.width,
+            height=upload.height,
+            rotation=upload.rotation,
+            duration_seconds=upload.duration_seconds,
+            scan_status=MessageAttachment.ScanStatus.CLEAN,
+            scan_notes=upload.scan_notes,
+            scanned_at=upload.scanned_at,
+            metadata={
+                **dict(upload.metadata or {}),
+                **(
+                    {"encrypted_attachment": True, "encryption": encryption_payloads[str(upload.id)]}
+                    if str(upload.id) in encryption_payloads
+                    else {}
+                ),
+            },
+            view_once=str(upload.id) in view_once_ids,
+        )
+        with upload.file.open("rb") as source:
+            attachment.file.save(Path(upload.file.name).name, File(source), save=False)
+        if upload.thumbnail:
+            with upload.thumbnail.open("rb") as source:
+                attachment.thumbnail.save(Path(upload.thumbnail.name).name, File(source), save=False)
+        attachment.save()
+        upload.status = PendingUpload.UploadStatus.ATTACHED
+        upload.save(update_fields=["status", "updated_at"])
+        attachments.append(attachment)
+    return attachments
+
+
+def infer_message_type_from_uploads(uploads: list[PendingUpload]) -> str:
+    if len(uploads) != 1:
+        return Message.MessageType.FILE
+    upload = uploads[0]
+    return {
+        PendingUpload.MediaKind.IMAGE: Message.MessageType.IMAGE,
+        PendingUpload.MediaKind.VIDEO: Message.MessageType.VIDEO,
+        PendingUpload.MediaKind.AUDIO: Message.MessageType.AUDIO,
+    }.get(upload.media_kind or media_kind_from_mime(upload.mime_type), Message.MessageType.FILE)
 
 
 @transaction.atomic
@@ -2754,51 +2818,15 @@ def send_message(
         _lock_message_editing(reply_to, "message_has_replies")
         message._edit_locked_reply_target = reply_to
 
-    attached_any = False
-    if uploads:
-        for upload in uploads:
-            attachment = MessageAttachment(
-                message=message,
-                original_name=upload.original_name,
-                media_kind=upload.media_kind or media_kind_from_mime(upload.mime_type),
-                mime_type=upload.mime_type,
-                size=upload.size,
-                width=upload.width,
-                height=upload.height,
-                rotation=upload.rotation,
-                duration_seconds=upload.duration_seconds,
-                scan_status=MessageAttachment.ScanStatus.CLEAN,
-                scan_notes=upload.scan_notes,
-                scanned_at=upload.scanned_at,
-                metadata={
-                    **dict(upload.metadata or {}),
-                    **(
-                        {"encrypted_attachment": True, "encryption": attachment_encryption_payloads[str(upload.id)]}
-                        if str(upload.id) in attachment_encryption_payloads
-                        else {}
-                    ),
-                },
-                view_once=str(upload.id) in view_once_attachment_ids,
-            )
-            with upload.file.open("rb") as source:
-                attachment.file.save(Path(upload.file.name).name, File(source), save=False)
-            if upload.thumbnail:
-                with upload.thumbnail.open("rb") as source:
-                    attachment.thumbnail.save(Path(upload.thumbnail.name).name, File(source), save=False)
-            attachment.save()
-            upload.status = PendingUpload.UploadStatus.ATTACHED
-            upload.save(update_fields=["status", "updated_at"])
-            attached_any = True
+    attachments = attach_pending_uploads_to_message(
+        message=message,
+        uploads=uploads,
+        attachment_encryption_payloads=attachment_encryption_payloads,
+        view_once_attachment_ids=view_once_attachment_ids,
+    ) if uploads else []
 
-    if attached_any and not text and message_type == Message.MessageType.TEXT:
-        inferred_type = Message.MessageType.FILE
-        if len(uploads) == 1:
-            inferred_type = {
-                PendingUpload.MediaKind.IMAGE: Message.MessageType.IMAGE,
-                PendingUpload.MediaKind.VIDEO: Message.MessageType.VIDEO,
-                PendingUpload.MediaKind.AUDIO: Message.MessageType.AUDIO,
-            }.get(uploads[0].media_kind or media_kind_from_mime(uploads[0].mime_type), Message.MessageType.FILE)
-        message.type = inferred_type
+    if attachments and not text and message_type == Message.MessageType.TEXT:
+        message.type = infer_message_type_from_uploads(uploads)
         message.save(update_fields=["type"])
 
     conversation.last_message = message
@@ -3917,6 +3945,7 @@ def secure_attachment_queryset_for_user(user):
 def secure_pending_upload_queryset_for_user(user):
     return PendingUpload.objects.filter(
         user=user,
+        purpose=PendingUpload.Purpose.MESSENGER,
         scan_status=PendingUpload.ScanStatus.CLEAN,
         status=PendingUpload.UploadStatus.PENDING,
         expires_at__gt=timezone.now(),

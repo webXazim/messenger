@@ -7,6 +7,7 @@ from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 from apps.chat.api import urls as chat_api_urls
+from apps.support.api import urls as support_api_urls
 from apps.accounts.api import urls as accounts_api_urls
 from apps.accounts.api.views import AvatarView, LoginView, MeView, RefreshView, RegisterView, UsernameAvailabilityView
 from config.centralization_views import admin_action_catalog, admin_action_execute, centralization_control_snapshot, centralization_readiness, internal_admin_monitoring
@@ -42,6 +43,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/chat/", include(chat_api_urls.urlpatterns)),
     path("api/v1/chat/", include((chat_api_urls.urlpatterns, "chat"), namespace="chat")),
+    path("api/v1/support/", include((support_api_urls.urlpatterns, "support"), namespace="support")),
     path("firebase-messaging-sw.js", firebase_messaging_service_worker, name="firebase-messaging-service-worker"),
 ]
 
