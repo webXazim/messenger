@@ -34,6 +34,14 @@ assert.ok(app.includes('path="support/plans"'), "Support plans route is missing.
 assert.ok(supportPlans.includes("Start 14-day trial"), "Support plan activation action is missing.");
 assert.ok(supportPlans.includes("activatePlan"), "Support plan activation is not connected to the API.");
 assert.ok(api.includes("/support/plans/activate/"), "Support plan activation API is missing.");
+assert.ok(
+  api.includes("return response.data as SupportConversationListResponse"),
+  "Support conversation pagination must preserve its results object.",
+);
+assert.ok(
+  api.includes("return response.data as SupportServiceAlertList"),
+  "Support service-alert pagination must preserve its results object.",
+);
 assert.ok(supportPage.includes("InviteAgentSection"), "Owner agent invitation UI is missing.");
 assert.ok(supportPage.includes("PendingInvitationRow"), "Pending invitation management is missing.");
 assert.ok(supportPage.includes("AgentManagementCard"), "Responsive agent access management is missing.");

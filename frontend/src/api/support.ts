@@ -275,7 +275,7 @@ export const supportApi = {
       params: { status },
       signal,
     });
-    return unwrapData<SupportServiceAlertList>(response.data);
+    return response.data as SupportServiceAlertList;
   },
 
   async markServiceAlertRead(alertId: string) {
@@ -385,7 +385,7 @@ export const supportApi = {
       params: filters,
       signal,
     });
-    return unwrapData<SupportConversationListResponse>(response.data);
+    return response.data as SupportConversationListResponse;
   },
 
   async getConversationMessages(conversationId: string, signal?: AbortSignal) {
