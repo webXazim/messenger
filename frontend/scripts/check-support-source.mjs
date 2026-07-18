@@ -87,6 +87,10 @@ assert.ok(widgetLoader.includes("/conversation/uploads/"), "Widget visitor attac
 assert.ok(widgetLoader.includes("xhr.upload.onprogress"), "Widget attachment upload progress is missing.");
 assert.ok(widgetLoader.includes("cs-upload-preview"), "Widget attachment previews are missing.");
 assert.ok(widgetLoader.includes("Ready to send"), "Widget attachment readiness state is missing.");
+assert.ok(widgetLoader.includes("})).then(function ()"), "Widget upload completion must clear its busy state after every upload settles.");
+assert.ok(widgetLoader.includes("composerFocusRequested"), "Widget upload updates must preserve composer focus.");
+assert.ok(widgetLoader.includes("setSelectionRange"), "Widget rerenders must preserve the draft cursor position.");
+assert.ok(widgetLoader.includes("flex:0 0 100%"), "Widget attachment previews must fill the composer width.");
 assert.ok(widgetLoader.includes("MediaRecorder"), "Widget visitor voice recording is missing.");
 assert.ok(widgetLoader.includes("authorizedBlob"), "Widget private media rendering is missing.");
 assert.ok(css.includes(".ms-support-composer-row"), "Responsive Support media composer layout is missing.");

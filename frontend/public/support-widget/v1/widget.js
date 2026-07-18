@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws/support/widget/" + encodeURIComponent(siteKey) + "/";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -350,6 +350,7 @@
       state.pendingUploads.push(item);
       return { file: file, item: item };
     });
+    state.composerFocusRequested = true;
     render();
     Promise.all(queued.map(function (entry) {
       return uploadRequest(sessionPath("/conversation/uploads/"), entry.file, {}, function (progress) {
@@ -365,12 +366,13 @@
         entry.item.status = "failed";
         entry.item.error = error.message || "Upload failed.";
       });
-    }).then(function () {
+    })).then(function () {
       state.uploading = false;
       var failed = state.pendingUploads.filter(function (upload) { return upload.status === "failed"; });
       if (failed.length) state.error = "Attachment upload failed. " + failed[0].error;
+      state.composerFocusRequested = true;
       render();
-    }));
+    });
   }
 
   function updatePendingUploadProgress(upload) {
@@ -872,11 +874,11 @@
       .cs-receipt{font-weight:800;letter-spacing:-2px;color:#262626}.cs-receipt.is-pending{font-weight:500;letter-spacing:0;color:#8a8a8f}.cs-receipt.is-failed{font-weight:700;letter-spacing:0;color:#c62828}
       .cs-composer{grid-template-columns:auto minmax(0,1fr) auto;align-items:end;padding:10px 12px;gap:8px}
       .cs-composer textarea{min-height:46px;max-height:108px;padding:12px 15px;border-radius:24px;line-height:20px;overflow-y:auto}
-      .cs-upload-list{grid-column:1/-1;display:flex;gap:9px;padding:2px 0 3px;overflow-x:auto;scrollbar-width:thin}
-      .cs-upload-card{position:relative;flex:0 0 118px;display:grid;gap:6px;padding:7px;border:1px solid #d9d9dc;border-radius:13px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#f7f7f8"};overflow:hidden}
+      .cs-upload-list{grid-column:1/-1;display:flex;width:100%;gap:9px;padding:2px 0 3px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:thin}
+      .cs-upload-card{position:relative;flex:0 0 100%;width:100%;display:grid;gap:7px;padding:8px;border:1px solid #d9d9dc;border-radius:14px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#f7f7f8"};overflow:hidden;scroll-snap-align:start}
       .cs-upload-card.is-failed{border-color:#dc8f8f;background:${state.config && state.config.theme === "dark" ? "#321c1c" : "#fff2f2"}}
-      .cs-upload-preview{height:72px;display:grid;place-items:center;overflow:hidden;border-radius:9px;background:rgba(127,127,127,.12);color:#777;font-size:24px;font-weight:800}
-      .cs-upload-preview img,.cs-upload-preview video{width:100%;height:100%;display:block;object-fit:cover}
+      .cs-upload-preview{width:100%;height:min(190px,24dvh);display:grid;place-items:center;overflow:hidden;border-radius:10px;background:rgba(127,127,127,.12);color:#777;font-size:32px;font-weight:800}
+      .cs-upload-preview img,.cs-upload-preview video{width:100%;height:100%;display:block;object-fit:contain}
       .cs-upload-details{min-width:0;display:grid;gap:4px}.cs-upload-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:750}
       .cs-upload-status{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#777;font-size:9px}.cs-upload-card.is-failed .cs-upload-status{color:#b42318}
       .cs-upload-progress{height:3px;overflow:hidden;border-radius:999px;background:rgba(127,127,127,.18)}.cs-upload-progress span{display:block;width:0;height:100%;border-radius:inherit;background:${state.config ? state.config.primary_color : "#111"};transition:width 120ms linear}
@@ -1081,6 +1083,12 @@
       updateLauncherUnread(state.hasUnread);
       return;
     }
+    var activeElement = shadow.activeElement;
+    var composerWasFocused = Boolean(activeElement && activeElement.tagName === "TEXTAREA");
+    var composerSelectionStart = composerWasFocused ? activeElement.selectionStart : null;
+    var composerSelectionEnd = composerWasFocused ? activeElement.selectionEnd : null;
+    var restoreComposerFocus = Boolean(state.composerFocusRequested || composerWasFocused);
+    state.composerFocusRequested = false;
     var previousBody = shadow.querySelector(".cs-body");
     var distanceFromBottom = previousBody ? Math.max(0, previousBody.scrollHeight - previousBody.scrollTop - previousBody.clientHeight) : 0;
     var followLatest = state.followLatest !== false;
@@ -1142,6 +1150,7 @@
         remove.onclick = function () {
           if (upload.previewUrl) { try { URL.revokeObjectURL(upload.previewUrl); } catch (_) {} }
           state.pendingUploads.splice(index, 1);
+          state.composerFocusRequested = true;
           render();
         };
         card.appendChild(remove);
@@ -1157,10 +1166,11 @@
     var send = buttonIcon(node("button", "cs-send"), "send"); send.type = "submit"; send.setAttribute("aria-label", "Send");
     function updateComposerAction() {
       var readyUploads = state.pendingUploads.filter(function (upload) { return upload.status === "ready" && upload.id; });
+      var hasActiveUploads = state.pendingUploads.some(function (upload) { return upload.status === "uploading"; });
       var hasMessage = Boolean(state.draft.trim() || readyUploads.length);
       voice.hidden = hasMessage && !state.recording;
       send.hidden = !hasMessage || state.recording;
-      send.disabled = state.loading || state.uploading || !hasMessage;
+      send.disabled = state.loading || hasActiveUploads || !hasMessage;
     }
     updateComposerAction();
     textarea.oninput = function () {
@@ -1216,6 +1226,18 @@
           ? nextBody.scrollHeight
           : Math.max(0, nextBody.scrollHeight - nextBody.clientHeight - distanceFromBottom);
         if (nextJump) nextJump.hidden = nextBody.scrollHeight - nextBody.scrollTop - nextBody.clientHeight < 96;
+      });
+    }
+    if (restoreComposerFocus && state.open && state.session && !(state.call && !callTerminal(state.call))) {
+      window.requestAnimationFrame(function () {
+        var nextComposer = shadow && shadow.querySelector(".cs-composer textarea");
+        if (!nextComposer || nextComposer.disabled) return;
+        nextComposer.focus({ preventScroll: true });
+        if (composerSelectionStart !== null && composerSelectionEnd !== null) {
+          try { nextComposer.setSelectionRange(composerSelectionStart, composerSelectionEnd); } catch (_) {}
+        } else {
+          try { nextComposer.setSelectionRange(nextComposer.value.length, nextComposer.value.length); } catch (_) {}
+        }
       });
     }
   }
