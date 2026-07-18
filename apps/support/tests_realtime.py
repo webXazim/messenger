@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
@@ -8,7 +10,7 @@ from django.test import TransactionTestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
-from apps.support.conversation_services import send_team_message, send_visitor_message
+from apps.support.conversation_services import mark_visitor_read, send_team_message, send_visitor_message
 from apps.support.models import SupportAccount, SupportAgent, SupportWebsite, SupportWebsiteAgent
 from apps.support.services import deactivate_agent, get_support_context, update_agent
 from apps.support.widget_services import create_widget_session
@@ -191,6 +193,31 @@ class SupportRealtimeTests(TransactionTestCase):
             await communicator.disconnect()
 
         async_to_sync(scenario)()
+
+    def test_repeated_widget_read_acknowledgement_is_idempotent(self):
+        session, _ = self.issue_session()
+        support_conversation, _ = send_visitor_message(session=session, text="Hello")
+        team_message = send_team_message(
+            context=get_support_context(self.owner),
+            actor=self.owner,
+            support_conversation=support_conversation,
+            text="We are here",
+        )
+
+        with patch("apps.support.conversation_services._publish_receipt_event") as publish:
+            support_conversation = mark_visitor_read(
+                support_conversation=support_conversation,
+                message_id=team_message.id,
+            )
+            first_ack_event_count = publish.call_count
+            support_conversation = mark_visitor_read(
+                support_conversation=support_conversation,
+                message_id=team_message.id,
+            )
+
+        self.assertEqual(first_ack_event_count, 2)
+        self.assertEqual(publish.call_count, first_ack_event_count)
+        self.assertEqual(support_conversation.visitor_last_read_message_id, team_message.id)
 
     def test_widget_presence_activity_typing_and_receipts_are_realtime(self):
         session, raw_token = self.issue_session()

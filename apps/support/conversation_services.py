@@ -626,6 +626,11 @@ def mark_visitor_read(
         message_id=message_id,
     )
     last_team_message = support_conversation.visitor_last_delivered_message
+    if (
+        not last_team_message
+        or support_conversation.visitor_last_read_message_id == last_team_message.id
+    ):
+        return support_conversation
     support_conversation.visitor_last_read_message = last_team_message
     support_conversation.visitor_last_read_at = timezone.now()
     support_conversation.save(

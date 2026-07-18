@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws/support/widget/" + encodeURIComponent(siteKey) + "/";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -118,10 +118,14 @@
   function loadMessages() {
     if (!state.session) return Promise.resolve([]);
     return request(sessionPath("/conversation/messages/"), { method: "GET" }).then(function (payload) {
-      state.messages = Array.isArray(payload.messages) ? payload.messages : [];
+      var nextMessages = Array.isArray(payload.messages) ? payload.messages : [];
+      var changed = JSON.stringify(nextMessages) !== JSON.stringify(state.messages);
+      state.messages = nextMessages;
       acknowledgeLatestTeamMessage();
-      render();
-      scrollMessages();
+      if (changed) {
+        render();
+        if (state.followLatest) scrollMessages();
+      }
       return state.messages;
     });
   }
@@ -141,8 +145,16 @@
   function acknowledgeLatestTeamMessage() {
     var message = latestTeamMessage();
     if (!message || String(message.id || "").indexOf("temp-") === 0) return;
-    sendRealtime("support.message.delivered", { message_id: message.id });
-    if (state.open && document.visibilityState === "visible") sendRealtime("support.message.read", { message_id: message.id });
+    var currentStatus = String(message.receipt_status || message.delivery_status || "sent").toLowerCase();
+    var targetStatus = state.open && document.visibilityState === "visible" ? "read" : "delivered";
+    var rank = { pending: 0, sent: 1, delivered: 2, read: 3 };
+    if ((rank[currentStatus] || 0) >= rank[targetStatus]) return;
+    if (state.lastReceiptAckId === String(message.id) && (rank[state.lastReceiptAckStatus] || 0) >= rank[targetStatus]) return;
+    var sent = sendRealtime(targetStatus === "read" ? "support.message.read" : "support.message.delivered", { message_id: message.id });
+    if (sent) {
+      state.lastReceiptAckId = String(message.id);
+      state.lastReceiptAckStatus = targetStatus;
+    }
   }
 
   function reportVisitorActivity(force) {
@@ -204,8 +216,10 @@
   function loadCSAT() {
     if (!state.session) return Promise.resolve(null);
     return request(sessionPath("/conversation/csat/"), { method: "GET" }).then(function (payload) {
-      state.csat = payload || null;
-      render();
+      var nextCSAT = payload || null;
+      var changed = JSON.stringify(nextCSAT) !== JSON.stringify(state.csat);
+      state.csat = nextCSAT;
+      if (changed) render();
       return state.csat;
     });
   }
@@ -604,6 +618,7 @@
         if (state.socket === socket && socket.readyState === WebSocket.OPEN) reportVisitorActivity(false);
       }, 25000);
       reportVisitorActivity(true);
+      if (state.open) render();
       if (state.open) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); }
     };
     socket.onmessage = function (event) {
@@ -619,8 +634,11 @@
           if (!state.open && senderKind !== "visitor") { state.hasUnread = true; render(); return; }
           if (state.open) loadMessages().catch(function () {});
         } else if (payload.event === "support.typing.started" || payload.event === "support.typing.stopped") {
-          state.teamTyping = payload.event === "support.typing.started";
-          render();
+          var teamTyping = payload.event === "support.typing.started";
+          if (state.teamTyping !== teamTyping) {
+            state.teamTyping = teamTyping;
+            render();
+          }
         } else if (payload.event === "support.message.delivered" || payload.event === "support.message.read") {
           loadMessages().catch(function () {});
         } else if (payload.event === "support.csat.updated") {
@@ -641,6 +659,7 @@
     socket.onclose = function () {
       if (state.socket !== socket) return;
       state.socket = null; state.socketState = "closed"; stopHeartbeat(); startPolling(); scheduleRealtimeReconnect();
+      if (state.open) render();
     };
   }
 
@@ -750,7 +769,8 @@
       .cs-message.team.is-grouped .cs-bubble{border-top-left-radius:5px}
       .cs-message.visitor .cs-bubble{border-color:#d1d1d4;border-bottom-right-radius:5px;background:${state.config && state.config.theme === "dark" ? "#272727" : "#f2f2f3"};color:${state.config && state.config.theme === "dark" ? "#f5f5f5" : "#141414"}}
       .cs-message.visitor.is-grouped .cs-bubble{border-top-right-radius:5px}
-      .cs-meta{display:block;margin-top:4px;color:#8a8a8f;text-align:right;white-space:nowrap;opacity:1}
+      .cs-bubble-text{display:inline}
+      .cs-meta{display:inline-block;margin:0 0 0 7px;color:#8a8a8f;vertical-align:baseline;text-align:right;white-space:nowrap;opacity:1}
       .cs-message.visitor .cs-meta{color:#77777c}
       .cs-receipt{font-weight:800;letter-spacing:-2px;color:#262626}.cs-receipt.is-pending{font-weight:500;letter-spacing:0;color:#8a8a8f}.cs-receipt.is-failed{font-weight:700;letter-spacing:0;color:#c62828}
       .cs-composer{grid-template-columns:auto minmax(0,1fr) auto;align-items:end;padding:10px 12px;gap:8px}

@@ -22,6 +22,7 @@ const supportSocket = read("src/lib/supportSocket.ts");
 const supportRealtime = read("src/hooks/useSupportRealtime.ts");
 const appShell = read("src/components/AppShell.tsx");
 const widgetLoader = read("public/support-widget/v1/widget.js");
+const dockerCompose = read("../docker-compose.yml");
 const api = read("src/api/support.ts");
 const css = read("src/styles/pages/support.css");
 const auth = read("src/pages/AuthRedirectPage.tsx");
@@ -154,6 +155,9 @@ assert.ok(api.includes("/support/calls/active/"), "Global Support call recovery 
 assert.ok(widgetLoader.includes("function renderCall"), "Widget incoming-call experience is missing.");
 assert.ok(widgetLoader.includes("RTCPeerConnection"), "Widget WebRTC guest calling is missing.");
 assert.ok(widgetLoader.includes("/calls/turn-credentials/"), "Widget TURN credential retrieval is missing.");
+assert.ok(widgetLoader.includes("lastReceiptAckStatus"), "Widget receipt acknowledgement deduplication is missing.");
+assert.ok(widgetLoader.includes(".cs-bubble-text{display:inline}"), "Widget message metadata must remain inline with text.");
+assert.ok(dockerCompose.includes("SUPPORT_CALLS_ENABLED: ${SUPPORT_CALLS_ENABLED:-true}"), "Production Support calls are not enabled.");
 assert.ok(css.includes(".ms-support-call-overlay"), "Responsive Support call overlay styles are missing.");
 assert.ok(css.includes(".ms-support-call-media"), "Responsive Support video layout is missing.");
 
