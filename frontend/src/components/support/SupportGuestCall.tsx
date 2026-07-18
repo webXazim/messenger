@@ -151,6 +151,7 @@ export function SupportGuestCall({ initialCall, onFinished }: { initialCall: Sup
 
   useEffect(() => {
     const poll = window.setInterval(() => {
+      if (supportSocket.isOpen()) return;
       void supportApi.getCall(initialCall.id).then((payload) => {
         setCall(payload);
         (payload.pending_signals || []).forEach((signal) => void processSignal(signal));

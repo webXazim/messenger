@@ -12,7 +12,9 @@ import type {
   SupportBootstrap,
   SupportConversation,
   SupportConversationFilters,
+  SupportConversationMessagesResponse,
   SupportConversationUpdateInput,
+  SupportAttachment,
   SupportMessage,
   SupportCall,
 } from "../../types/support";
@@ -24,6 +26,8 @@ import { MessageComposer } from "../MessageComposer";
 import { ChatHeader, type ChatHeaderNotice } from "../conversation/ChatHeader";
 import type { VoiceNotePayload } from "../VoiceNoteRecorder";
 import { SupportGuestCall } from "./SupportGuestCall";
+import { TypingIndicator } from "../TypingIndicator";
+import { supportSocket } from "../../lib/supportSocket";
 
 const QUEUES: Array<{
   value: NonNullable<SupportConversationFilters["queue"]>;
@@ -42,6 +46,58 @@ function visitorName(conversation: SupportConversation) {
   return (
     conversation.visitor.name || conversation.visitor.email || "Website visitor"
   );
+}
+
+function buildOptimisticSupportMessage(
+  bootstrap: SupportBootstrap,
+  payload: Record<string, unknown>,
+): SupportMessage {
+  const clientTempId = String(payload.client_temp_id || Date.now());
+  const now = new Date().toISOString();
+  const rawAttachments = Array.isArray(payload._optimistic_attachments)
+    ? payload._optimistic_attachments
+    : [];
+  const attachments: SupportAttachment[] = rawAttachments.map((raw) => {
+    const attachment = raw as Record<string, unknown>;
+    return {
+      id: String(attachment.id || ""),
+      media_kind: String(attachment.media_kind || "file") as SupportAttachment["media_kind"],
+      original_name: String(attachment.original_name || "Attachment"),
+      mime_type: String(attachment.mime_type || "application/octet-stream"),
+      size: Number(attachment.size || 0),
+      width: attachment.width == null ? null : Number(attachment.width),
+      height: attachment.height == null ? null : Number(attachment.height),
+      rotation: attachment.rotation == null ? null : Number(attachment.rotation),
+      duration_seconds: attachment.duration_seconds == null ? null : Number(attachment.duration_seconds),
+      scan_status: "clean",
+      can_preview_inline: true,
+      download_url: String(attachment.file_url || attachment.preview_url || ""),
+      preview_url: attachment.preview_url ? String(attachment.preview_url) : null,
+      thumbnail_url: attachment.thumbnail_url ? String(attachment.thumbnail_url) : null,
+    };
+  });
+  const text = String(payload.text || "").trim();
+  const firstMediaKind = attachments[0]?.media_kind;
+  return {
+    id: `temp-${clientTempId}`,
+    type: firstMediaKind || "text",
+    text,
+    created_at: now,
+    updated_at: now,
+    delivery_status: "pending",
+    receipt_status: "pending",
+    delivered_at: null,
+    read_at: null,
+    sender: {
+      kind: bootstrap.role === "agent" ? "agent" : "owner",
+      id: null,
+      display_name: "You",
+    },
+    is_own: true,
+    voice_note: Boolean(payload.voice_note),
+    attachments,
+    preview_text: text || attachments[0]?.original_name || "Attachment",
+  };
 }
 
 function formatCompactTime(value?: string | null) {
@@ -212,7 +268,7 @@ function toMessengerMessage(message: SupportMessage): Message {
     text: message.text,
     created_at: message.created_at,
     updated_at: message.updated_at,
-    delivery_status: message.delivery_status,
+    delivery_status: message.receipt_status || message.delivery_status,
     sender: {
       id: message.sender.id || `${message.sender.kind}-${message.id}`,
       username: message.sender.username || message.sender.kind,
@@ -440,7 +496,10 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     id: string;
     text: string;
   } | null>(null);
+  const [typingVisitors, setTypingVisitors] = useState<Record<string, string>>({});
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const typingStopTimerRef = useRef<number | null>(null);
+  const typingVisitorTimerRef = useRef<number | null>(null);
 
   const filters = useMemo(
     () => ({
@@ -562,6 +621,135 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     });
   }, [messagesQuery.data, queryClient, selectedId]);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    return supportSocket.subscribe((payload) => {
+      const conversationId = String(payload.data?.conversation_id || "");
+      if (conversationId && conversationId !== selectedId) return;
+
+      if (
+        payload.event === "support.typing.started" ||
+        payload.event === "support.typing.stopped"
+      ) {
+        const sender = payload.data?.sender && typeof payload.data.sender === "object"
+          ? payload.data.sender as Record<string, unknown>
+          : {};
+        if (String(sender.kind || "") !== "visitor") return;
+        const visitorId = String(sender.id || selectedConversation?.visitor.id || "visitor");
+        if (typingVisitorTimerRef.current) {
+          window.clearTimeout(typingVisitorTimerRef.current);
+          typingVisitorTimerRef.current = null;
+        }
+        if (payload.event === "support.typing.stopped") {
+          setTypingVisitors({});
+          return;
+        }
+        setTypingVisitors({
+          [visitorId]: String(sender.display_name || "Website visitor"),
+        });
+        typingVisitorTimerRef.current = window.setTimeout(() => {
+          setTypingVisitors({});
+          typingVisitorTimerRef.current = null;
+        }, 7500);
+        return;
+      }
+
+      if (payload.event === "support.visitor.presence") {
+        queryClient.setQueryData<SupportConversationMessagesResponse>(
+          ["support-conversation-messages", selectedId],
+          (current) => current
+            ? {
+                ...current,
+                conversation: {
+                  ...current.conversation,
+                  visitor: {
+                    ...current.conversation.visitor,
+                    is_online: Boolean(payload.data?.is_online),
+                    last_seen_at: String(
+                      payload.data?.last_seen_at ||
+                      current.conversation.visitor.last_seen_at,
+                    ),
+                    current_page_url: String(
+                      payload.data?.current_page_url ||
+                      current.conversation.visitor.current_page_url,
+                    ),
+                    referrer: String(
+                      payload.data?.referrer ||
+                      current.conversation.visitor.referrer,
+                    ),
+                  },
+                },
+              }
+            : current,
+        );
+        return;
+      }
+
+      if (
+        payload.event !== "support.message.delivered" &&
+        payload.event !== "support.message.read"
+      ) return;
+      const pointerId = String(payload.data?.message_id || "");
+      const actorKind = String(payload.data?.actor_kind || "");
+      const nextStatus = payload.event.endsWith(".read") ? "read" : "delivered";
+      queryClient.setQueryData<SupportConversationMessagesResponse>(
+        ["support-conversation-messages", selectedId],
+        (current) => {
+          if (!current || !pointerId) return current;
+          const pointerIndex = current.messages.findIndex((item) => item.id === pointerId);
+          if (pointerIndex < 0) return current;
+          return {
+            ...current,
+            messages: current.messages.map((item, index) => {
+              const addressed =
+                actorKind === "visitor"
+                  ? item.sender.kind !== "visitor"
+                  : item.sender.kind === "visitor";
+              if (!addressed || index > pointerIndex) return item;
+              return {
+                ...item,
+                receipt_status: nextStatus,
+                delivered_at: item.delivered_at || String(payload.data?.occurred_at || ""),
+                read_at: nextStatus === "read"
+                  ? String(payload.data?.occurred_at || "")
+                  : item.read_at,
+              };
+            }),
+          };
+        },
+      );
+    });
+  }, [queryClient, selectedConversation?.visitor.id, selectedId]);
+
+  useEffect(() => {
+    const messages = messagesQuery.data?.messages || [];
+    const latestVisitorMessage = [...messages]
+      .reverse()
+      .find((message) => message.sender.kind === "visitor");
+    if (!selectedId || !latestVisitorMessage || !supportSocket.isOpen()) return;
+    supportSocket.send({
+      event: "support.message.delivered",
+      data: { conversation_id: selectedId, message_id: latestVisitorMessage.id },
+    });
+    if (document.visibilityState === "visible") {
+      supportSocket.send({
+        event: "support.message.read",
+        data: { conversation_id: selectedId, message_id: latestVisitorMessage.id },
+      });
+    }
+  }, [messagesQuery.data?.messages, selectedId, socketStatus]);
+
+  useEffect(() => () => {
+    if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
+    if (typingVisitorTimerRef.current) window.clearTimeout(typingVisitorTimerRef.current);
+    if (selectedId && supportSocket.isOpen()) {
+      supportSocket.send({
+        event: "support.typing.stop",
+        data: { conversation_id: selectedId },
+      });
+    }
+  }, [selectedId]);
+
   const refreshConversation = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["support-conversations"] }),
@@ -580,13 +768,54 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
       text?: string;
       attachment_ids?: string[];
       voice_note?: boolean;
-    }) => supportApi.sendConversationMessage(selectedId, payload),
+      clientTempId?: string;
+    }) => {
+      const { clientTempId: _clientTempId, ...messagePayload } = payload;
+      return supportApi.sendConversationMessage(selectedId, messagePayload);
+    },
     onMutate: () => setError(null),
-    onSuccess: refreshConversation,
-    onError: (mutationError) =>
+    onSuccess: (message, variables) => {
+      queryClient.setQueryData<SupportConversationMessagesResponse>(
+        ["support-conversation-messages", selectedId],
+        (current) => current
+          ? {
+              ...current,
+              messages: [
+                ...current.messages.filter(
+                  (item) => item.id !== `temp-${variables.clientTempId}`,
+                ),
+                message,
+              ],
+              conversation: {
+                ...current.conversation,
+                last_message: message,
+                updated_at: message.created_at,
+              },
+            }
+          : current,
+      );
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["support-conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["support-unread-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["support-service-alerts"] }),
+      ]);
+    },
+    onError: (mutationError, variables) => {
+      queryClient.setQueryData<SupportConversationMessagesResponse>(
+        ["support-conversation-messages", selectedId],
+        (current) => current
+          ? {
+              ...current,
+              messages: current.messages.filter(
+                (item) => item.id !== `temp-${variables.clientTempId}`,
+              ),
+            }
+          : current,
+      );
       setError(
         parseApiError(mutationError, "The message could not be sent.").message,
-      ),
+      );
+    },
   });
   const updateMutation = useMutation({
     mutationFn: (payload: SupportConversationUpdateInput) =>
@@ -678,6 +907,26 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   const sendVoiceNote = async (payload: VoiceNotePayload) => {
     if (!selectedId) throw new Error("Select a conversation first.");
     setError(null);
+    const optimisticMessage = buildOptimisticSupportMessage(bootstrap, {
+      client_temp_id: payload.clientTempId,
+      voice_note: true,
+      _optimistic_attachments: [{
+        id: `voice-${payload.clientTempId}`,
+        original_name: payload.fileName,
+        mime_type: payload.mimeType,
+        media_kind: "audio",
+        size: payload.file.size,
+        duration_seconds: payload.durationSeconds,
+        file_url: payload.previewUrl,
+        preview_url: payload.previewUrl,
+      }],
+    });
+    queryClient.setQueryData<SupportConversationMessagesResponse>(
+      ["support-conversation-messages", selectedId],
+      (current) => current
+        ? { ...current, messages: [...current.messages, optimisticMessage] }
+        : current,
+    );
     try {
       const upload = await supportApi.uploadConversationFile(
         selectedId,
@@ -687,12 +936,23 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
           waveform: payload.waveform,
         },
       );
-      await supportApi.sendConversationMessage(selectedId, {
+      await sendMutation.mutateAsync({
         attachment_ids: [upload.id],
         voice_note: true,
+        clientTempId: payload.clientTempId,
       });
-      await refreshConversation();
     } catch (voiceError) {
+      queryClient.setQueryData<SupportConversationMessagesResponse>(
+        ["support-conversation-messages", selectedId],
+        (current) => current
+          ? {
+              ...current,
+              messages: current.messages.filter(
+                (item) => item.id !== `temp-${payload.clientTempId}`,
+              ),
+            }
+          : current,
+      );
       const message = parseApiError(
         voiceError,
         "The voice message could not be sent.",
@@ -700,6 +960,22 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
       setError(message);
       throw new Error(message);
     }
+  };
+
+  const sendTyping = () => {
+    if (!selectedId || !supportSocket.isOpen()) return;
+    supportSocket.send({
+      event: "support.typing.start",
+      data: { conversation_id: selectedId },
+    });
+    if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = window.setTimeout(() => {
+      supportSocket.send({
+        event: "support.typing.stop",
+        data: { conversation_id: selectedId },
+      });
+      typingStopTimerRef.current = null;
+    }, 2200);
   };
 
   const selectedWebsiteSettings = bootstrap.websites.find((item) => item.id === selectedConversation?.website.id)?.widget_settings;
@@ -856,12 +1132,16 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
           <>
             <ChatHeader
               title={visitorName(selectedConversation)}
-              subtitle={`${selectedConversation.website.name} · ${selectedConversation.status.replace(/_/g, " ")}`}
+              subtitle={`${selectedConversation.website.name} · ${
+                selectedConversation.visitor.is_online
+                  ? "Online"
+                  : selectedConversation.status.replace(/_/g, " ")
+              }`}
               avatarPerson={{
                 id: selectedConversation.visitor.id,
                 username: "website-visitor",
                 display_name: visitorName(selectedConversation),
-                is_online: Boolean(selectedConversation.visitor.last_seen_at),
+                is_online: selectedConversation.visitor.is_online,
               }}
               notices={headerNotices}
               detailsOpen={detailsOpen}
@@ -908,6 +1188,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
               })}
             </section>
             <footer className="ms-chat-composer-dock">
+              <TypingIndicator names={Object.values(typingVisitors).filter(Boolean)} />
               <div className="ms-support-composer-shortcuts">
                 <select
                   className="ms-support-canned-select"
@@ -948,6 +1229,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                 allowViewOnce={false}
                 disabled={selectedConversation.status === "closed"}
                 disabledReason={selectedConversation.status === "closed" ? "This support conversation is closed." : null}
+                onTyping={sendTyping}
                 onUpload={async (file, options) => {
                   if (options.signal.aborted) throw new Error("Upload cancelled.");
                   const upload = await supportApi.uploadConversationFile(selectedId, file);
@@ -962,12 +1244,32 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                   };
                 }}
                 onSend={async (payload) => {
+                  const clientTempId = String(payload.client_temp_id || Date.now());
+                  const optimisticMessage = buildOptimisticSupportMessage(
+                    bootstrap,
+                    payload as Record<string, unknown>,
+                  );
+                  queryClient.setQueryData<SupportConversationMessagesResponse>(
+                    ["support-conversation-messages", selectedId],
+                    (current) => current
+                      ? {
+                          ...current,
+                          messages: [...current.messages, optimisticMessage],
+                          conversation: {
+                            ...current.conversation,
+                            last_message: optimisticMessage,
+                            updated_at: optimisticMessage.created_at,
+                          },
+                        }
+                      : current,
+                  );
                   try {
                     await sendMutation.mutateAsync({
                       text: String(payload.text || "").trim(),
                       attachment_ids: Array.isArray(payload.attachment_ids)
                         ? payload.attachment_ids.map(String)
                         : [],
+                      clientTempId,
                     });
                   } catch (reason) {
                     throw new Error(parseApiError(reason, "The message could not be sent.").message);

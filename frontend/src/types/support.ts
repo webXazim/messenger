@@ -210,6 +210,9 @@ export type SupportMessage = {
   created_at: string;
   updated_at: string;
   delivery_status: "pending" | "sent" | "failed";
+  receipt_status: "pending" | "sent" | "delivered" | "read" | "failed";
+  delivered_at?: string | null;
+  read_at?: string | null;
   sender: SupportMessageSender;
   is_own: boolean;
   voice_note: boolean;
@@ -232,6 +235,7 @@ export type SupportVisitor = {
   current_page_url: string;
   referrer: string;
   last_seen_at: string;
+  is_online: boolean;
 };
 
 export type SupportServiceSnapshot = {

@@ -102,6 +102,15 @@ export function useSupportRealtime() {
         return;
       }
       if (!payload.event.startsWith("support.")) return;
+      if (
+        payload.event === "support.pong" ||
+        payload.event === "support.visitor.presence" ||
+        payload.event === "support.typing.started" ||
+        payload.event === "support.typing.stopped" ||
+        payload.event === "support.call.signal"
+      ) {
+        return;
+      }
       const conversationId = String(payload.data?.conversation_id || "");
       void queryClient.invalidateQueries({ queryKey: ["support-unread-summary"] });
       void queryClient.invalidateQueries({ queryKey: ["support-service-alerts"] });

@@ -61,6 +61,12 @@ class SupportSocketClient {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
+  send(payload: SupportSocketEvent) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify(payload));
+    return true;
+  }
+
   subscribe(listener: EventListener) {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };

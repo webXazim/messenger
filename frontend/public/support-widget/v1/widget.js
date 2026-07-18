@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws/support/widget/" + encodeURIComponent(siteKey) + "/";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], call: null, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], call: null, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -119,10 +119,50 @@
     if (!state.session) return Promise.resolve([]);
     return request(sessionPath("/conversation/messages/"), { method: "GET" }).then(function (payload) {
       state.messages = Array.isArray(payload.messages) ? payload.messages : [];
+      acknowledgeLatestTeamMessage();
       render();
       scrollMessages();
       return state.messages;
     });
+  }
+
+  function sendRealtime(event, data) {
+    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
+    try { state.socket.send(JSON.stringify({ event: event, data: data || {} })); return true; } catch (_) { return false; }
+  }
+
+  function latestTeamMessage() {
+    for (var index = state.messages.length - 1; index >= 0; index -= 1) {
+      if (!state.messages[index].sender || state.messages[index].sender.kind !== "visitor") return state.messages[index];
+    }
+    return null;
+  }
+
+  function acknowledgeLatestTeamMessage() {
+    var message = latestTeamMessage();
+    if (!message || String(message.id || "").indexOf("temp-") === 0) return;
+    sendRealtime("support.message.delivered", { message_id: message.id });
+    if (state.open && document.visibilityState === "visible") sendRealtime("support.message.read", { message_id: message.id });
+  }
+
+  function reportVisitorActivity(force) {
+    if (!state.session) return;
+    var currentUrl = window.location.href;
+    if (!force && state.lastActivityUrl === currentUrl) {
+      sendRealtime("support.visitor.activity", { current_page_url: currentUrl, referrer: document.referrer || "" });
+      return;
+    }
+    state.lastActivityUrl = currentUrl;
+    if (!sendRealtime("support.visitor.activity", { current_page_url: currentUrl, referrer: document.referrer || "" })) {
+      api.updateSession({ current_page_url: currentUrl, referrer: document.referrer || "" }).catch(function () {});
+    }
+  }
+
+  function reportVisitorTyping(active) {
+    sendRealtime(active ? "support.typing.start" : "support.typing.stop", {});
+    if (state.typingStopTimer) window.clearTimeout(state.typingStopTimer);
+    state.typingStopTimer = 0;
+    if (active) state.typingStopTimer = window.setTimeout(function () { reportVisitorTyping(false); }, 1800);
   }
 
   function knowledgeClientKey() {
@@ -207,14 +247,39 @@
     var body = String(text || "").trim();
     var uploads = Array.isArray(attachmentIds) ? attachmentIds : [];
     if (!body && !uploads.length) return Promise.reject(new Error("Write a message or add an attachment before sending."));
+    var clientTempId = "temp-" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+    var optimisticUploads = state.pendingUploads.filter(function (upload) { return uploads.indexOf(upload.id) >= 0; });
+    state.messages.push({
+      id: clientTempId,
+      type: optimisticUploads[0] ? optimisticUploads[0].kind : "text",
+      text: body,
+      created_at: new Date().toISOString(),
+      delivery_status: "pending",
+      receipt_status: "pending",
+      sender: { kind: "visitor", display_name: "You" },
+      attachments: optimisticUploads.map(function (upload) {
+        return { id: upload.id, media_kind: upload.kind, original_name: upload.name, mime_type: "", size: 0, scan_status: "clean", can_preview_inline: false, download_url: "" };
+      })
+    });
+    state.draft = "";
+    render();
+    scrollMessages();
     return request(sessionPath("/conversation/messages/"), { method: "POST", body: JSON.stringify({ text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) }) })
       .then(function (payload) {
-        if (payload.message) state.messages.push(payload.message);
+        state.messages = state.messages.filter(function (message) { return message.id !== clientTempId; });
+        if (payload.message && !state.messages.some(function (message) { return message.id === payload.message.id; })) state.messages.push(payload.message);
         state.pendingUploads = [];
-        state.draft = "";
         render();
         scrollMessages();
         return payload;
+      }).catch(function (error) {
+        state.messages = state.messages.map(function (message) {
+          if (message.id !== clientTempId) return message;
+          message.delivery_status = "failed";
+          message.receipt_status = "failed";
+          return message;
+        });
+        throw error;
       });
   }
 
@@ -335,7 +400,7 @@
   }
 
   function pollCallSignals() {
-    if (!state.call || !state.callPeer || callTerminal(state.call)) return;
+    if (state.socketState === "open" || !state.call || !state.callPeer || callTerminal(state.call)) return;
     request(callPath(state.call.id, "/signals/"), { method: "GET" }).then(function (payload) {
       (payload.signals || []).forEach(function (signal) { processCallSignal(signal).catch(function () {}); });
     }).catch(function () {});
@@ -494,8 +559,9 @@
       stopPolling();
       stopHeartbeat();
       state.heartbeatTimer = window.setInterval(function () {
-        if (state.socket === socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ event: "support.ping", data: {} }));
+        if (state.socket === socket && socket.readyState === WebSocket.OPEN) reportVisitorActivity(false);
       }, 25000);
+      reportVisitorActivity(true);
       if (state.open) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); }
     };
     socket.onmessage = function (event) {
@@ -504,8 +570,17 @@
         var payload = JSON.parse(event.data || "{}");
         if (payload.event === "support.message.created" || payload.event === "support.conversation.updated") {
           var senderKind = payload.data && payload.data.sender ? payload.data.sender.kind : "";
+          if (payload.event === "support.message.created" && senderKind !== "visitor" && payload.data && payload.data.id) {
+            sendRealtime("support.message.delivered", { message_id: payload.data.id });
+            if (state.open && document.visibilityState === "visible") sendRealtime("support.message.read", { message_id: payload.data.id });
+          }
           if (!state.open && senderKind !== "visitor") { state.hasUnread = true; render(); return; }
           if (state.open) loadMessages().catch(function () {});
+        } else if (payload.event === "support.typing.started" || payload.event === "support.typing.stopped") {
+          state.teamTyping = payload.event === "support.typing.started";
+          render();
+        } else if (payload.event === "support.message.delivered" || payload.event === "support.message.read") {
+          loadMessages().catch(function () {});
         } else if (payload.event === "support.csat.updated") {
           if (state.open) loadCSAT().catch(function () {});
           else { state.hasUnread = true; render(); }
@@ -577,8 +652,8 @@
     sendMessage: sendMessage,
     uploadFile: uploadConversationFile,
     markRead: function () { return state.session ? request(sessionPath("/conversation/read/"), { method: "POST" }) : Promise.resolve(); },
-    open: function () { state.open = true; state.hasUnread = false; render(); connectRealtime(); if (state.session) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); } startPolling(); },
-    close: function () { if (state.call && !callTerminal(state.call)) return; state.open = false; render(); stopPolling(); },
+    open: function () { state.open = true; state.hasUnread = false; render(); connectRealtime(); reportVisitorActivity(true); acknowledgeLatestTeamMessage(); if (state.session) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); } startPolling(); },
+    close: function () { if (state.call && !callTerminal(state.call)) return; state.open = false; reportVisitorTyping(false); render(); stopPolling(); },
     clearSession: function () { closeRealtime(true); clearSession(); render(); }
   };
 
@@ -591,7 +666,7 @@
     var text = dark ? "#f5f5f5" : "#171717";
     var muted = dark ? "#a8a8a8" : "#6b6b6b";
     var line = dark ? "#303030" : "#e2e2e2";
-    return `:host{all:initial;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:${text}}*{box-sizing:border-box}.cs-wrap{position:fixed;z-index:2147483000;bottom:max(18px,env(safe-area-inset-bottom));${side}:18px;display:grid;justify-items:${side === "left" ? "start" : "end"};gap:10px}.cs-launcher{position:relative;min-width:54px;height:54px;padding:0 18px;border:0;border-radius:18px;background:${primary};color:#fff;font:800 14px/1 inherit;box-shadow:0 14px 38px rgba(0,0,0,.22);cursor:pointer}.cs-unread{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;display:grid;place-items:center;padding:0 4px;border:2px solid #fff;border-radius:999px;background:#d92d20;color:#fff;font:800 10px/1 inherit}.cs-panel{width:min(380px,calc(100vw - 24px));height:min(620px,calc(100dvh - 100px));display:${state.open ? "grid" : "none"};grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;border:1px solid ${line};border-radius:20px;background:${surface};box-shadow:0 24px 70px rgba(0,0,0,.24)}.cs-header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid ${line};background:${surface}}.cs-mark{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:${primary};color:#fff;font-weight:850}.cs-title{min-width:0;display:grid;flex:1}.cs-title strong,.cs-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-title strong{font-size:14px}.cs-title small{color:${muted};font-size:11px}.cs-close{width:34px;height:34px;border:0;border-radius:50%;background:${canvas};color:${text};font-size:20px;cursor:pointer}.cs-body{min-height:0;overflow-y:auto;padding:16px;background:${canvas}}.cs-welcome{margin:0 0 14px;color:${muted};font-size:13px;line-height:1.55}.cs-form{display:grid;gap:10px}.cs-field,.cs-composer textarea{width:100%;min-height:44px;padding:11px 12px;border:1px solid ${line};border-radius:12px;background:${surface};color:${text};font:inherit}.cs-primary{min-height:44px;border:0;border-radius:12px;background:${primary};color:#fff;font:800 13px inherit;cursor:pointer}.cs-error{padding:10px 12px;border:1px solid #d98c8c;border-radius:10px;background:#fff0f0;color:#8d1b1b;font-size:12px}.cs-messages{display:flex;flex-direction:column;gap:12px}.cs-message{max-width:86%;display:grid;gap:3px}.cs-message.visitor{align-self:flex-end;justify-items:end}.cs-message.team{align-self:flex-start;justify-items:start}.cs-meta{color:${muted};font-size:10px}.cs-bubble{padding:9px 11px;border:1px solid ${line};border-radius:13px;background:${surface};color:${text};font-size:13px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cs-message.visitor .cs-bubble{border-color:${primary};background:${primary};color:#fff}.cs-empty{padding:30px 10px;color:${muted};font-size:13px;text-align:center}.cs-composer{display:${state.session ? "grid" : "none"};grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:12px;border-top:1px solid ${line};background:${surface}}.cs-composer textarea{min-height:42px;max-height:110px;resize:none}.cs-send{min-width:62px;border:0;border-radius:12px;background:${primary};color:#fff;font:800 12px inherit;cursor:pointer}.cs-note{margin:8px 0 0;color:${muted};font-size:10px;line-height:1.4}.cs-bubble-text:empty{display:none}.cs-media{display:grid;gap:7px;min-width:190px}.cs-media img,.cs-media video{display:block;width:100%;max-height:260px;border-radius:9px;object-fit:contain;background:rgba(0,0,0,.08)}.cs-media audio{width:100%;min-width:210px}.cs-file{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid currentColor;border-radius:9px}.cs-file span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-download{justify-self:start;padding:0;border:0;background:transparent;color:inherit;font:800 10px inherit;text-decoration:underline;cursor:pointer}.cs-composer{grid-template-columns:auto minmax(0,1fr) auto auto}.cs-tool{width:42px;height:42px;border:1px solid ${line};border-radius:12px;background:${surface};color:${text};font:800 18px inherit;cursor:pointer}.cs-tool.recording{border-color:#d92d20;color:#d92d20}.cs-upload-list{grid-column:1/-1;display:flex;gap:6px;overflow-x:auto}.cs-upload-chip{display:flex;align-items:center;gap:5px;max-width:150px;padding:5px 7px;border:1px solid ${line};border-radius:8px;background:${canvas};font-size:10px}.cs-upload-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-upload-chip button{border:0;background:transparent;color:${text};cursor:pointer}.cs-hidden{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}.cs-csat{display:grid;gap:10px;margin-top:14px;padding:14px;border:1px solid ${line};border-radius:14px;background:${surface}}.cs-csat strong{font-size:13px}.cs-csat p{margin:0;color:${muted};font-size:11px;line-height:1.45}.cs-csat-stars{display:flex;gap:6px}.cs-csat-star{width:36px;height:36px;border:1px solid ${line};border-radius:10px;background:${canvas};color:${text};font-size:20px;cursor:pointer}.cs-csat-star.is-selected{border-color:${primary};background:${primary};color:#fff}.cs-csat textarea{width:100%;min-height:70px;padding:9px 10px;border:1px solid ${line};border-radius:10px;background:${canvas};color:${text};font:inherit;resize:vertical}.cs-csat-actions{display:flex;justify-content:flex-end;gap:8px}.cs-csat-secondary{border:0;background:transparent;color:${muted};font:700 11px inherit;cursor:pointer}.cs-csat-submit{min-height:36px;padding:0 13px;border:0;border-radius:10px;background:${primary};color:#fff;font:800 11px inherit;cursor:pointer}.cs-csat-thanks{display:grid;gap:5px;margin-top:14px;padding:14px;border:1px solid ${line};border-radius:14px;background:${surface};text-align:center}.cs-csat-thanks strong{font-size:18px;letter-spacing:2px;color:${primary}}.cs-kb{display:grid;gap:10px;margin-bottom:16px}.cs-kb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.cs-kb-head strong{font-size:13px}.cs-kb-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.cs-kb-search input{min-width:0;min-height:40px;padding:9px 10px;border:1px solid ${line};border-radius:10px;background:${surface};color:${text};font:inherit}.cs-kb-search button,.cs-kb-back{min-height:40px;padding:0 12px;border:1px solid ${line};border-radius:10px;background:${surface};color:${text};font:800 11px inherit;cursor:pointer}.cs-kb-categories{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}.cs-kb-category{flex:0 0 auto;padding:6px 9px;border:1px solid ${line};border-radius:999px;background:${surface};color:${text};font:700 10px inherit;cursor:pointer}.cs-kb-list{display:grid;gap:7px}.cs-kb-item{display:grid;gap:3px;width:100%;padding:10px;border:1px solid ${line};border-radius:11px;background:${surface};color:${text};text-align:left;cursor:pointer}.cs-kb-item strong{font-size:12px}.cs-kb-item span{color:${muted};font-size:10px;line-height:1.4}.cs-kb-article{display:grid;gap:10px;padding:12px;border:1px solid ${line};border-radius:13px;background:${surface}}.cs-kb-article h2{margin:0;font-size:15px;line-height:1.35}.cs-kb-article p{margin:0;color:${text};font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.cs-kb-article small{color:${muted};font-size:10px}.cs-kb-feedback{display:flex;align-items:center;gap:7px;padding-top:8px;border-top:1px solid ${line}}.cs-kb-feedback span{margin-right:auto;color:${muted};font-size:10px}.cs-kb-feedback button{width:34px;height:32px;border:1px solid ${line};border-radius:9px;background:${canvas};color:${text};cursor:pointer}.cs-kb-divider{display:flex;align-items:center;gap:8px;margin:14px 0;color:${muted};font-size:10px}.cs-kb-divider:before,.cs-kb-divider:after{content:"";height:1px;flex:1;background:${line}}.cs-privacy-actions{display:flex;align-items:center;justify-content:center;margin-top:14px;padding-top:12px;border-top:1px solid ${line}}.cs-privacy-delete{border:0;background:transparent;color:${muted};font:700 10px inherit;text-decoration:underline;cursor:pointer}.cs-privacy-delete:disabled{opacity:.55;cursor:default}.cs-privacy-confirmed{margin:0 0 12px;padding:10px 12px;border:1px solid ${line};border-radius:10px;background:${surface};color:${muted};font-size:11px;line-height:1.45}.cs-call-incoming{display:grid;justify-items:center;gap:9px;padding:22px 14px;border:1px solid ${line};border-radius:16px;background:${surface};text-align:center}.cs-call-incoming small{color:${muted}}.cs-call-avatar{display:grid;place-items:center;width:72px;height:72px;border-radius:50%;background:${primary};color:#fff;font-size:24px;font-weight:850}.cs-call-actions{display:flex;gap:9px;margin-top:5px}.cs-call-actions button,.cs-call-controls button{min-height:40px;padding:0 15px;border:0;border-radius:999px;color:#fff;font:800 11px inherit;cursor:pointer}.cs-call-decline,.cs-call-end{background:#c62828}.cs-call-accept{background:#198754}.cs-call-stage{position:relative;min-height:360px;height:100%;overflow:hidden;border-radius:14px;background:#090909;color:#fff}.cs-call-remote{width:100%;height:100%;object-fit:cover;background:#090909}.cs-call-local{position:absolute;right:10px;bottom:66px;width:30%;aspect-ratio:3/4;object-fit:cover;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:#1c1c1c}.cs-call-audio{height:100%;display:grid;place-content:center;justify-items:center;gap:8px;background:radial-gradient(circle,#292929,#080808 72%)}.cs-call-audio small{color:rgba(255,255,255,.65)}.cs-call-controls{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:7px;padding:12px;background:rgba(0,0,0,.62)}.cs-call-controls button{background:rgba(255,255,255,.16)}.cs-call-controls .cs-call-end{background:#c62828}@media(max-width:520px){.cs-wrap{left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));justify-items:stretch}.cs-panel{width:100%;height:min(72dvh,620px);border-radius:18px}.cs-launcher{justify-self:${side === "left" ? "start" : "end"}}`;
+    return `:host{all:initial;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:${text}}*{box-sizing:border-box}.cs-wrap{position:fixed;z-index:2147483000;bottom:max(18px,env(safe-area-inset-bottom));${side}:18px;display:grid;justify-items:${side === "left" ? "start" : "end"};gap:10px}.cs-launcher{position:relative;min-width:54px;height:54px;padding:0 18px;border:0;border-radius:18px;background:${primary};color:#fff;font:800 14px/1 inherit;box-shadow:0 14px 38px rgba(0,0,0,.22);cursor:pointer}.cs-unread{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;display:grid;place-items:center;padding:0 4px;border:2px solid #fff;border-radius:999px;background:#d92d20;color:#fff;font:800 10px/1 inherit}.cs-panel{width:min(380px,calc(100vw - 24px));height:min(620px,calc(100dvh - 100px));display:${state.open ? "grid" : "none"};grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;border:1px solid ${line};border-radius:20px;background:${surface};box-shadow:0 24px 70px rgba(0,0,0,.24)}.cs-header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid ${line};background:${surface}}.cs-mark{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:${primary};color:#fff;font-weight:850}.cs-title{min-width:0;display:grid;flex:1}.cs-title strong,.cs-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-title strong{font-size:14px}.cs-title small{color:${muted};font-size:11px}.cs-close{width:34px;height:34px;border:0;border-radius:50%;background:${canvas};color:${text};font-size:20px;cursor:pointer}.cs-body{min-height:0;overflow-y:auto;padding:16px;background:${canvas}}.cs-welcome{margin:0 0 14px;color:${muted};font-size:13px;line-height:1.55}.cs-form{display:grid;gap:10px}.cs-field,.cs-composer textarea{width:100%;min-height:44px;padding:11px 12px;border:1px solid ${line};border-radius:12px;background:${surface};color:${text};font:inherit}.cs-primary{min-height:44px;border:0;border-radius:12px;background:${primary};color:#fff;font:800 13px inherit;cursor:pointer}.cs-error{padding:10px 12px;border:1px solid #d98c8c;border-radius:10px;background:#fff0f0;color:#8d1b1b;font-size:12px}.cs-messages{display:flex;flex-direction:column;gap:12px}.cs-message{max-width:86%;display:grid;gap:3px}.cs-message.visitor{align-self:flex-end;justify-items:end}.cs-message.team{align-self:flex-start;justify-items:start}.cs-meta{color:${muted};font-size:10px}.cs-typing{padding:7px 2px;color:${muted};font:700 11px inherit}.cs-bubble{padding:9px 11px;border:1px solid ${line};border-radius:13px;background:${surface};color:${text};font-size:13px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}.cs-message.visitor .cs-bubble{border-color:${primary};background:${primary};color:#fff}.cs-empty{padding:30px 10px;color:${muted};font-size:13px;text-align:center}.cs-composer{display:${state.session ? "grid" : "none"};grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:12px;border-top:1px solid ${line};background:${surface}}.cs-composer textarea{min-height:42px;max-height:110px;resize:none}.cs-send{min-width:62px;border:0;border-radius:12px;background:${primary};color:#fff;font:800 12px inherit;cursor:pointer}.cs-note{margin:8px 0 0;color:${muted};font-size:10px;line-height:1.4}.cs-bubble-text:empty{display:none}.cs-media{display:grid;gap:7px;min-width:190px}.cs-media img,.cs-media video{display:block;width:100%;max-height:260px;border-radius:9px;object-fit:contain;background:rgba(0,0,0,.08)}.cs-media audio{width:100%;min-width:210px}.cs-file{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid currentColor;border-radius:9px}.cs-file span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-download{justify-self:start;padding:0;border:0;background:transparent;color:inherit;font:800 10px inherit;text-decoration:underline;cursor:pointer}.cs-composer{grid-template-columns:auto minmax(0,1fr) auto auto}.cs-tool{width:42px;height:42px;border:1px solid ${line};border-radius:12px;background:${surface};color:${text};font:800 18px inherit;cursor:pointer}.cs-tool.recording{border-color:#d92d20;color:#d92d20}.cs-upload-list{grid-column:1/-1;display:flex;gap:6px;overflow-x:auto}.cs-upload-chip{display:flex;align-items:center;gap:5px;max-width:150px;padding:5px 7px;border:1px solid ${line};border-radius:8px;background:${canvas};font-size:10px}.cs-upload-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-upload-chip button{border:0;background:transparent;color:${text};cursor:pointer}.cs-hidden{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}.cs-csat{display:grid;gap:10px;margin-top:14px;padding:14px;border:1px solid ${line};border-radius:14px;background:${surface}}.cs-csat strong{font-size:13px}.cs-csat p{margin:0;color:${muted};font-size:11px;line-height:1.45}.cs-csat-stars{display:flex;gap:6px}.cs-csat-star{width:36px;height:36px;border:1px solid ${line};border-radius:10px;background:${canvas};color:${text};font-size:20px;cursor:pointer}.cs-csat-star.is-selected{border-color:${primary};background:${primary};color:#fff}.cs-csat textarea{width:100%;min-height:70px;padding:9px 10px;border:1px solid ${line};border-radius:10px;background:${canvas};color:${text};font:inherit;resize:vertical}.cs-csat-actions{display:flex;justify-content:flex-end;gap:8px}.cs-csat-secondary{border:0;background:transparent;color:${muted};font:700 11px inherit;cursor:pointer}.cs-csat-submit{min-height:36px;padding:0 13px;border:0;border-radius:10px;background:${primary};color:#fff;font:800 11px inherit;cursor:pointer}.cs-csat-thanks{display:grid;gap:5px;margin-top:14px;padding:14px;border:1px solid ${line};border-radius:14px;background:${surface};text-align:center}.cs-csat-thanks strong{font-size:18px;letter-spacing:2px;color:${primary}}.cs-kb{display:grid;gap:10px;margin-bottom:16px}.cs-kb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.cs-kb-head strong{font-size:13px}.cs-kb-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px}.cs-kb-search input{min-width:0;min-height:40px;padding:9px 10px;border:1px solid ${line};border-radius:10px;background:${surface};color:${text};font:inherit}.cs-kb-search button,.cs-kb-back{min-height:40px;padding:0 12px;border:1px solid ${line};border-radius:10px;background:${surface};color:${text};font:800 11px inherit;cursor:pointer}.cs-kb-categories{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}.cs-kb-category{flex:0 0 auto;padding:6px 9px;border:1px solid ${line};border-radius:999px;background:${surface};color:${text};font:700 10px inherit;cursor:pointer}.cs-kb-list{display:grid;gap:7px}.cs-kb-item{display:grid;gap:3px;width:100%;padding:10px;border:1px solid ${line};border-radius:11px;background:${surface};color:${text};text-align:left;cursor:pointer}.cs-kb-item strong{font-size:12px}.cs-kb-item span{color:${muted};font-size:10px;line-height:1.4}.cs-kb-article{display:grid;gap:10px;padding:12px;border:1px solid ${line};border-radius:13px;background:${surface}}.cs-kb-article h2{margin:0;font-size:15px;line-height:1.35}.cs-kb-article p{margin:0;color:${text};font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}.cs-kb-article small{color:${muted};font-size:10px}.cs-kb-feedback{display:flex;align-items:center;gap:7px;padding-top:8px;border-top:1px solid ${line}}.cs-kb-feedback span{margin-right:auto;color:${muted};font-size:10px}.cs-kb-feedback button{width:34px;height:32px;border:1px solid ${line};border-radius:9px;background:${canvas};color:${text};cursor:pointer}.cs-kb-divider{display:flex;align-items:center;gap:8px;margin:14px 0;color:${muted};font-size:10px}.cs-kb-divider:before,.cs-kb-divider:after{content:"";height:1px;flex:1;background:${line}}.cs-privacy-actions{display:flex;align-items:center;justify-content:center;margin-top:14px;padding-top:12px;border-top:1px solid ${line}}.cs-privacy-delete{border:0;background:transparent;color:${muted};font:700 10px inherit;text-decoration:underline;cursor:pointer}.cs-privacy-delete:disabled{opacity:.55;cursor:default}.cs-privacy-confirmed{margin:0 0 12px;padding:10px 12px;border:1px solid ${line};border-radius:10px;background:${surface};color:${muted};font-size:11px;line-height:1.45}.cs-call-incoming{display:grid;justify-items:center;gap:9px;padding:22px 14px;border:1px solid ${line};border-radius:16px;background:${surface};text-align:center}.cs-call-incoming small{color:${muted}}.cs-call-avatar{display:grid;place-items:center;width:72px;height:72px;border-radius:50%;background:${primary};color:#fff;font-size:24px;font-weight:850}.cs-call-actions{display:flex;gap:9px;margin-top:5px}.cs-call-actions button,.cs-call-controls button{min-height:40px;padding:0 15px;border:0;border-radius:999px;color:#fff;font:800 11px inherit;cursor:pointer}.cs-call-decline,.cs-call-end{background:#c62828}.cs-call-accept{background:#198754}.cs-call-stage{position:relative;min-height:360px;height:100%;overflow:hidden;border-radius:14px;background:#090909;color:#fff}.cs-call-remote{width:100%;height:100%;object-fit:cover;background:#090909}.cs-call-local{position:absolute;right:10px;bottom:66px;width:30%;aspect-ratio:3/4;object-fit:cover;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:#1c1c1c}.cs-call-audio{height:100%;display:grid;place-content:center;justify-items:center;gap:8px;background:radial-gradient(circle,#292929,#080808 72%)}.cs-call-audio small{color:rgba(255,255,255,.65)}.cs-call-controls{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:center;gap:7px;padding:12px;background:rgba(0,0,0,.62)}.cs-call-controls button{background:rgba(255,255,255,.16)}.cs-call-controls .cs-call-end{background:#c62828}@media(max-width:520px){.cs-wrap{left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));justify-items:stretch}.cs-panel{width:100%;height:min(72dvh,620px);border-radius:18px}.cs-launcher{justify-self:${side === "left" ? "start" : "end"}}`;
   }
 
   function node(tag, className, text) {
@@ -640,13 +715,18 @@
     state.messages.forEach(function (message) {
       var visitor = message.sender && message.sender.kind === "visitor";
       var row = node("div", "cs-message " + (visitor ? "visitor" : "team"));
-      row.appendChild(node("div", "cs-meta", message.sender && message.sender.display_name ? message.sender.display_name : "Support team"));
+      var createdAt = message.created_at ? new Date(message.created_at) : null;
+      var timeLabel = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+      var receiptLabel = visitor ? String(message.receipt_status || message.delivery_status || "sent") : "";
+      if (receiptLabel) receiptLabel = receiptLabel.slice(0, 1).toUpperCase() + receiptLabel.slice(1);
+      row.appendChild(node("div", "cs-meta", (visitor ? timeLabel : (message.sender && message.sender.display_name ? message.sender.display_name : "Support team") + (timeLabel ? " · " + timeLabel : "")) + (visitor && receiptLabel ? " · " + receiptLabel : "")));
       var bubble = node("div", "cs-bubble");
       bubble.appendChild(node("div", "cs-bubble-text", message.text || ""));
       (message.attachments || []).forEach(function (attachment) { renderAttachment(bubble, attachment); });
       row.appendChild(bubble);
       list.appendChild(row);
     });
+    if (state.teamTyping) list.appendChild(node("div", "cs-typing", "Support team is typing…"));
     body.appendChild(list);
   }
 
@@ -766,13 +846,14 @@
     var fileInput = node("input", "cs-hidden"); fileInput.type = "file"; fileInput.multiple = true; fileInput.disabled = state.loading || state.uploading;
     fileInput.onchange = function () { addPendingFiles(fileInput.files); };
     var attach = node("button", "cs-tool", "+"); attach.type = "button"; attach.title = "Attach files"; attach.setAttribute("aria-label", "Attach files"); attach.disabled = state.loading || state.uploading || !state.config.allow_attachments; attach.onclick = function () { fileInput.click(); };
-    var textarea = node("textarea"); textarea.placeholder = "Write a message"; textarea.rows = 1; textarea.value = state.draft; textarea.disabled = state.loading || state.uploading; textarea.oninput = function () { state.draft = textarea.value; };
+    var textarea = node("textarea"); textarea.placeholder = "Write a message"; textarea.rows = 1; textarea.value = state.draft; textarea.disabled = state.loading || state.uploading; textarea.oninput = function () { state.draft = textarea.value; reportVisitorTyping(Boolean(state.draft.trim())); }; textarea.onblur = function () { reportVisitorTyping(false); };
     var voice = node("button", "cs-tool" + (state.recording ? " recording" : ""), state.recording ? "■" : "●"); voice.type = "button"; voice.title = state.recording ? "Send voice message" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
     var send = node("button", "cs-send", state.loading || state.uploading ? "…" : "Send"); send.type = "submit"; send.disabled = state.loading || state.uploading || (!state.draft.trim() && !state.pendingUploads.length);
     composer.appendChild(fileInput); composer.appendChild(attach); composer.appendChild(textarea); composer.appendChild(voice); composer.appendChild(send);
     composer.addEventListener("submit", function (event) {
       event.preventDefault();
       var text = state.draft.trim(); var attachmentIds = state.pendingUploads.map(function (upload) { return upload.id; }); if (!text && !attachmentIds.length) return;
+      reportVisitorTyping(false);
       state.loading = true; state.error = ""; render();
       sendMessage(text, attachmentIds, false).then(function () { state.loading = false; render(); scrollMessages(); }).catch(function (error) { state.loading = false; state.error = error.message; render(); });
     });
@@ -787,6 +868,24 @@
   shadow = host.attachShadow ? host.attachShadow({ mode: "open" }) : host;
   document.body.appendChild(host);
   window.CrescentSupportChat = api;
+
+  ["pushState", "replaceState"].forEach(function (method) {
+    var original = window.history && window.history[method];
+    if (typeof original !== "function" || original.__crescentSupportWrapped) return;
+    var wrapped = function () {
+      var result = original.apply(this, arguments);
+      window.setTimeout(function () { reportVisitorActivity(true); }, 0);
+      return result;
+    };
+    wrapped.__crescentSupportWrapped = true;
+    window.history[method] = wrapped;
+  });
+  window.addEventListener("popstate", function () { reportVisitorActivity(true); });
+  window.addEventListener("hashchange", function () { reportVisitorActivity(true); });
+  window.addEventListener("focus", function () { reportVisitorActivity(true); acknowledgeLatestTeamMessage(); });
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") { reportVisitorActivity(true); acknowledgeLatestTeamMessage(); }
+  });
 
   api.ready = request("/config/", { method: "GET" }).then(function (config) {
     state.config = config;

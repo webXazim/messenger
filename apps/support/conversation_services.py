@@ -136,6 +136,33 @@ def _publish_conversation_event(*, support_conversation: SupportConversation, re
     )
 
 
+def _publish_receipt_event(
+    *,
+    support_conversation: SupportConversation,
+    event_name: str,
+    message,
+    actor_kind: str,
+    actor_id=None,
+    occurred_at=None,
+) -> None:
+    if not message:
+        return
+    publish_support_event(
+        event_name=event_name,
+        website_id=support_conversation.website_id,
+        visitor_id=support_conversation.visitor_id,
+        data={
+            "conversation_id": str(support_conversation.id),
+            "website_id": str(support_conversation.website_id),
+            "visitor_id": str(support_conversation.visitor_id),
+            "message_id": str(message.id),
+            "actor_kind": actor_kind,
+            "actor_id": str(actor_id or ""),
+            "occurred_at": (occurred_at or timezone.now()).isoformat(),
+        },
+    )
+
+
 class SupportConversationError(Exception):
     def __init__(self, detail: str, *, code: str = "invalid", status_code: int = 400):
         super().__init__(detail)
@@ -446,38 +473,171 @@ def send_team_message(
 
 
 @transaction.atomic
-def mark_team_read(*, support_conversation: SupportConversation, user) -> SupportConversationReadState:
+def mark_team_delivered(
+    *,
+    support_conversation: SupportConversation,
+    user,
+    message_id=None,
+) -> SupportConversationReadState:
+    messages = Message.objects.filter(
+        conversation=support_conversation.conversation,
+        sender__isnull=True,
+        is_deleted=False,
+    )
     last_message = (
-        Message.objects.filter(conversation=support_conversation.conversation, is_deleted=False)
-        .order_by("-created_at", "-id")
-        .first()
+        messages.filter(pk=message_id).first()
+        if message_id
+        else messages.order_by("-created_at", "-id").first()
     )
     state, _ = SupportConversationReadState.objects.select_for_update().get_or_create(
         support_conversation=support_conversation,
         user=user,
     )
-    state.last_read_message = last_message
-    state.last_read_at = timezone.now()
-    state.save(update_fields=["last_read_message", "last_read_at", "updated_at"])
+    if last_message and (
+        not state.last_delivered_message_id
+        or (
+            state.last_delivered_message_id != last_message.id
+            and state.last_delivered_message.created_at <= last_message.created_at
+        )
+    ):
+        state.last_delivered_message = last_message
+        state.last_delivered_at = timezone.now()
+        state.save(update_fields=["last_delivered_message", "last_delivered_at", "updated_at"])
+        _publish_receipt_event(
+            support_conversation=support_conversation,
+            event_name="support.message.delivered",
+            message=last_message,
+            actor_kind="team",
+            actor_id=user.id,
+            occurred_at=state.last_delivered_at,
+        )
     return state
 
 
 @transaction.atomic
-def mark_visitor_read(*, support_conversation: SupportConversation) -> SupportConversation:
+def mark_team_read(
+    *,
+    support_conversation: SupportConversation,
+    user,
+    message_id=None,
+) -> SupportConversationReadState:
+    last_message = (
+        Message.objects.filter(
+            conversation=support_conversation.conversation,
+            sender__isnull=True,
+            is_deleted=False,
+        ).filter(pk=message_id).first()
+        if message_id
+        else Message.objects.filter(
+            conversation=support_conversation.conversation,
+            sender__isnull=True,
+            is_deleted=False,
+        ).order_by("-created_at", "-id").first()
+    )
+    state, _ = SupportConversationReadState.objects.select_for_update().get_or_create(
+        support_conversation=support_conversation,
+        user=user,
+    )
+    if last_message and (
+        not state.last_delivered_message_id
+        or (
+            state.last_delivered_message_id != last_message.id
+            and state.last_delivered_message.created_at <= last_message.created_at
+        )
+    ):
+        state.last_delivered_message = last_message
+        state.last_delivered_at = timezone.now()
+    state.last_read_message = last_message
+    state.last_read_at = timezone.now()
+    state.save(update_fields=[
+        "last_delivered_message",
+        "last_delivered_at",
+        "last_read_message",
+        "last_read_at",
+        "updated_at",
+    ])
+    _publish_receipt_event(
+        support_conversation=support_conversation,
+        event_name="support.message.read",
+        message=last_message,
+        actor_kind="team",
+        actor_id=user.id,
+        occurred_at=state.last_read_at,
+    )
+    return state
+
+
+@transaction.atomic
+def mark_visitor_delivered(
+    *,
+    support_conversation: SupportConversation,
+    message_id=None,
+) -> SupportConversation:
     last_team_message = (
         Message.objects.filter(
             conversation=support_conversation.conversation,
             sender__isnull=False,
             is_deleted=False,
         )
-        .order_by("-created_at", "-id")
-        .first()
+        .filter(pk=message_id).first()
+        if message_id
+        else Message.objects.filter(
+            conversation=support_conversation.conversation,
+            sender__isnull=False,
+            is_deleted=False,
+        ).order_by("-created_at", "-id").first()
     )
     support_conversation = SupportConversation.objects.select_for_update().get(pk=support_conversation.pk)
+    if last_team_message and (
+        not support_conversation.visitor_last_delivered_message_id
+        or (
+            support_conversation.visitor_last_delivered_message_id != last_team_message.id
+            and support_conversation.visitor_last_delivered_message.created_at <= last_team_message.created_at
+        )
+    ):
+        support_conversation.visitor_last_delivered_message = last_team_message
+        support_conversation.visitor_last_delivered_at = timezone.now()
+        support_conversation.save(
+            update_fields=[
+                "visitor_last_delivered_message",
+                "visitor_last_delivered_at",
+                "updated_at",
+            ]
+        )
+        _publish_receipt_event(
+            support_conversation=support_conversation,
+            event_name="support.message.delivered",
+            message=last_team_message,
+            actor_kind="visitor",
+            actor_id=support_conversation.visitor_id,
+            occurred_at=support_conversation.visitor_last_delivered_at,
+        )
+    return support_conversation
+
+
+@transaction.atomic
+def mark_visitor_read(
+    *,
+    support_conversation: SupportConversation,
+    message_id=None,
+) -> SupportConversation:
+    support_conversation = mark_visitor_delivered(
+        support_conversation=support_conversation,
+        message_id=message_id,
+    )
+    last_team_message = support_conversation.visitor_last_delivered_message
     support_conversation.visitor_last_read_message = last_team_message
     support_conversation.visitor_last_read_at = timezone.now()
     support_conversation.save(
         update_fields=["visitor_last_read_message", "visitor_last_read_at", "updated_at"]
+    )
+    _publish_receipt_event(
+        support_conversation=support_conversation,
+        event_name="support.message.read",
+        message=last_team_message,
+        actor_kind="visitor",
+        actor_id=support_conversation.visitor_id,
+        occurred_at=support_conversation.visitor_last_read_at,
     )
     return support_conversation
 

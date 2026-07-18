@@ -10,6 +10,7 @@ from rest_framework import serializers
 
 from apps.chat.models import Message, MessageAttachment, PendingUpload
 from apps.support.conversation_services import team_unread_count, visitor_unread_count
+from apps.support.realtime import visitor_is_online
 from apps.support.feedback_services import feedback_settings_for, survey_for_conversation
 from apps.support.service_operations import (
     SupportServiceConfigurationError,
@@ -342,9 +343,14 @@ class SupportWidgetSessionUpdateSerializer(serializers.Serializer):
 
 
 class SupportVisitorSerializer(serializers.ModelSerializer):
+    is_online = serializers.SerializerMethodField()
+
+    def get_is_online(self, obj):
+        return visitor_is_online(obj.id)
+
     class Meta:
         model = SupportVisitor
-        fields = ("id", "external_id", "name", "email", "locale", "current_page_url", "referrer", "last_seen_at")
+        fields = ("id", "external_id", "name", "email", "locale", "current_page_url", "referrer", "last_seen_at", "is_online")
         read_only_fields = fields
 
 
@@ -495,11 +501,87 @@ class SupportMessageSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
     delivery_status = serializers.CharField(read_only=True)
+    receipt_status = serializers.SerializerMethodField()
+    delivered_at = serializers.SerializerMethodField()
+    read_at = serializers.SerializerMethodField()
     sender = serializers.SerializerMethodField()
     is_own = serializers.SerializerMethodField()
     voice_note = serializers.SerializerMethodField()
     attachments = serializers.SerializerMethodField()
     preview_text = serializers.SerializerMethodField()
+
+    def _receipt_snapshot(self):
+        cached = self.context.get("_support_receipt_snapshot")
+        if cached is not None:
+            return cached
+        conversation = self.context.get("support_conversation")
+        if not conversation:
+            cached = {}
+        else:
+            states = list(
+                conversation.read_states.select_related(
+                    "last_delivered_message",
+                    "last_read_message",
+                )
+            )
+            team_delivered = [
+                state
+                for state in states
+                if state.last_delivered_message_id and state.last_delivered_at
+            ]
+            team_read = [
+                state
+                for state in states
+                if state.last_read_message_id and state.last_read_at
+            ]
+            cached = {
+                "visitor_delivered_message": getattr(conversation, "visitor_last_delivered_message", None),
+                "visitor_delivered_at": getattr(conversation, "visitor_last_delivered_at", None),
+                "visitor_read_message": getattr(conversation, "visitor_last_read_message", None),
+                "visitor_read_at": getattr(conversation, "visitor_last_read_at", None),
+                "team_delivered_message": max(
+                    (state.last_delivered_message for state in team_delivered),
+                    key=lambda item: item.created_at,
+                    default=None,
+                ),
+                "team_delivered_at": max(
+                    (state.last_delivered_at for state in team_delivered),
+                    default=None,
+                ),
+                "team_read_message": max(
+                    (state.last_read_message for state in team_read),
+                    key=lambda item: item.created_at,
+                    default=None,
+                ),
+                "team_read_at": max(
+                    (state.last_read_at for state in team_read),
+                    default=None,
+                ),
+            }
+        self.context["_support_receipt_snapshot"] = cached
+        return cached
+
+    def _receipt_values(self, obj):
+        snapshot = self._receipt_snapshot()
+        prefix = "visitor" if obj.sender_id else "team"
+        delivered_message = snapshot.get(f"{prefix}_delivered_message")
+        read_message = snapshot.get(f"{prefix}_read_message")
+        delivered = bool(delivered_message and delivered_message.created_at >= obj.created_at)
+        read = bool(read_message and read_message.created_at >= obj.created_at)
+        return {
+            "status": "read" if read else "delivered" if delivered else obj.delivery_status,
+            "delivered_at": snapshot.get(f"{prefix}_delivered_at") if delivered else None,
+            "read_at": snapshot.get(f"{prefix}_read_at") if read else None,
+        }
+
+    def get_receipt_status(self, obj):
+        return self._receipt_values(obj)["status"]
+
+    def get_delivered_at(self, obj):
+        return self._receipt_values(obj)["delivered_at"]
+
+    def get_read_at(self, obj):
+        return self._receipt_values(obj)["read_at"]
 
     def get_voice_note(self, obj: Message):
         return bool((obj.metadata or {}).get("voice_note"))

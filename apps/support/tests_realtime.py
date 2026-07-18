@@ -192,6 +192,70 @@ class SupportRealtimeTests(TransactionTestCase):
 
         async_to_sync(scenario)()
 
+    def test_widget_presence_activity_typing_and_receipts_are_realtime(self):
+        session, raw_token = self.issue_session()
+        support_conversation, visitor_message = send_visitor_message(session=session, text="Hello")
+        token = str(AccessToken.for_user(self.owner))
+
+        async def scenario():
+            team = WebsocketCommunicator(application, f"/ws/support/?token={token}")
+            widget = WebsocketCommunicator(
+                application,
+                f"/ws/support/widget/{self.website.site_key}/?session_id={session.id}&token={raw_token}",
+                headers=[(b"origin", b"https://main.example.com")],
+            )
+            self.assertTrue((await team.connect())[0])
+            await team.receive_json_from(timeout=2)
+            self.assertTrue((await widget.connect())[0])
+            await widget.receive_json_from(timeout=2)
+
+            presence = await team.receive_json_from(timeout=2)
+            self.assertEqual(presence["event"], "support.visitor.presence")
+            self.assertTrue(presence["data"]["is_online"])
+
+            await widget.send_json_to({
+                "event": "support.visitor.activity",
+                "data": {
+                    "current_page_url": "https://main.example.com/pricing",
+                    "referrer": "https://main.example.com/",
+                },
+            })
+            activity = await team.receive_json_from(timeout=2)
+            self.assertEqual(activity["event"], "support.visitor.presence")
+            self.assertEqual(activity["data"]["current_page_url"], "https://main.example.com/pricing")
+
+            await widget.send_json_to({"event": "support.typing.start", "data": {}})
+            typing = await team.receive_json_from(timeout=2)
+            self.assertEqual(typing["event"], "support.typing.started")
+            self.assertEqual(typing["data"]["sender"]["kind"], "visitor")
+
+            await team.send_json_to({
+                "event": "support.message.read",
+                "data": {
+                    "conversation_id": str(support_conversation.id),
+                    "message_id": str(visitor_message.id),
+                },
+            })
+            receipt = await widget.receive_json_from(timeout=2)
+            self.assertEqual(receipt["event"], "support.message.read")
+            self.assertEqual(receipt["data"]["message_id"], str(visitor_message.id))
+            team_receipt = await team.receive_json_from(timeout=2)
+            self.assertEqual(team_receipt["event"], "support.message.read")
+
+            await widget.disconnect()
+            offline = await team.receive_json_from(timeout=2)
+            self.assertEqual(offline["event"], "support.visitor.presence")
+            self.assertFalse(offline["data"]["is_online"])
+            await team.disconnect()
+
+        async_to_sync(scenario)()
+        support_conversation.refresh_from_db()
+        session.refresh_from_db()
+        self.assertEqual(session.current_page_url, "https://main.example.com/pricing")
+        read_state = support_conversation.read_states.get(user=self.owner)
+        self.assertEqual(read_state.last_read_message_id, visitor_message.id)
+        self.assertEqual(read_state.last_delivered_message_id, visitor_message.id)
+
     def test_private_workflow_event_reaches_team_but_not_widget(self):
         session, raw_token = self.issue_session()
         support_conversation, _ = send_visitor_message(session=session, text="Hello")
@@ -210,6 +274,9 @@ class SupportRealtimeTests(TransactionTestCase):
             self.assertTrue(widget_connected)
             await team.receive_json_from(timeout=2)
             await widget.receive_json_from(timeout=2)
+            presence = await team.receive_json_from(timeout=2)
+            self.assertEqual(presence["event"], "support.visitor.presence")
+            self.assertTrue(presence["data"]["is_online"])
 
             def add_note():
                 return create_internal_note(

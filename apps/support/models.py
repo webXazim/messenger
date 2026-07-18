@@ -596,6 +596,14 @@ class SupportConversation(BaseUUIDModel):
         related_name="+",
     )
     visitor_last_read_at = models.DateTimeField(null=True, blank=True)
+    visitor_last_delivered_message = models.ForeignKey(
+        "chat.Message",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    visitor_last_delivered_at = models.DateTimeField(null=True, blank=True)
     first_response_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
     next_response_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
     resolution_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -705,6 +713,14 @@ class SupportConversationReadState(BaseUUIDModel):
         related_name="+",
     )
     last_read_at = models.DateTimeField(null=True, blank=True)
+    last_delivered_message = models.ForeignKey(
+        "chat.Message",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    last_delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
