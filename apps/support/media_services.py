@@ -116,20 +116,29 @@ def _locked_support_uploads(attachment_ids) -> list[SupportPendingUpload]:
         )
     if len(set(normalized)) != len(normalized):
         raise SupportMediaError("Duplicate upload identifiers are not allowed.", code="duplicate_upload")
+    # Lock the Support ownership rows without joining nullable relations.
+    # PostgreSQL rejects an unrestricted FOR UPDATE when select_related()
+    # introduces the nullable widget_session/visitor outer joins.
     records = list(
         SupportPendingUpload.objects.select_for_update()
-        .select_related(
-            "pending_upload",
-            "support_account",
-            "website",
-            "support_conversation",
-            "widget_session",
-            "visitor",
-        )
         .filter(pending_upload_id__in=normalized)
     )
     if len(records) != len(normalized):
         raise SupportMediaError("One or more uploads are unavailable.", code="upload_unavailable")
+
+    # Lock the shared Messenger upload records separately. This keeps Support
+    # on the same attachment finalization primitive as Messenger while making
+    # ownership validation and attach status changes one atomic operation.
+    pending_uploads = list(
+        PendingUpload.objects.select_for_update()
+        .filter(id__in=normalized)
+    )
+    if len(pending_uploads) != len(normalized):
+        raise SupportMediaError("One or more uploads are unavailable.", code="upload_unavailable")
+    pending_by_id = {str(upload.id): upload for upload in pending_uploads}
+    for record in records:
+        record._state.fields_cache["pending_upload"] = pending_by_id[str(record.pending_upload_id)]
+
     by_id = {str(record.pending_upload_id): record for record in records}
     return [by_id[value] for value in normalized]
 

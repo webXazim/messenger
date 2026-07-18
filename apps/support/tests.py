@@ -7,7 +7,9 @@ from urllib.parse import unquote
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -714,14 +716,26 @@ class SupportFoundationTests(APITestCase):
         support_upload = SupportPendingUpload.objects.get(pending_upload=pending)
         self.assertEqual(str(support_upload.widget_session_id), session["id"])
 
-        sent = self.client.post(
-            f"/api/v1/support/widget/{website.site_key}/sessions/{session['id']}/conversation/messages/",
-            {"text": "", "attachment_ids": [upload_id]},
-            format="json",
-            HTTP_ORIGIN="https://main.example.com",
-            HTTP_AUTHORIZATION=f"Bearer {session['token']}",
-        )
+        with CaptureQueriesContext(connection) as captured_queries:
+            sent = self.client.post(
+                f"/api/v1/support/widget/{website.site_key}/sessions/{session['id']}/conversation/messages/",
+                {"text": "", "attachment_ids": [upload_id]},
+                format="json",
+                HTTP_ORIGIN="https://main.example.com",
+                HTTP_AUTHORIZATION=f"Bearer {session['token']}",
+            )
         self.assertEqual(sent.status_code, 201)
+        ownership_queries = [
+            query["sql"]
+            for query in captured_queries.captured_queries
+            if 'FROM "support_supportpendingupload"' in query["sql"]
+            and "pending_upload_id" in query["sql"]
+        ]
+        self.assertTrue(ownership_queries)
+        self.assertTrue(
+            all(" JOIN " not in query.upper() for query in ownership_queries),
+            "Support upload row locking must not join nullable ownership relations.",
+        )
         self.assertEqual(sent.data["message"]["type"], "file")
         self.assertEqual(len(sent.data["message"]["attachments"]), 1)
         attachment = MessageAttachment.objects.get(message_id=sent.data["message"]["id"])

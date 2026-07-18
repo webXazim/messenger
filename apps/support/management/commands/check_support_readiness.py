@@ -1,3 +1,5 @@
+import os
+
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
@@ -23,11 +25,24 @@ class Command(BaseCommand):
         self.stdout.write(f"- Public widget: {'enabled' if widget_enabled else 'disabled'}")
         self.stdout.write(f"- Guest calls: {'enabled' if calls_enabled else 'disabled'}")
         self.stdout.write(f"- Origin enforcement: {bool(getattr(settings, 'SUPPORT_WIDGET_REQUIRE_ORIGIN', True))}")
+        self.stdout.write(f"- Database engine: {connection.vendor}")
+        self.stdout.write(f"- Upload scanning: {'async' if bool(getattr(settings, 'UPLOAD_SCAN_ASYNC', True)) else 'inline'}")
+        self.stdout.write(f"- Antivirus: {'enabled' if bool(getattr(settings, 'CLAMAV_ENABLED', False)) else 'signature checks only'}")
+        self.stdout.write(
+            f"- Attachment storage: {'S3/R2' if bool(getattr(settings, 'CHAT_USE_S3_STORAGE', False)) else 'shared private media volume'}"
+        )
 
         if (widget_enabled or calls_enabled) and not support_enabled:
             failures.append("Support Chat must be enabled before its widget or calls.")
         if widget_enabled and not bool(getattr(settings, "SUPPORT_WIDGET_REQUIRE_ORIGIN", True)):
             failures.append("Widget origin enforcement is disabled.")
+        if not bool(getattr(settings, "CHAT_USE_S3_STORAGE", False)):
+            private_media_root = str(getattr(settings, "PRIVATE_MEDIA_ROOT", "") or "")
+            local_test_services = bool(getattr(settings, "USE_LOCAL_TEST_SERVICES", False))
+            if (not private_media_root or not os.path.isdir(private_media_root)) and not local_test_services:
+                failures.append("The private attachment media directory does not exist.")
+            elif os.path.isdir(private_media_root) and not os.access(private_media_root, os.R_OK | os.W_OK):
+                failures.append("The private attachment media directory is not readable and writable.")
         if calls_enabled:
             if not widget_enabled:
                 failures.append("The public widget must be enabled for visitor calls.")
