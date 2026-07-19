@@ -64,7 +64,7 @@ for pair in   "DEBUG:False"   "MESSENGER_ENVIRONMENT:production"   "MESSENGER_RE
 done
 
 [[ "$(read_env NGINX_CONF_PATH)" == "./nginx/snm.production.conf" ]] ||   failures+=("NGINX_CONF_PATH must be ./nginx/snm.production.conf")
-grep -Fq 'proxy_pass $realtime_upstream$request_uri;' nginx/snm.production.conf || \
+grep -Fq 'proxy_pass http://realtime:9000;' nginx/snm.production.conf || \
   failures+=("Production Nginx must preserve the /ws ticket query when proxying to Axum")
 [[ "$(read_env TURN_PROVIDER)" == "cloudflare" ]] || failures+=("TURN_PROVIDER must be cloudflare in production")
 [[ "$(read_env CLOUDFLARE_TURN_API_BASE_URL)" == https://* ]] || failures+=("CLOUDFLARE_TURN_API_BASE_URL must use HTTPS")
@@ -197,6 +197,24 @@ curl --fail --silent --show-error --insecure \
   "https://${app_domain}/api/v1/health/ready/" >/dev/null
 
 echo "Origin HTTPS readiness endpoint passed."
+
+websocket_route_status="$(
+  curl --silent --show-error --insecure --output /dev/null --write-out '%{http_code}' \
+    --http1.1 --max-time 10 \
+    --resolve "${app_domain}:443:127.0.0.1" \
+    --header 'Connection: Upgrade' \
+    --header 'Upgrade: websocket' \
+    --header 'Sec-WebSocket-Version: 13' \
+    --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    --header "Origin: https://${app_domain}" \
+    "https://${app_domain}/ws?ticket=invalid-readiness-probe"
+)"
+if [[ "$websocket_route_status" != "401" ]]; then
+  echo "Axum WebSocket route probe failed: expected HTTP 401 for an invalid ticket, got ${websocket_route_status}" >&2
+  exit 1
+fi
+
+echo "Axum WebSocket query-routing probe passed."
 
 if (( ! skip_public )); then
   curl --fail --silent --show-error --max-time 20 \
