@@ -64,6 +64,8 @@ for pair in   "DEBUG:False"   "MESSENGER_ENVIRONMENT:production"   "MESSENGER_RE
 done
 
 [[ "$(read_env NGINX_CONF_PATH)" == "./nginx/snm.production.conf" ]] ||   failures+=("NGINX_CONF_PATH must be ./nginx/snm.production.conf")
+grep -Fq 'proxy_pass $realtime_upstream$request_uri;' nginx/snm.production.conf || \
+  failures+=("Production Nginx must preserve the /ws ticket query when proxying to Axum")
 [[ "$(read_env TURN_PROVIDER)" == "cloudflare" ]] || failures+=("TURN_PROVIDER must be cloudflare in production")
 [[ "$(read_env CLOUDFLARE_TURN_API_BASE_URL)" == https://* ]] || failures+=("CLOUDFLARE_TURN_API_BASE_URL must use HTTPS")
 turn_ttl="$(read_env TURN_CREDENTIAL_TTL_SECONDS)"
