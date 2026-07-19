@@ -45,12 +45,14 @@ done
 "${compose[@]}" build frontend
 "${compose[@]}" build realtime
 
-"${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py migrate
+# Create a verified database rollback point before applying schema changes.
+# Starting only the data services also supports deployment from a stopped stack.
+"${compose[@]}" up -d postgres redis
+bash ./scripts/backup-postgres.sh
+
+"${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py migrate --noinput
 "${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py migrate --check
 "${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py check --deploy
-
-# Create a verified database rollback point before replacing any running service.
-bash ./scripts/backup-postgres.sh
 
 # Replace services only after every build, validation, migration, and backup has succeeded.
 "${compose[@]}" up -d --remove-orphans postgres redis web realtime frontend nginx worker beat
