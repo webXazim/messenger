@@ -6,6 +6,7 @@ from urllib.parse import unquote
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import override_settings
@@ -14,6 +15,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from apps.chat.models import Conversation, ConversationParticipant, Message, MessageAttachment, PendingUpload
+from config.throttling import UnsafeScopedRateThrottle
 from apps.support.models import (
     SupportAccount,
     SupportAgent,
@@ -534,6 +536,53 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(first.data["message"]["id"], second.data["message"]["id"])
         self.assertEqual(first.data["message"]["client_temp_id"], "widget-once-1")
         self.assertEqual(Message.objects.filter(client_temp_id="widget-once-1").count(), 1)
+
+    def test_widget_polling_does_not_consume_message_send_limit(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        messages_endpoint = (
+            f"/api/v1/support/widget/{website.site_key}/sessions/"
+            f"{session['id']}/conversation/messages/"
+        )
+        csat_endpoint = (
+            f"/api/v1/support/widget/{website.site_key}/sessions/"
+            f"{session['id']}/conversation/csat/"
+        )
+        headers = {
+            "HTTP_ORIGIN": "https://main.example.com",
+            "HTTP_AUTHORIZATION": f"Bearer {session['token']}",
+        }
+        cache.clear()
+        try:
+            with patch.object(UnsafeScopedRateThrottle, "get_rate", return_value="1/min"):
+                self.assertEqual(self.client.get(messages_endpoint, **headers).status_code, 200)
+                self.assertEqual(self.client.get(csat_endpoint, **headers).status_code, 200)
+                self.assertEqual(
+                    self.client.post(
+                        messages_endpoint,
+                        {"text": "Allowed after polling"},
+                        format="json",
+                        **headers,
+                    ).status_code,
+                    201,
+                )
+                self.assertEqual(
+                    self.client.post(
+                        messages_endpoint,
+                        {"text": "Actually rate limited"},
+                        format="json",
+                        **headers,
+                    ).status_code,
+                    429,
+                )
+        finally:
+            cache.clear()
 
     def test_team_message_client_temp_id_is_idempotent(self):
         account = self.active_account()

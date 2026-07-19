@@ -12,6 +12,8 @@
   "include": [
     "src/lib/messageTimeline.ts",
     "src/lib/messageReceipts.ts",
+    "src/lib/serializedTaskQueue.ts",
+    "src/lib/typingPresence.ts",
     "src/types/chat.ts"
   ]
 }

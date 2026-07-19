@@ -655,15 +655,66 @@
 }
 
 .ms-typing-indicator {
-  width: max-content;
-  max-width: min(22rem, 82%);
-  margin: 0 0 var(--ms-space-2) var(--ms-space-4);
-  padding: 0.45rem 0.7rem;
-  border: 1px solid var(--ms-color-line);
-  border-radius: var(--ms-radius-pill);
-  background: var(--ms-color-surface);
+  width: min(100%, 64rem);
+  min-height: 1.375rem;
+  margin: 0 auto;
+  padding: 0 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   color: var(--ms-color-ink-muted);
   font-size: var(--ms-font-size-xs);
+  line-height: 1.2;
+  opacity: 0;
+  transform: translateY(0.2rem);
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: none;
+}
+
+.ms-typing-indicator.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ms-typing-indicator__copy {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-typing-indicator__dots {
+  display: inline-flex;
+  gap: 0.16rem;
+  align-items: center;
+}
+
+.ms-typing-indicator__dots i {
+  width: 0.23rem;
+  height: 0.23rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ms-typing-dot 1.05s ease-in-out infinite;
+}
+
+.ms-typing-indicator__dots i:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.ms-typing-indicator__dots i:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+@keyframes ms-typing-dot {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-0.12rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ms-typing-indicator,
+  .ms-typing-indicator__dots i {
+    transition: none;
+    animation: none;
+  }
 }
 
 @media (max-width: 900px) {

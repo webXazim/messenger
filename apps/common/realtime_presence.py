@@ -10,6 +10,7 @@ from django.core.cache import cache
 
 
 USER_KEY_PREFIX = "realtime:presence:user:"
+LAST_SEEN_KEY_PREFIX = "realtime:presence:last-seen:"
 RECIPIENT_KEY_PREFIX = "realtime:presence:recipients:"
 PROFILE_KEY_PREFIX = "realtime:presence:profile:"
 SUPPORT_VISITOR_KEY_PREFIX = "realtime:presence:support-visitor:"
@@ -38,6 +39,68 @@ def _ttl() -> int:
 
 def _metadata_ttl() -> int:
     return max(300, int(getattr(settings, "REALTIME_PRESENCE_METADATA_TTL_SECONDS", 3600)))
+
+
+def _last_seen_ttl() -> int:
+    return max(86_400, int(getattr(settings, "REALTIME_PRESENCE_LAST_SEEN_TTL_SECONDS", 180 * 86_400)))
+
+
+def _last_seen_key(user_id: Any) -> str:
+    return f"{LAST_SEEN_KEY_PREFIX}{user_id}"
+
+
+def _normalize_last_seen(value: Any) -> float | None:
+    try:
+        timestamp = float(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return timestamp if timestamp > 0 else None
+
+
+def read_user_last_seen(user_id: Any) -> float | None:
+    key = _last_seen_key(user_id)
+    url = _redis_url()
+    if url:
+        try:
+            return _normalize_last_seen(_client(url).get(key))
+        except Exception:
+            pass
+    return _normalize_last_seen(cache.get(key))
+
+
+def read_many_user_last_seen(user_ids: Iterable[Any]) -> dict[str, float | None]:
+    ids = list(dict.fromkeys(str(value) for value in user_ids if value is not None))
+    result = {user_id: None for user_id in ids}
+    if not ids:
+        return result
+    keys = [_last_seen_key(user_id) for user_id in ids]
+    url = _redis_url()
+    if url:
+        try:
+            values = _client(url).mget(keys)
+            return {
+                user_id: _normalize_last_seen(value)
+                for user_id, value in zip(ids, values)
+            }
+        except Exception:
+            pass
+    cached = cache.get_many(keys)
+    return {
+        user_id: _normalize_last_seen(cached.get(key))
+        for user_id, key in zip(ids, keys)
+    }
+
+
+def _write_user_last_seen(user_id: Any, timestamp: float) -> None:
+    key = _last_seen_key(user_id)
+    url = _redis_url()
+    if url:
+        try:
+            _client(url).setex(key, _last_seen_ttl(), timestamp)
+            return
+        except Exception:
+            pass
+    cache.set(key, timestamp, timeout=_last_seen_ttl())
 
 
 def _normalize_device_record(value: Any) -> dict[str, Any] | None:
@@ -223,6 +286,7 @@ def upsert_user_presence(
             pipe = client.pipeline(transaction=False)
             pipe.hset(key, str(device_id)[:200], json.dumps(record, separators=(",", ":")))
             pipe.expire(key, _ttl() * 2)
+            pipe.setex(_last_seen_key(user_id), _last_seen_ttl(), record["last_seen"])
             pipe.execute()
             return read_user_presence(user_id)
         except Exception:
@@ -230,21 +294,27 @@ def upsert_user_presence(
     registry = read_user_presence(user_id)
     registry[str(device_id)[:200]] = record
     cache.set(key, registry, timeout=_ttl() * 2)
+    _write_user_last_seen(user_id, record["last_seen"])
     return registry
 
 
 def remove_user_presence(user_id: Any, device_id: str, *, prefix: bool = False) -> dict[str, dict[str, Any]]:
     key = f"{USER_KEY_PREFIX}{user_id}"
+    disconnected_at = time.time()
     url = _redis_url()
     if url:
         try:
             client = _client(url)
-            if prefix:
-                fields = [field for field in client.hkeys(key) if field == device_id or field.startswith(f"{device_id}:")]
-                if fields:
-                    client.hdel(key, *fields)
-            else:
-                client.hdel(key, device_id)
+            pipe = client.pipeline(transaction=False)
+            fields = (
+                [field for field in client.hkeys(key) if field == device_id or field.startswith(f"{device_id}:")]
+                if prefix
+                else [device_id]
+            )
+            if fields:
+                pipe.hdel(key, *fields)
+            pipe.setex(_last_seen_key(user_id), _last_seen_ttl(), disconnected_at)
+            pipe.execute()
             return read_user_presence(user_id)
         except Exception:
             pass
@@ -261,6 +331,7 @@ def remove_user_presence(user_id: Any, device_id: str, *, prefix: bool = False) 
         cache.set(key, registry, timeout=_ttl() * 2)
     else:
         cache.delete(key)
+    _write_user_last_seen(user_id, disconnected_at)
     return registry
 
 

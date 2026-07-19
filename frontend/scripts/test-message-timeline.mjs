@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import {
   advanceMessageReceiptPages,
+  compareTimelineMessages,
   flattenMessagePages,
   mapMessagePages,
   markMessageDeletedPages,
@@ -10,6 +11,11 @@ import {
   upsertMessagePages,
 } from "../.timeline-test-build/lib/messageTimeline.js";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "../.timeline-test-build/lib/messageReceipts.js";
+import { createSerializedTaskQueue } from "../.timeline-test-build/lib/serializedTaskQueue.js";
+import {
+  TYPING_MIN_VISIBLE_MS,
+  typingRemovalDelay,
+} from "../.timeline-test-build/lib/typingPresence.js";
 
 const user = { id: "user-1", username: "user", display_name: "User" };
 const makeMessage = (id, createdAt, patch = {}) => ({
@@ -99,6 +105,61 @@ assert.ok(!flattenMessagePages(removedData).some((message) => message.id === "co
 
 const emptyData = upsertMessagePages(undefined, makeMessage("first", "2026-07-13T12:00:00Z"));
 assert.equal(emptyData.pages[0].results[0].id, "first", "Optimistic sends must work before the first page settles.");
+
+const sameTimestamp = "2026-07-13T12:01:00.000Z";
+const rapidFirst = makeMessage("z-random-id", sameTimestamp);
+const rapidSecond = makeMessage("a-random-id", sameTimestamp);
+assert.deepEqual(
+  [rapidFirst, rapidSecond].sort(compareTimelineMessages).map((message) => message.id),
+  ["z-random-id", "a-random-id"],
+  "Equal server timestamps must preserve arrival order instead of sorting by random UUID.",
+);
+const rapidPages = upsertMessagePages(
+  upsertMessagePages(undefined, rapidFirst),
+  rapidSecond,
+);
+assert.deepEqual(
+  rapidPages.pages[0].results.map((message) => message.id),
+  ["z-random-id", "a-random-id"],
+  "New rapid messages must append in arrival order.",
+);
+
+const serialQueue = createSerializedTaskQueue();
+const serialOrder = [];
+let releaseFirst;
+const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+const firstTask = serialQueue.enqueue(async () => {
+  serialOrder.push("first:start");
+  await firstGate;
+  serialOrder.push("first:end");
+  return "first";
+});
+const secondTask = serialQueue.enqueue(async () => {
+  serialOrder.push("second:start");
+  return "second";
+});
+await new Promise((resolve) => setImmediate(resolve));
+assert.deepEqual(serialOrder, ["first:start"], "A later send must not begin while the earlier send is preparing.");
+releaseFirst();
+assert.deepEqual(await Promise.all([firstTask, secondTask]), ["first", "second"]);
+assert.deepEqual(serialOrder, ["first:start", "first:end", "second:start"]);
+await assert.rejects(serialQueue.enqueue(async () => { throw new Error("expected"); }), /expected/);
+assert.equal(
+  await serialQueue.enqueue(async () => "after-failure"),
+  "after-failure",
+  "One failed send must not permanently block the queue.",
+);
+
+assert.equal(
+  typingRemovalDelay(1_000, 100, 1_200),
+  TYPING_MIN_VISIBLE_MS - 200,
+  "Typing presence must stay visible for its minimum display window.",
+);
+assert.equal(
+  typingRemovalDelay(1_000, 420, 2_000),
+  420,
+  "Typing stop events must retain their smoothing grace after the minimum window.",
+);
 
 const participant = {
   id: "participant-1",

@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -147,8 +147,17 @@
     if (!state.session) return Promise.resolve([]);
     return request(sessionPath("/conversation/messages/"), { method: "GET" }).then(function (payload) {
       var nextMessages = Array.isArray(payload.messages) ? payload.messages : [];
-      var changed = JSON.stringify(nextMessages) !== JSON.stringify(state.messages);
-      state.messages = nextMessages;
+      var authoritativeTempIds = {};
+      nextMessages.forEach(function (message) {
+        if (message.client_temp_id) authoritativeTempIds[String(message.client_temp_id)] = true;
+      });
+      var localMessages = state.messages.filter(function (message) {
+        var temporary = String(message.id || "").indexOf("temp-") === 0;
+        return temporary && !authoritativeTempIds[String(message.client_temp_id || message.id || "")];
+      });
+      var mergedMessages = nextMessages.concat(localMessages);
+      var changed = JSON.stringify(mergedMessages) !== JSON.stringify(state.messages);
+      state.messages = mergedMessages;
       acknowledgeLatestTeamMessage();
       if (changed && state.open) {
         render();
@@ -196,7 +205,13 @@
   }
 
   function reportVisitorTyping(active) {
-    sendRealtime(active ? "support.typing.start" : "support.typing.stop", {});
+    if (active && !state.visitorTyping) {
+      state.visitorTyping = true;
+      sendRealtime("support.typing.start", {});
+    } else if (!active && state.visitorTyping) {
+      state.visitorTyping = false;
+      sendRealtime("support.typing.stop", {});
+    }
     if (state.typingStopTimer) window.clearTimeout(state.typingStopTimer);
     state.typingStopTimer = 0;
     if (active) state.typingStopTimer = window.setTimeout(function () { reportVisitorTyping(false); }, 1800);
@@ -288,8 +303,9 @@
     if (!body && !uploads.length) return Promise.reject(new Error("Write a message or add an attachment before sending."));
     var clientTempId = "temp-" + Date.now().toString(36) + Math.random().toString(36).slice(2);
     var optimisticUploads = state.pendingUploads.filter(function (upload) { return uploads.indexOf(upload.id) >= 0; });
-    state.messages.push({
+    var optimisticMessage = {
       id: clientTempId,
+      client_temp_id: clientTempId,
       type: optimisticUploads[0] ? optimisticUploads[0].kind : "text",
       text: body,
       created_at: new Date().toISOString(),
@@ -299,21 +315,30 @@
       attachments: optimisticUploads.map(function (upload) {
         return { id: upload.id, media_kind: upload.kind, original_name: upload.name, mime_type: "", size: 0, scan_status: "clean", can_preview_inline: false, download_url: "" };
       })
-    });
+    };
+    state.messages.push(optimisticMessage);
+    state.pendingUploads = state.pendingUploads.filter(function (upload) { return uploads.indexOf(upload.id) < 0; });
     state.draft = "";
+    state.error = "";
     render();
     scrollMessages();
-    return request(sessionPath("/conversation/messages/"), { method: "POST", body: JSON.stringify({ client_temp_id: clientTempId, text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) }) })
+    var task = state.sendQueue.catch(function () {}).then(function () {
+      return request(sessionPath("/conversation/messages/"), { method: "POST", body: JSON.stringify({ client_temp_id: clientTempId, text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) }) });
+    });
+    state.sendQueue = task.catch(function () {});
+    return task
       .then(function (payload) {
-        state.messages = state.messages.filter(function (message) { return message.id !== clientTempId; });
-        if (payload.message && !state.messages.some(function (message) { return message.id === payload.message.id; })) state.messages.push(payload.message);
-        clearPendingUploads();
+        var replacementIndex = state.messages.findIndex(function (message) {
+          return message.id === clientTempId || String(message.client_temp_id || "") === clientTempId;
+        });
+        if (payload.message && replacementIndex >= 0) state.messages.splice(replacementIndex, 1, payload.message);
+        else if (payload.message && !state.messages.some(function (message) { return message.id === payload.message.id; })) state.messages.push(payload.message);
         render();
         scrollMessages();
         return payload;
       }).catch(function (error) {
         state.messages = state.messages.map(function (message) {
-          if (message.id !== clientTempId) return message;
+          if (message.id !== clientTempId && String(message.client_temp_id || "") !== clientTempId) return message;
           message.delivery_status = "failed";
           message.receipt_status = "failed";
           return message;
@@ -732,9 +757,19 @@
           if (state.open) loadMessages().catch(function () {});
         } else if (payload.event === "support.typing.started" || payload.event === "support.typing.stopped") {
           var teamTyping = payload.event === "support.typing.started";
-          if (state.teamTyping !== teamTyping) {
-            state.teamTyping = teamTyping;
-            if (state.open) render();
+          if (state.teamTypingHideTimer) window.clearTimeout(state.teamTypingHideTimer);
+          state.teamTypingHideTimer = 0;
+          if (teamTyping) {
+            state.teamTypingShownAt = state.teamTyping ? state.teamTypingShownAt : Date.now();
+            if (!state.teamTyping) { state.teamTyping = true; if (state.open) render(); }
+            state.teamTypingHideTimer = window.setTimeout(function () {
+              state.teamTyping = false; state.teamTypingHideTimer = 0; if (state.open) render();
+            }, 7500);
+          } else if (state.teamTyping) {
+            var remaining = Math.max(0, 900 - (Date.now() - state.teamTypingShownAt));
+            state.teamTypingHideTimer = window.setTimeout(function () {
+              state.teamTyping = false; state.teamTypingHideTimer = 0; if (state.open) render();
+            }, remaining + 140);
           }
         } else if (payload.event === "support.message.delivered" || payload.event === "support.message.read") {
           loadMessages().catch(function () {});
@@ -1198,8 +1233,8 @@
       event.preventDefault();
       var text = state.draft.trim(); var attachmentIds = state.pendingUploads.filter(function (upload) { return upload.status === "ready" && upload.id; }).map(function (upload) { return upload.id; }); if (!text && !attachmentIds.length) return;
       reportVisitorTyping(false);
-      state.loading = true; state.error = "";
-      sendMessage(text, attachmentIds, false).then(function () { state.loading = false; render(); scrollMessages(); }).catch(function (error) { state.loading = false; state.error = error.message; render(); });
+      state.error = "";
+      sendMessage(text, attachmentIds, false).then(function () { render(); scrollMessages(); }).catch(function (error) { state.error = error.message; render(); });
     });
     panel.appendChild(composer);
     if (state.session && state.config.visitor_deletion_enabled) {

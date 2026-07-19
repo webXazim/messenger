@@ -433,7 +433,9 @@ fn fanout_user_presence(state: &AppState, session: &AuthenticatedSession, snapsh
         data.insert("user_id".to_owned(), json!(session.actor_id.as_str()));
         data.insert("username".to_owned(), json!(session.username.as_str()));
         data.insert("display_name".to_owned(), json!(session.display_name.as_str()));
-        data.insert("last_seen_at".to_owned(), Value::Null);
+        if !data.contains_key("last_seen_at") {
+            data.insert("last_seen_at".to_owned(), Value::Null);
+        }
         data.insert("visibility".to_owned(), json!("public"));
         if let Ok(message) = event_message("presence.updated", Value::Object(data)) {
             state_registry.fanout_low(&audiences, message, None, None);

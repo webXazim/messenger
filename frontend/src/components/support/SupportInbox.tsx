@@ -28,6 +28,8 @@ import type { VoiceNotePayload } from "../VoiceNoteRecorder";
 import { SupportGuestCall } from "./SupportGuestCall";
 import { TypingIndicator } from "../TypingIndicator";
 import { supportSocket } from "../../lib/supportSocket";
+import { createSerializedTaskQueue } from "../../lib/serializedTaskQueue";
+import { TYPING_MESSAGE_TRANSITION_MS, typingRemovalDelay } from "../../lib/typingPresence";
 
 const QUEUES: Array<{
   value: NonNullable<SupportConversationFilters["queue"]>;
@@ -80,6 +82,7 @@ function buildOptimisticSupportMessage(
   const firstMediaKind = attachments[0]?.media_kind;
   return {
     id: `temp-${clientTempId}`,
+    client_temp_id: clientTempId,
     type: firstMediaKind || "text",
     text,
     created_at: now,
@@ -97,6 +100,30 @@ function buildOptimisticSupportMessage(
     voice_note: Boolean(payload.voice_note),
     attachments,
     preview_text: text || attachments[0]?.original_name || "Attachment",
+  };
+}
+
+function mergeSupportMessages(
+  currentValue: unknown,
+  incomingValue: unknown,
+) {
+  const current = currentValue as SupportConversationMessagesResponse | undefined;
+  const incoming = incomingValue as SupportConversationMessagesResponse;
+  if (!current) return incoming;
+  const committedTempIds = new Set(
+    incoming.messages
+      .map((message) => message.client_temp_id)
+      .filter((clientTempId): clientTempId is string => Boolean(clientTempId)),
+  );
+  const localMessages = current.messages.filter(
+    (message) =>
+      message.id.startsWith("temp-")
+      && !committedTempIds.has(message.client_temp_id || message.id.slice(5)),
+  );
+  if (!localMessages.length) return incoming;
+  return {
+    ...incoming,
+    messages: [...incoming.messages, ...localMessages],
   };
 }
 
@@ -500,6 +527,9 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const typingStopTimerRef = useRef<number | null>(null);
   const typingVisitorTimerRef = useRef<number | null>(null);
+  const typingVisitorShownAtRef = useRef(0);
+  const teamTypingActiveRef = useRef(false);
+  const sendQueueRef = useRef(createSerializedTaskQueue());
 
   const filters = useMemo(
     () => ({
@@ -549,12 +579,13 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   });
   const selectedFromList =
     listQuery.data?.results.find((item) => item.id === selectedId) || null;
-  const messagesQuery = useQuery({
+  const messagesQuery = useQuery<SupportConversationMessagesResponse>({
     queryKey: ["support-conversation-messages", selectedId],
     queryFn: ({ signal }) =>
       supportApi.getConversationMessages(selectedId, signal),
     enabled: Boolean(selectedId),
     refetchInterval: selectedId && socketStatus !== "open" ? 4000 : false,
+    structuralSharing: mergeSupportMessages,
   });
   const selectedConversation =
     messagesQuery.data?.conversation || selectedFromList;
@@ -650,9 +681,17 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
           typingVisitorTimerRef.current = null;
         }
         if (payload.event === "support.typing.stopped") {
-          setTypingVisitors({});
+          const delay = typingRemovalDelay(
+            typingVisitorShownAtRef.current,
+            TYPING_MESSAGE_TRANSITION_MS,
+          );
+          typingVisitorTimerRef.current = window.setTimeout(() => {
+            setTypingVisitors({});
+            typingVisitorTimerRef.current = null;
+          }, delay);
           return;
         }
+        typingVisitorShownAtRef.current = Date.now();
         setTypingVisitors({
           [visitorId]: String(sender.display_name || "Website visitor"),
         });
@@ -745,6 +784,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   useEffect(() => () => {
     if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
     if (typingVisitorTimerRef.current) window.clearTimeout(typingVisitorTimerRef.current);
+    teamTypingActiveRef.current = false;
     if (selectedId && supportSocket.isOpen()) {
       supportSocket.send({
         event: "support.typing.stop",
@@ -776,9 +816,10 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
       attachment_ids?: string[];
       voice_note?: boolean;
       clientTempId?: string;
+      conversationId: string;
     }) => {
-      const { clientTempId, ...messagePayload } = payload;
-      return supportApi.sendConversationMessage(selectedId, {
+      const { clientTempId, conversationId, ...messagePayload } = payload;
+      return supportApi.sendConversationMessage(conversationId, {
         ...messagePayload,
         client_temp_id: clientTempId,
       });
@@ -786,23 +827,24 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     onMutate: () => setError(null),
     onSuccess: (message, variables) => {
       queryClient.setQueryData<SupportConversationMessagesResponse>(
-        ["support-conversation-messages", selectedId],
-        (current) => current
-          ? {
+        ["support-conversation-messages", variables.conversationId],
+        (current) => {
+          if (!current) return current;
+          const temporaryId = `temp-${variables.clientTempId}`;
+          const temporaryIndex = current.messages.findIndex((item) => item.id === temporaryId);
+          const messages = [...current.messages];
+          if (temporaryIndex >= 0) messages.splice(temporaryIndex, 1, message);
+          else if (!messages.some((item) => item.id === message.id)) messages.push(message);
+          return {
               ...current,
-              messages: [
-                ...current.messages.filter(
-                  (item) => item.id !== `temp-${variables.clientTempId}`,
-                ),
-                message,
-              ],
+              messages,
               conversation: {
                 ...current.conversation,
                 last_message: message,
                 updated_at: message.created_at,
               },
-            }
-          : current,
+            };
+        },
       );
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["support-conversations"] }),
@@ -812,12 +854,14 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     },
     onError: (mutationError, variables) => {
       queryClient.setQueryData<SupportConversationMessagesResponse>(
-        ["support-conversation-messages", selectedId],
+        ["support-conversation-messages", variables.conversationId],
         (current) => current
           ? {
               ...current,
-              messages: current.messages.filter(
-                (item) => item.id !== `temp-${variables.clientTempId}`,
+              messages: current.messages.map((item) =>
+                item.id === `temp-${variables.clientTempId}`
+                  ? { ...item, delivery_status: "failed", receipt_status: "failed" }
+                  : item
               ),
             }
           : current,
@@ -946,11 +990,12 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
           waveform: payload.waveform,
         },
       );
-      await sendMutation.mutateAsync({
+      await sendQueueRef.current.enqueue(() => sendMutation.mutateAsync({
         attachment_ids: [upload.id],
         voice_note: true,
         clientTempId: payload.clientTempId,
-      });
+        conversationId: selectedId,
+      }));
     } catch (voiceError) {
       queryClient.setQueryData<SupportConversationMessagesResponse>(
         ["support-conversation-messages", selectedId],
@@ -972,18 +1017,12 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     }
   };
 
-  const sendTyping = () => {
-    if (!selectedId || !supportSocket.isOpen()) return;
-    supportSocket.send({
-      event: "support.typing.start",
-      data: {
-        conversation_id: selectedId,
-        website_id: selectedConversation?.website.id || "",
-        visitor_id: selectedConversation?.visitor.id || "",
-      },
-    });
-    if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
-    typingStopTimerRef.current = window.setTimeout(() => {
+  const stopTeamTyping = () => {
+    if (typingStopTimerRef.current) {
+      window.clearTimeout(typingStopTimerRef.current);
+      typingStopTimerRef.current = null;
+    }
+    if (teamTypingActiveRef.current && selectedId && supportSocket.isOpen()) {
       supportSocket.send({
         event: "support.typing.stop",
         data: {
@@ -992,7 +1031,26 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
           visitor_id: selectedConversation?.visitor.id || "",
         },
       });
-      typingStopTimerRef.current = null;
+    }
+    teamTypingActiveRef.current = false;
+  };
+
+  const sendTyping = () => {
+    if (!selectedId || !supportSocket.isOpen()) return;
+    if (!teamTypingActiveRef.current) {
+      teamTypingActiveRef.current = true;
+      supportSocket.send({
+        event: "support.typing.start",
+        data: {
+          conversation_id: selectedId,
+          website_id: selectedConversation?.website.id || "",
+          visitor_id: selectedConversation?.visitor.id || "",
+        },
+      });
+    }
+    if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = window.setTimeout(() => {
+      stopTeamTyping();
     }, 2200);
   };
 
@@ -1271,6 +1329,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                   };
                 }}
                 onSend={async (payload) => {
+                  stopTeamTyping();
                   const clientTempId = String(payload.client_temp_id || Date.now());
                   const optimisticMessage = buildOptimisticSupportMessage(
                     bootstrap,
@@ -1291,13 +1350,14 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                       : current,
                   );
                   try {
-                    await sendMutation.mutateAsync({
+                    await sendQueueRef.current.enqueue(() => sendMutation.mutateAsync({
                       text: String(payload.text || "").trim(),
                       attachment_ids: Array.isArray(payload.attachment_ids)
                         ? payload.attachment_ids.map(String)
                         : [],
                       clientTempId,
-                    });
+                      conversationId: selectedId,
+                    }));
                   } catch (reason) {
                     throw new Error(parseApiError(reason, "The message could not be sent.").message);
                   }

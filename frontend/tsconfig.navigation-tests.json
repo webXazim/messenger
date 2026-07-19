@@ -13,6 +13,7 @@
     "src/components/conversations/conversationPresentation.ts",
     "src/components/conversations/conversationFiltering.ts",
     "src/components/conversations/types.ts",
+    "src/lib/presenceState.ts",
     "src/lib/userIdentity.ts",
     "src/types/chat.ts"
   ]

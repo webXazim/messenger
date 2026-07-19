@@ -28,6 +28,8 @@ const api = read("src/api/support.ts");
 const css = read("src/styles/pages/support.css");
 const auth = read("src/pages/AuthRedirectPage.tsx");
 const returnPath = read("src/lib/returnPath.ts");
+const supportViews = read("../apps/support/api/views.py");
+const throttling = read("../config/throttling.py");
 
 assert.ok(app.includes('/support/invitations/accept'), "Public support invitation route is missing.");
 assert.ok(app.includes('path="support/agents"'), "Support agent management route is missing.");
@@ -222,6 +224,13 @@ assert.ok(supportRealtime.includes('payload.event === "support.ready"'), "Suppor
 assert.ok(supportInbox.includes("client_temp_id: clientTempId"), "Support agent optimistic IDs are not persisted for idempotency.");
 assert.ok(widgetLoader.includes("client_temp_id: clientTempId"), "Support visitor optimistic IDs are not persisted for idempotency.");
 assert.ok(widgetLoader.includes("payload.data.message_id || payload.data.id"), "Widget realtime delivery receipts do not resolve the authoritative message ID.");
+assert.ok(supportViews.includes("throttle_classes = [UnsafeScopedRateThrottle]"), "Support message polling still consumes the visitor send-rate bucket.");
+assert.ok(throttling.includes("class UnsafeScopedRateThrottle"), "Unsafe-only scoped throttling is missing.");
+assert.ok(widgetLoader.includes("sendQueue: Promise.resolve()"), "Widget sends are not serialized.");
+assert.ok(widgetLoader.includes("visitorTyping: false"), "Widget typing presence is not edge-triggered.");
+assert.ok(widgetLoader.includes("state.messages.splice(replacementIndex, 1, payload.message)"), "Widget optimistic messages are not replaced in place.");
+assert.ok(supportInbox.includes("createSerializedTaskQueue"), "Support Inbox sends are not serialized.");
+assert.ok(supportInbox.includes("structuralSharing: mergeSupportMessages"), "Support Inbox refetches can discard optimistic messages.");
 
 
 assert.ok(css.includes("@media (max-width: 760px)"), "Support responsive tablet/mobile layout is missing.");

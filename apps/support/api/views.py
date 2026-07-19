@@ -17,6 +17,7 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from config.throttling import UnsafeScopedRateThrottle
 
 from apps.chat.api.serializers import UploadCreateSerializer, _media_kind_from_mime
 from apps.chat.api.views import (
@@ -1509,6 +1510,7 @@ class SupportConversationClaimView(APIView):
 class SupportWidgetConversationMessagesView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [UnsafeScopedRateThrottle]
     throttle_scope = "support_widget_message"
 
     def _session(self, request, site_key, session_id):
@@ -2170,6 +2172,7 @@ class SupportConversationCSATView(APIView):
 class SupportWidgetConversationCSATView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [UnsafeScopedRateThrottle]
     throttle_scope = "support_widget_message"
 
     def _context(self, request, site_key, session_id):

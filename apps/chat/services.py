@@ -15,7 +15,7 @@ import mimetypes
 import uuid
 from io import BytesIO
 from pathlib import Path
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from tempfile import NamedTemporaryFile
 
@@ -33,7 +33,9 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
 
 from apps.common.realtime_presence import (
+    read_many_user_last_seen,
     read_many_user_presence,
+    read_user_last_seen,
     read_user_presence,
     remove_user_presence,
     upsert_user_presence,
@@ -1872,11 +1874,22 @@ def _normalize_presence_device_record(value):
     }
 
 
-def _presence_snapshot_from_devices(active_devices):
+def _presence_snapshot_from_devices(active_devices, *, last_seen=None):
+    latest_device_seen = max(
+        (record.get("last_seen", 0) for record in active_devices.values()),
+        default=0,
+    )
+    resolved_last_seen = max(float(last_seen or 0), float(latest_device_seen or 0))
+    last_seen_at = (
+        datetime.fromtimestamp(resolved_last_seen, tz=timezone.get_current_timezone()).isoformat()
+        if resolved_last_seen > 0
+        else None
+    )
     if not active_devices:
         return {
             "is_online": False,
             "active_devices": 0,
+            "last_seen_at": last_seen_at,
             "presence_status": "offline",
             "presence_label": "offline",
             "device_type": None,
@@ -1897,6 +1910,7 @@ def _presence_snapshot_from_devices(active_devices):
     return {
         "is_online": True,
         "active_devices": len(active_devices),
+        "last_seen_at": last_seen_at,
         "presence_status": presence_status,
         "presence_label": "online" if presence_status == "active" else "idle",
         "device_type": primary["device_type"] if primary["device_type"] != "unknown" else (device_types[0] if device_types else None),
@@ -1930,15 +1944,19 @@ def _active_presence_devices(user_id, *, now_ts=None):
 
 def get_presence_snapshot(user_id):
     active_devices = _active_presence_devices(user_id)
-    return _presence_snapshot_from_devices(active_devices)
+    return _presence_snapshot_from_devices(active_devices, last_seen=read_user_last_seen(user_id))
 
 
 def get_presence_snapshots(user_ids):
     """Return normalized presence snapshots with one Redis pipeline."""
 
     registries = read_many_user_presence(user_ids)
+    last_seen_map = read_many_user_last_seen(registries.keys())
     return {
-        str(user_id): _presence_snapshot_from_devices(active_devices)
+        str(user_id): _presence_snapshot_from_devices(
+            active_devices,
+            last_seen=last_seen_map.get(str(user_id)),
+        )
         for user_id, active_devices in registries.items()
     }
 
@@ -1959,7 +1977,7 @@ def set_presence(user, device_id="default", *, device_type=None, presence_status
     )
     if normalized_status == "active":
         type(user).objects.filter(id=user.id).update(last_seen_at=now)
-    return _presence_snapshot_from_devices(registry)
+    return _presence_snapshot_from_devices(registry, last_seen=now.timestamp())
 
 
 def clear_presence(user, device_id="default", *, include_device_connections=False):
@@ -1970,7 +1988,7 @@ def clear_presence(user, device_id="default", *, include_device_connections=Fals
         prefix=include_device_connections,
     )
     type(user).objects.filter(id=user.id).update(last_seen_at=now)
-    return _presence_snapshot_from_devices(registry)
+    return _presence_snapshot_from_devices(registry, last_seen=now.timestamp())
 
 
 def get_public_presence_snapshot(user, snapshot=None):
@@ -2009,7 +2027,7 @@ def get_public_presence_snapshot(user, snapshot=None):
     return {
         "is_online": online,
         "active_devices": int(resolved.get("active_devices") or 0),
-        "last_seen_at": current.last_seen_at.isoformat() if current.last_seen_at else None,
+        "last_seen_at": resolved.get("last_seen_at") or (current.last_seen_at.isoformat() if current.last_seen_at else None),
         "presence_label": str(resolved.get("presence_label") or ("online" if online else "offline")),
         "presence_status": str(resolved.get("presence_status") or ("active" if online else "offline")),
         "device_type": resolved.get("device_type") if online else None,

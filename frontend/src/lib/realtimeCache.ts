@@ -3,6 +3,7 @@ import type { MessagePage } from "../api/chat";
 import type { Call, Conversation, Message } from "../types/chat";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "./messageReceipts";
 import { applyActiveConversationReadState } from "./activeConversationView";
+import { mergeNewestPresence } from "./presenceState";
 
 export type ChatSyncPayload = {
   conversations: Conversation[];
@@ -155,25 +156,7 @@ type PresenceFriendRequest = {
 };
 
 function preservePresence<T extends PresenceUser>(current: T | undefined, incoming: T): T {
-  if (!current) return incoming;
-  const source = current.is_online ? current : incoming.is_online ? incoming : current;
-  return {
-    ...incoming,
-    ...(source.is_online !== undefined ? { is_online: source.is_online } : {}),
-    ...(source.active_devices !== undefined ? { active_devices: source.active_devices } : {}),
-    ...(source.last_seen_at !== undefined ? { last_seen_at: source.last_seen_at } : {}),
-    ...(source.presence_label !== undefined ? { presence_label: source.presence_label } : {}),
-    ...(source.presence_status !== undefined || incoming.presence_status !== undefined
-      ? { presence_status: source.presence_status ?? incoming.presence_status }
-      : {}),
-    ...(source.device_type !== undefined || incoming.device_type !== undefined
-      ? { device_type: source.device_type ?? incoming.device_type }
-      : {}),
-    ...(source.device_types !== undefined || incoming.device_types !== undefined
-      ? { device_types: source.device_types ?? incoming.device_types }
-      : {}),
-    ...(source.presence_visibility !== undefined ? { presence_visibility: source.presence_visibility } : {}),
-  };
+  return mergeNewestPresence(current, incoming);
 }
 
 function reconcileConversationPresence(queryClient: QueryClient, incoming: Conversation): Conversation {
@@ -234,7 +217,11 @@ function patchPresenceUser<T extends PresenceUser>(user: T, userId: string, payl
   const hidden = String(payload.visibility ?? payload.presence_visibility ?? "") === "hidden";
   const activeDevices = Number(payload.active_devices);
   const online = !hidden && Boolean(payload.is_online);
-  const lastSeenAt = typeof payload.last_seen_at === "string" && payload.last_seen_at ? payload.last_seen_at : null;
+  const lastSeenAt = typeof payload.last_seen_at === "string" && payload.last_seen_at
+    ? payload.last_seen_at
+    : online
+      ? new Date().toISOString()
+      : null;
   const rawStatus = String(payload.presence_status ?? payload.presence_label ?? "").toLowerCase();
   const presenceStatus: "active" | "idle" | "offline" = online ? rawStatus === "idle" ? "idle" : "active" : "offline";
   const rawDeviceType = String(payload.device_type ?? "").toLowerCase();
@@ -244,7 +231,7 @@ function patchPresenceUser<T extends PresenceUser>(user: T, userId: string, payl
   const deviceTypes = (Array.isArray(payload.device_types) ? payload.device_types : [])
     .map((entry) => String(entry).toLowerCase())
     .filter((entry): entry is "desktop" | "mobile" | "tablet" => ["desktop", "mobile", "tablet"].includes(entry));
-  return {
+  const patched = {
     ...user,
     is_online: online,
     active_devices: hidden ? 0 : (Number.isFinite(activeDevices) ? activeDevices : user.active_devices),
@@ -255,6 +242,7 @@ function patchPresenceUser<T extends PresenceUser>(user: T, userId: string, payl
     presence_visibility: hidden ? "hidden" : "public",
     last_seen_at: hidden ? null : (lastSeenAt || user.last_seen_at || null),
   };
+  return mergeNewestPresence(user, patched);
 }
 
 function patchConversationPresence(conversation: Conversation | undefined, userId: string, payload: PresencePayload) {

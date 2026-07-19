@@ -4,11 +4,13 @@ use anyhow::{Context, Result};
 use redis::aio::MultiplexedConnection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::{auth::{ActorType, AuthenticatedSession}, config::Config};
 
 const USER_KEY_PREFIX: &str = "realtime:presence:user:";
+const LAST_SEEN_KEY_PREFIX: &str = "realtime:presence:last-seen:";
 const RECIPIENT_KEY_PREFIX: &str = "realtime:presence:recipients:";
 const SUPPORT_VISITOR_KEY_PREFIX: &str = "realtime:presence:support-visitor:";
 
@@ -49,6 +51,10 @@ impl PresenceStore {
         format!("{SUPPORT_VISITOR_KEY_PREFIX}{visitor_id}")
     }
 
+    fn last_seen_key(user_id: &str) -> String {
+        format!("{LAST_SEEN_KEY_PREFIX}{user_id}")
+    }
+
     fn connection_field(session: &AuthenticatedSession, connection_id: Uuid) -> String {
         format!("{}:{}", session.device_id, connection_id)
     }
@@ -65,22 +71,18 @@ impl PresenceStore {
         }
         let key = Self::user_key(&session.actor_id);
         let field = Self::connection_field(session, connection_id);
+        let touched_at = now_seconds();
         let record = DeviceRecord {
-            last_seen: now_seconds(),
+            last_seen: touched_at,
             device_type: normalize_device_type(device_type),
             presence_status: normalize_status(status),
         };
         let encoded = serde_json::to_string(&record)?;
         let mut connection = self.connection().await?;
-        let _: usize = redis::cmd("HSET")
-            .arg(&key)
-            .arg(&field)
-            .arg(encoded)
-            .query_async(&mut connection)
-            .await?;
-        let _: bool = redis::cmd("EXPIRE")
-            .arg(&key)
-            .arg(self.ttl_seconds * 2)
+        let _: () = redis::pipe()
+            .cmd("HSET").arg(&key).arg(&field).arg(encoded).ignore()
+            .cmd("EXPIRE").arg(&key).arg(self.ttl_seconds * 2).ignore()
+            .cmd("SETEX").arg(Self::last_seen_key(&session.actor_id)).arg(180 * 86_400).arg(touched_at).ignore()
             .query_async(&mut connection)
             .await?;
         self.user_snapshot_with(&mut connection, &session.actor_id).await
@@ -97,9 +99,10 @@ impl PresenceStore {
         let key = Self::user_key(&session.actor_id);
         let field = Self::connection_field(session, connection_id);
         let mut connection = self.connection().await?;
-        let _: usize = redis::cmd("HDEL")
-            .arg(&key)
-            .arg(field)
+        let disconnected_at = now_seconds();
+        let _: () = redis::pipe()
+            .cmd("HDEL").arg(&key).arg(field).ignore()
+            .cmd("SETEX").arg(Self::last_seen_key(&session.actor_id)).arg(180 * 86_400).arg(disconnected_at).ignore()
             .query_async(&mut connection)
             .await?;
         self.user_snapshot_with(&mut connection, &session.actor_id).await
@@ -111,8 +114,11 @@ impl PresenceStore {
         user_id: &str,
     ) -> Result<Value> {
         let key = Self::user_key(user_id);
-        let raw: HashMap<String, String> = redis::cmd("HGETALL")
+        let (raw, last_seen): (HashMap<String, String>, Option<f64>) = redis::pipe()
+            .cmd("HGETALL")
             .arg(&key)
+            .cmd("GET")
+            .arg(Self::last_seen_key(user_id))
             .query_async(connection)
             .await?;
         let now = now_seconds();
@@ -137,7 +143,7 @@ impl PresenceStore {
             }
             let _: usize = command.query_async(connection).await?;
         }
-        Ok(snapshot(active))
+        Ok(snapshot(active, last_seen))
     }
 
     pub async fn recipient_ids(&self, user_id: &str) -> Result<Vec<String>> {
@@ -208,11 +214,17 @@ impl PresenceStore {
     }
 }
 
-fn snapshot(records: Vec<DeviceRecord>) -> Value {
+fn snapshot(records: Vec<DeviceRecord>, stored_last_seen: Option<f64>) -> Value {
+    let latest_record_seen = records
+        .iter()
+        .map(|record| record.last_seen)
+        .fold(0.0_f64, f64::max);
+    let last_seen_at = format_timestamp(stored_last_seen.unwrap_or(0.0).max(latest_record_seen));
     if records.is_empty() {
         return json!({
             "is_online": false,
             "active_devices": 0,
+            "last_seen_at": last_seen_at,
             "presence_status": "offline",
             "presence_label": "offline",
             "device_type": Value::Null,
@@ -238,6 +250,7 @@ fn snapshot(records: Vec<DeviceRecord>) -> Value {
     json!({
         "is_online": true,
         "active_devices": records.len(),
+        "last_seen_at": last_seen_at,
         "presence_status": status,
         "presence_label": if status == "active" { "online" } else { "idle" },
         "device_type": if primary.device_type == "unknown" { Value::Null } else { json!(primary.device_type) },
@@ -265,4 +278,15 @@ fn now_seconds() -> f64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64()
+}
+
+fn format_timestamp(timestamp: f64) -> Value {
+    if timestamp <= 0.0 {
+        return Value::Null;
+    }
+    OffsetDateTime::from_unix_timestamp(timestamp as i64)
+        .ok()
+        .and_then(|value| value.format(&Rfc3339).ok())
+        .map(Value::String)
+        .unwrap_or(Value::Null)
 }

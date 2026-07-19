@@ -296,7 +296,9 @@ class UserLiteSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.DateTimeField(allow_null=True))
     def get_last_seen_at(self, obj):
-        return getattr(obj, "last_seen_at", None) if self._presence_is_visible(obj) else None
+        if not self._presence_is_visible(obj):
+            return None
+        return self._presence_snapshot(obj).get("last_seen_at") or getattr(obj, "last_seen_at", None)
 
     def get_presence_label(self, obj) -> str:
         if not self._presence_is_visible(obj):

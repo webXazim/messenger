@@ -1,5 +1,5 @@
 from io import BytesIO, StringIO
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -2580,6 +2580,22 @@ class ChatApiTests(TestCase):
         response = self.client.get("/api/v1/chat/users/search/", {"q": "other"})
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data[0]["is_online"])
+
+    def test_conversation_last_seen_uses_live_presence_instead_of_stale_user_row(self):
+        set_presence(self.other, device_id="mobile")
+        stale_database_time = timezone.now() - timedelta(hours=2)
+        User.objects.filter(id=self.other.id).update(last_seen_at=stale_database_time)
+        conversation = self.create_direct_conversation()
+
+        detail = self.client.get(reverse("conversation-detail", kwargs={"pk": conversation["id"]}))
+
+        self.assertEqual(detail.status_code, 200)
+        peer = next(item["user"] for item in detail.data["participants"] if str(item["user"]["id"]) == str(self.other.id))
+        self.assertTrue(peer["is_online"])
+        self.assertGreater(
+            datetime.fromisoformat(str(peer["last_seen_at"])).timestamp(),
+            stale_database_time.timestamp(),
+        )
 
     def test_email_change_requires_fresh_verification(self):
         self.user.email_verified = True

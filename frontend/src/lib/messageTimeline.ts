@@ -95,6 +95,19 @@ export function flattenMessagePages(data: InfiniteData<TimelineMessagePage> | un
   return Array.from(byId.values());
 }
 
+export function compareTimelineMessages(left: Message, right: Message) {
+  const leftTimestamp = Date.parse(left.created_at);
+  const rightTimestamp = Date.parse(right.created_at);
+  if (Number.isFinite(leftTimestamp) && Number.isFinite(rightTimestamp)) {
+    const timestampDelta = leftTimestamp - rightTimestamp;
+    if (timestampDelta) return timestampDelta;
+  }
+  // Modern JavaScript sorting is stable. Returning zero preserves arrival or
+  // optimistic insertion order when the server timestamps are identical,
+  // instead of letting unrelated UUID values shuffle rapid messages.
+  return 0;
+}
+
 export function findMessageInPages(data: InfiniteData<TimelineMessagePage> | undefined, messageId: string) {
   for (const page of data?.pages ?? []) {
     const message = page.results.find((entry) => entry.id === messageId);
@@ -159,7 +172,7 @@ export function upsertMessagePages(
 
   if (!found && insertWhenMissing) {
     const [firstPage, ...remainingPages] = pages;
-    pages.splice(0, pages.length, { ...firstPage, results: [incoming, ...firstPage.results] }, ...remainingPages);
+    pages.splice(0, pages.length, { ...firstPage, results: [...firstPage.results, incoming] }, ...remainingPages);
   }
 
   return { ...current, pages };

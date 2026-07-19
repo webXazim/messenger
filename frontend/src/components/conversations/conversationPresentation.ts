@@ -1,4 +1,5 @@
 import { isSameUserIdentity } from "../../lib/userIdentity";
+import { mergeNewestPresence } from "../../lib/presenceState";
 import type { Conversation, UserLite } from "../../types/chat";
 
 export function applyKnownOnlinePresence(
@@ -14,19 +15,22 @@ export function applyKnownOnlinePresence(
       const knownPerson = presenceById.get(String(participant.user.id));
       if (!knownPerson) return participant;
       changed = true;
+      const incomingUser = {
+        ...participant.user,
+        ...knownPerson,
+        id: participant.user.id,
+        is_online: Boolean(knownPerson.is_online) && knownPerson.presence_visibility !== "hidden",
+        active_devices: knownPerson.presence_visibility === "hidden" ? 0 : knownPerson.active_devices ?? participant.user.active_devices,
+        last_seen_at: knownPerson.presence_visibility === "hidden" ? null : knownPerson.last_seen_at ?? participant.user.last_seen_at,
+        presence_label: knownPerson.presence_visibility === "hidden" ? "offline" : knownPerson.presence_label ?? participant.user.presence_label,
+        presence_status: knownPerson.presence_visibility === "hidden" ? "offline" : knownPerson.presence_status ?? participant.user.presence_status,
+        device_type: knownPerson.presence_visibility === "hidden" ? null : knownPerson.device_type ?? participant.user.device_type,
+        device_types: knownPerson.presence_visibility === "hidden" ? [] : knownPerson.device_types ?? participant.user.device_types,
+        presence_visibility: knownPerson.presence_visibility ?? participant.user.presence_visibility ?? "public",
+      };
       return {
         ...participant,
-        user: {
-          ...participant.user,
-          is_online: Boolean(knownPerson.is_online) && knownPerson.presence_visibility !== "hidden",
-          active_devices: knownPerson.presence_visibility === "hidden" ? 0 : knownPerson.active_devices ?? participant.user.active_devices,
-          last_seen_at: knownPerson.presence_visibility === "hidden" ? null : knownPerson.last_seen_at ?? participant.user.last_seen_at,
-          presence_label: knownPerson.presence_visibility === "hidden" ? "offline" : knownPerson.presence_label ?? participant.user.presence_label,
-          presence_status: knownPerson.presence_visibility === "hidden" ? "offline" : knownPerson.presence_status ?? participant.user.presence_status,
-          device_type: knownPerson.presence_visibility === "hidden" ? null : knownPerson.device_type ?? participant.user.device_type,
-          device_types: knownPerson.presence_visibility === "hidden" ? [] : knownPerson.device_types ?? participant.user.device_types,
-          presence_visibility: knownPerson.presence_visibility ?? participant.user.presence_visibility ?? "public",
-        },
+        user: mergeNewestPresence(participant.user, incomingUser),
       };
     });
     return changed ? { ...conversation, participants } : conversation;

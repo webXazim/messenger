@@ -35,6 +35,7 @@ import { buildConversationDraftKey, buildLegacyConversationDraftKey } from "../l
 import { prefetchConversationResources } from "../lib/conversationPrefetch";
 import {
   advanceMessageReceiptPages,
+  compareTimelineMessages,
   findMessageInPages,
   flattenMessagePages,
   mapMessagePages,
@@ -43,6 +44,12 @@ import {
   removeMessagePages,
   upsertMessagePages,
 } from "../lib/messageTimeline";
+import { createSerializedTaskQueue } from "../lib/serializedTaskQueue";
+import {
+  TYPING_MESSAGE_TRANSITION_MS,
+  TYPING_STOP_GRACE_MS,
+  typingRemovalDelay,
+} from "../lib/typingPresence";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
@@ -258,6 +265,7 @@ export function ConversationPage() {
   const typingTimeoutRef = useRef<number | null>(null);
   const typingActiveRef = useRef(false);
   const typingExpiryTimersRef = useRef<Record<string, number>>({});
+  const typingVisibleSinceRef = useRef<Record<string, number>>({});
   const [showDetails, setShowDetails] = useState(() => typeof window === "undefined" || window.innerWidth > 1180);
   const [mediaKind, setMediaKind] = useState<"all" | "image" | "video" | "audio" | "file">("all");
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
@@ -287,7 +295,34 @@ export function ConversationPage() {
   const lastDeliveredReceiptMessageRef = useRef("");
   const timelineAtLatestRef = useRef(true);
   const lastOptimisticCreatedAtRef = useRef(0);
+  const sendPipelineRef = useRef(createSerializedTaskQueue());
   const conversationViewRef = useRef<HTMLDivElement | null>(null);
+
+  const removeTypingUser = useCallback((typingUserId: string) => {
+    setTypingUsers((current) => {
+      if (!current[typingUserId]) return current;
+      const next = { ...current };
+      delete next[typingUserId];
+      return next;
+    });
+    if (typingExpiryTimersRef.current[typingUserId]) {
+      window.clearTimeout(typingExpiryTimersRef.current[typingUserId]);
+      delete typingExpiryTimersRef.current[typingUserId];
+    }
+    delete typingVisibleSinceRef.current[typingUserId];
+  }, []);
+
+  const scheduleTypingRemoval = useCallback((typingUserId: string, requestedDelay: number) => {
+    if (typingExpiryTimersRef.current[typingUserId]) {
+      window.clearTimeout(typingExpiryTimersRef.current[typingUserId]);
+    }
+    const visibleSince = typingVisibleSinceRef.current[typingUserId] ?? Date.now();
+    const delay = typingRemovalDelay(visibleSince, requestedDelay);
+    typingExpiryTimersRef.current[typingUserId] = window.setTimeout(
+      () => removeTypingUser(typingUserId),
+      delay,
+    );
+  }, [removeTypingUser]);
 
   const nextOptimisticCreatedAt = (data: InfiniteData<MessagePage> | undefined) => {
     const latestMessageTime = flattenMessagePages(data).reduce((latest, message) => {
@@ -350,6 +385,7 @@ export function ConversationPage() {
       typingActiveRef.current = false;
       Object.values(typingExpiryTimersRef.current).forEach((timer) => window.clearTimeout(timer));
       typingExpiryTimersRef.current = {};
+      typingVisibleSinceRef.current = {};
       setTypingUsers({});
     };
   }, [conversationId, socket]);
@@ -367,6 +403,7 @@ export function ConversationPage() {
     if (socketStatus === "open") return;
     Object.values(typingExpiryTimersRef.current).forEach((timer) => window.clearTimeout(timer));
     typingExpiryTimersRef.current = {};
+    typingVisibleSinceRef.current = {};
     setTypingUsers({});
     typingActiveRef.current = false;
   }, [socketStatus]);
@@ -732,6 +769,12 @@ export function ConversationPage() {
           markConversationReadInCaches(queryClient, conversationId);
           acknowledgeConversationRead(conversationId, normalized.id);
         }
+        if (
+          payload.event === "message.created"
+          && !isSameUserIdentity(normalized.sender, localCurrentUser)
+        ) {
+          scheduleTypingRemoval(String(normalized.sender.id), TYPING_MESSAGE_TRANSITION_MS);
+        }
         void queryClient.invalidateQueries({ queryKey: ["conversations"] }).then(() => {
           if (isConversationActivelyViewedAtLatest(conversationId)) {
             markConversationReadInCaches(queryClient, conversationId);
@@ -825,35 +868,27 @@ export function ConversationPage() {
       if ((payload.event === "typing.started" || payload.event === "typing.stopped") && payloadConversationId === conversationId) {
         const typingUserId = String(data.user_id || "");
         if (!typingUserId || isSameUserIdentity({ id: typingUserId, username: String(data.username || ""), display_name: String(data.display_name || "") }, localCurrentUser)) return;
-        if (typingExpiryTimersRef.current[typingUserId]) {
-          window.clearTimeout(typingExpiryTimersRef.current[typingUserId]);
-          delete typingExpiryTimersRef.current[typingUserId];
-        }
-        const removeTypingUser = () => {
-          setTypingUsers((current) => {
-            if (!current[typingUserId]) return current;
-            const next = { ...current };
-            delete next[typingUserId];
-            return next;
-          });
-          delete typingExpiryTimersRef.current[typingUserId];
-        };
         if (payload.event === "typing.stopped") {
-          removeTypingUser();
+          scheduleTypingRemoval(typingUserId, TYPING_STOP_GRACE_MS);
           return;
         }
         const typingName = String(data.display_name || data.username || "Someone");
-        setTypingUsers((current) => ({ ...current, [typingUserId]: typingName }));
+        setTypingUsers((current) => {
+          if (!current[typingUserId]) typingVisibleSinceRef.current[typingUserId] = Date.now();
+          return current[typingUserId] === typingName
+            ? current
+            : { ...current, [typingUserId]: typingName };
+        });
         const expiresAt = Date.parse(String(data.expires_at || ""));
         const delay = Number.isFinite(expiresAt) ? Math.max(500, Math.min(7000, expiresAt - Date.now())) : 6500;
-        typingExpiryTimersRef.current[typingUserId] = window.setTimeout(removeTypingUser, delay);
+        scheduleTypingRemoval(typingUserId, delay);
       }
     });
     return () => {
       socket.unsubscribeFromConversation(conversationId);
       unsubscribe();
     };
-  }, [acknowledgeConversationRead, conversationId, socket, queryClient, user?.id, localCurrentUser]);
+  }, [acknowledgeConversationRead, conversationId, socket, queryClient, user?.id, localCurrentUser, scheduleTypingRemoval]);
 
   const pagedMessages = useMemo(() => flattenMessagePages(messagesQuery.data), [messagesQuery.data]);
 
@@ -955,10 +990,7 @@ export function ConversationPage() {
           };
         })
         .filter((message) => message.decryption_state !== "pending")
-        .sort((a, b) => {
-          const timestampDelta = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-          return timestampDelta || String(a.id).localeCompare(String(b.id));
-        });
+        .sort(compareTimelineMessages);
     },
     [conversationId, decryptedTexts, decryptionStates, e2eeIdentityQuery.isError, pagedMessages, readyConversationIds],
   );
@@ -1105,6 +1137,17 @@ export function ConversationPage() {
       }
       typingActiveRef.current = false;
     }, 1600);
+  }, [conversationId, socket]);
+
+  const stopTyping = useCallback(() => {
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    if (typingActiveRef.current && conversationId && socket.isOpen()) {
+      socket.send({ event: "typing.stop", data: { conversation_id: conversationId } });
+    }
+    typingActiveRef.current = false;
   }, [conversationId, socket]);
 
   const setMessageActionError = (messageId: string, error?: string | null) => {
@@ -1255,7 +1298,9 @@ export function ConversationPage() {
       const failedPayload = clientTempId ? failedSendPayloadsRef.current[clientTempId] : undefined;
       if (failedPayload) {
         const refreshedPayload = await refreshFailedSecurePayload(failedPayload);
-        await sendMutation.mutateAsync({ ...refreshedPayload, _is_retry: true });
+        await sendPipelineRef.current.enqueue(
+          () => sendMutation.mutateAsync({ ...refreshedPayload, _is_retry: true }),
+        );
         return;
       }
       if (message.id.startsWith("temp-")) {
@@ -1326,68 +1371,71 @@ export function ConversationPage() {
       setDecryptedTexts((current) => ({ ...current, [optimistic.id]: plaintext }));
       setDecryptionStates((current) => ({ ...current, [optimistic.id]: { status: "ready" } }));
     }
+    stopTyping();
 
-    let mutationStarted = false;
-    try {
-      const attachmentEncryption = await Promise.all(attachmentIds.map(async (attachmentId) => {
-        const storedEnvelope = encryptedAttachmentUploadsRef.current[attachmentId];
-        if (!storedEnvelope) throw new Error("A secure attachment is not ready. Remove it and upload it again.");
-        const envelope = await rewrapAttachmentEncryptionForConversation({
-          userId: String(user.id),
-          conversationId,
-          envelope: storedEnvelope,
-          participantUserIds: conversationParticipantIds,
-        });
-        encryptedAttachmentUploadsRef.current[attachmentId] = envelope;
-        return { upload_id: attachmentId, ...envelope };
-      }));
-      const nextPayload: Record<string, unknown> = {
-        ...payload,
-        client_temp_id: clientTempId,
-        _optimistic_created_at: optimistic.created_at,
-        attachment_encryption: attachmentEncryption.length ? attachmentEncryption : undefined,
-        _optimistic_attachments: attachmentIds.map((attachmentId, index) => {
-          const source = optimisticAttachments.find((item) => String(item.id || "") === attachmentId);
-          return {
-            ...(source || { id: attachmentId, original_name: "Attachment", mime_type: "application/octet-stream", size: 0 }),
-            id: attachmentId,
-            is_encrypted: false,
-            encryption: encryptedAttachmentUploadsRef.current[attachmentId] || attachmentEncryption[index],
-          } satisfies MessageAttachment;
-        }),
-      };
-      if (plaintext.trim()) {
-        nextPayload.text = "";
-        nextPayload.is_encrypted = true;
-        nextPayload.encryption = await encryptMessageForConversation({
-          userId: String(user.id),
-          conversationId,
-          plaintext,
-          participantUserIds: conversationParticipantIds,
-        });
-        nextPayload._optimistic_text = plaintext;
+    await sendPipelineRef.current.enqueue(async () => {
+      let mutationStarted = false;
+      try {
+        const attachmentEncryption = await Promise.all(attachmentIds.map(async (attachmentId) => {
+          const storedEnvelope = encryptedAttachmentUploadsRef.current[attachmentId];
+          if (!storedEnvelope) throw new Error("A secure attachment is not ready. Remove it and upload it again.");
+          const envelope = await rewrapAttachmentEncryptionForConversation({
+            userId: String(user.id),
+            conversationId,
+            envelope: storedEnvelope,
+            participantUserIds: conversationParticipantIds,
+          });
+          encryptedAttachmentUploadsRef.current[attachmentId] = envelope;
+          return { upload_id: attachmentId, ...envelope };
+        }));
+        const nextPayload: Record<string, unknown> = {
+          ...payload,
+          client_temp_id: clientTempId,
+          _optimistic_created_at: optimistic.created_at,
+          attachment_encryption: attachmentEncryption.length ? attachmentEncryption : undefined,
+          _optimistic_attachments: attachmentIds.map((attachmentId, index) => {
+            const source = optimisticAttachments.find((item) => String(item.id || "") === attachmentId);
+            return {
+              ...(source || { id: attachmentId, original_name: "Attachment", mime_type: "application/octet-stream", size: 0 }),
+              id: attachmentId,
+              is_encrypted: false,
+              encryption: encryptedAttachmentUploadsRef.current[attachmentId] || attachmentEncryption[index],
+            } satisfies MessageAttachment;
+          }),
+        };
+        if (plaintext.trim()) {
+          nextPayload.text = "";
+          nextPayload.is_encrypted = true;
+          nextPayload.encryption = await encryptMessageForConversation({
+            userId: String(user.id),
+            conversationId,
+            plaintext,
+            participantUserIds: conversationParticipantIds,
+          });
+          nextPayload._optimistic_text = plaintext;
+        }
+        mutationStarted = true;
+        await sendMutation.mutateAsync(nextPayload);
+      } catch (error) {
+        if (!mutationStarted) {
+          queryClient.setQueryData<InfiniteData<MessagePage>>(
+            ["messages", conversationId],
+            (current) => removeMessagePages(current, (message) => message.id === optimistic.id),
+          );
+          setDecryptedTexts((current) => {
+            const next = { ...current };
+            delete next[optimistic.id];
+            return next;
+          });
+          setDecryptionStates((current) => {
+            const next = { ...current };
+            delete next[optimistic.id];
+            return next;
+          });
+        }
+        throw error;
       }
-      mutationStarted = true;
-      await sendMutation.mutateAsync(nextPayload);
-    } catch (error) {
-      if (!mutationStarted) {
-        queryClient.setQueryData<InfiniteData<MessagePage>>(
-          ["messages", conversationId],
-          (current) => removeMessagePages(current, (message) => message.id === optimistic.id),
-        );
-        setDecryptedTexts((current) => {
-          const next = { ...current };
-          delete next[optimistic.id];
-          return next;
-        });
-        setDecryptionStates((current) => {
-          const next = { ...current };
-          delete next[optimistic.id];
-          return next;
-        });
-      }
-      throw error;
-    }
+    });
   };
 
   const uploadConversationAttachment = async (
@@ -2054,47 +2102,50 @@ export function ConversationPage() {
                 );
               }
 
-              let sendStarted = false;
-              try {
-                const upload = await uploadConversationAttachment(file, {
-                  original_name: fileName,
-                  mime_type: mimeType,
-                });
-                const storedEnvelope = encryptedAttachmentUploadsRef.current[upload.id];
-                if (!storedEnvelope) throw new Error("The secure voice note is not ready. Record it again.");
-                const envelope = await rewrapAttachmentEncryptionForConversation({
-                  userId: String(user?.id || ""),
-                  conversationId,
-                  envelope: storedEnvelope,
-                  participantUserIds: conversationParticipantIds,
-                });
-                encryptedAttachmentUploadsRef.current[upload.id] = envelope;
-                const analyzedWaveform = await waveformPromise?.catch(() => null);
-                if (analyzedWaveform?.length) {
-                  normalizedWaveform = analyzedWaveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
+              stopTyping();
+              await sendPipelineRef.current.enqueue(async () => {
+                let sendStarted = false;
+                try {
+                  const upload = await uploadConversationAttachment(file, {
+                    original_name: fileName,
+                    mime_type: mimeType,
+                  });
+                  const storedEnvelope = encryptedAttachmentUploadsRef.current[upload.id];
+                  if (!storedEnvelope) throw new Error("The secure voice note is not ready. Record it again.");
+                  const envelope = await rewrapAttachmentEncryptionForConversation({
+                    userId: String(user?.id || ""),
+                    conversationId,
+                    envelope: storedEnvelope,
+                    participantUserIds: conversationParticipantIds,
+                  });
+                  encryptedAttachmentUploadsRef.current[upload.id] = envelope;
+                  const analyzedWaveform = await waveformPromise?.catch(() => null);
+                  if (analyzedWaveform?.length) {
+                    normalizedWaveform = analyzedWaveform.map((value) => Math.max(0, Math.min(100, Math.round(value * 100))));
+                  }
+                  sendStarted = true;
+                  await sendMutation.mutateAsync({
+                    type: "audio",
+                    attachment_ids: [upload.id],
+                    attachment_encryption: [{ upload_id: upload.id, ...envelope }],
+                    text: "",
+                    is_voice_note: true,
+                    duration_seconds: durationSeconds,
+                    waveform: normalizedWaveform,
+                    _optimistic_attachments: [{ ...optimisticAttachment, id: upload.id, encryption: envelope }],
+                    _optimistic_created_at: optimisticCreatedAt,
+                    client_temp_id: clientTempId,
+                  });
+                } catch (error) {
+                  if (!sendStarted) {
+                    queryClient.setQueryData<InfiniteData<MessagePage>>(
+                      ["messages", conversationId],
+                      (current) => removeMessagePages(current, (message) => message.id === `temp-${clientTempId}`),
+                    );
+                  }
+                  throw error;
                 }
-                sendStarted = true;
-                await sendMutation.mutateAsync({
-                  type: "audio",
-                  attachment_ids: [upload.id],
-                  attachment_encryption: [{ upload_id: upload.id, ...envelope }],
-                  text: "",
-                  is_voice_note: true,
-                  duration_seconds: durationSeconds,
-                  waveform: normalizedWaveform,
-                  _optimistic_attachments: [{ ...optimisticAttachment, id: upload.id, encryption: envelope }],
-                  _optimistic_created_at: optimisticCreatedAt,
-                  client_temp_id: clientTempId,
-                });
-              } catch (error) {
-                if (!sendStarted) {
-                  queryClient.setQueryData<InfiniteData<MessagePage>>(
-                    ["messages", conversationId],
-                    (current) => removeMessagePages(current, (message) => message.id === `temp-${clientTempId}`),
-                  );
-                }
-                throw error;
-              }
+              });
             }}
           />
         </footer>
