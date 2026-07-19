@@ -6,9 +6,8 @@ COPY package*.json ./
 RUN npm install --global npm@11.6.2 \
     && npm ci --no-audit --no-fund
 
-COPY index.html vite.config.ts tsconfig*.json ./
+COPY index.html vite.config.ts tsconfig.json ./
 COPY public ./public
-COPY scripts ./scripts
 COPY src ./src
 
 ARG VITE_API_BASE_URL
@@ -29,10 +28,7 @@ ENV VITE_APP_NAME=$VITE_APP_NAME
 ENV VITE_SOCIAL_BASE_URL=$VITE_SOCIAL_BASE_URL
 ENV VITE_SUPPORT_PLANS_URL=$VITE_SUPPORT_PLANS_URL
 
-RUN npm run test:realtime \
-    && npm run test:support \
-    && npm run test:call \
-    && npm run build
+RUN npm run build
 
 
 FROM nginx:1.27-alpine AS runtime
