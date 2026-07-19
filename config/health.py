@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.chat.tasks import integration_health_snapshot
+from apps.common.operational_health import realtime_pipeline_snapshot
 
 
 def database_ready(alias="default"):
@@ -87,9 +88,10 @@ class DeepHealthView(APIView):
         cache_ok, cache_detail = cache_ready()
         migrations_ok, migrations_detail = migrations_ready()
         integrations = integration_health_snapshot()
+        realtime = realtime_pipeline_snapshot()
         av_ok = integrations.get("antivirus", {}).get("available", False) or not integrations.get("antivirus", {}).get("enabled", False)
         push_ok = True if integrations.get("push", {}).get("dry_run", True) else integrations.get("push", {}).get("configured", False)
-        ok = db_ok and cache_ok and migrations_ok and av_ok and push_ok
+        ok = db_ok and cache_ok and migrations_ok and av_ok and push_ok and realtime.ok
         status_code = 200 if ok else 503
         return Response({
             "status": "ready" if ok else "degraded",
@@ -98,6 +100,7 @@ class DeepHealthView(APIView):
                 "cache": {"ok": cache_ok, "detail": cache_detail},
                 "migrations": {"ok": migrations_ok, "detail": migrations_detail},
                 "integrations": integrations,
+                "realtime_pipeline": realtime.to_dict(),
             },
             "time": timezone.now().isoformat(),
         }, status=status_code)

@@ -15,7 +15,7 @@ from drf_spectacular.utils import extend_schema_field
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from apps.accounts.models import AuthActionToken, FriendRequest, Profile, SocialAccount, UserSession
-from apps.chat.services import get_presence_snapshot
+from apps.chat.services import get_presence_snapshot, get_presence_snapshots
 
 User = get_user_model()
 
@@ -284,6 +284,22 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
+class UserDiscoveryListSerializer(serializers.ListSerializer):
+    """Batch user presence for discovery/search responses."""
+
+    def to_representation(self, data):
+        iterable = list(data.all() if hasattr(data, "all") else data)
+        presence_map = self.context.setdefault("presence_map", {})
+        missing_ids = [
+            str(user.id)
+            for user in iterable
+            if str(user.id) not in presence_map
+        ]
+        if missing_ids:
+            presence_map.update(get_presence_snapshots(missing_ids))
+        return super().to_representation(iterable)
+
+
 class UserDiscoverySerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField()
     avatar = serializers.SerializerMethodField()
@@ -303,6 +319,7 @@ class UserDiscoverySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
+        list_serializer_class = UserDiscoveryListSerializer
         fields = (
             "id",
             "username",
@@ -361,6 +378,9 @@ class UserDiscoverySerializer(serializers.ModelSerializer):
         return profile is None or bool(getattr(profile, "show_online_status", True))
 
     def _presence_snapshot(self, obj):
+        presence_map = self.context.get("presence_map")
+        if presence_map is not None and str(obj.id) in presence_map:
+            return presence_map[str(obj.id)]
         cache_key = f"_user_presence_{obj.id}"
         if not hasattr(self, cache_key):
             setattr(self, cache_key, get_presence_snapshot(obj.id))

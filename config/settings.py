@@ -91,7 +91,6 @@ CENTRAL_EMAIL_VERIFICATION_URL = env_str("CENTRAL_EMAIL_VERIFICATION_URL", f"{CE
 CENTRAL_LOGOUT_URL = env_str("CENTRAL_LOGOUT_URL", f"{CENTRAL_AUTH_PUBLIC_BASE_URL}/logout/?{urlencode({'next': env_str('SITE_URL', 'https://dm.crescentsphere.com').rstrip('/') + '/'})}")
 
 INSTALLED_APPS = [
-    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -102,7 +101,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "django_filters",
-    "channels",
     "apps.common",
     "apps.accounts",
     "apps.chat",
@@ -114,6 +112,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "config.middleware.RequestIDMiddleware",
+    "config.middleware.QueryMetricsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -144,7 +143,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
 
 DB_ENGINE = env_str("DB_ENGINE", "sqlite").lower()
 if DB_ENGINE == "postgres":
@@ -168,7 +166,9 @@ else:
 
 
 DATABASE_CONN_MAX_AGE = env_int("DATABASE_CONN_MAX_AGE", 60)
+DATABASE_CONN_HEALTH_CHECKS = env_bool("DATABASE_CONN_HEALTH_CHECKS", DB_ENGINE == "postgres")
 DATABASES["default"]["CONN_MAX_AGE"] = DATABASE_CONN_MAX_AGE
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = DATABASE_CONN_HEALTH_CHECKS
 
 # Security / proxy
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
@@ -281,6 +281,8 @@ REST_FRAMEWORK = {
         "support_widget_upload": env_str("SUPPORT_WIDGET_UPLOAD_RATE", "12/min"),
         "support_call_action": env_str("SUPPORT_CALL_ACTION_RATE", "30/min"),
         "support_call_signal": env_str("SUPPORT_CALL_SIGNAL_RATE", "240/min"),
+        "realtime_ticket": env_str("REALTIME_TICKET_RATE", "60/min"),
+        "realtime_grant": env_str("REALTIME_GRANT_RATE", "120/min"),
     },
 }
 
@@ -342,23 +344,71 @@ SIMPLE_JWT = {
     "AUDIENCE": env_str("AUTH_PAYMENT_JWT_AUDIENCE") or None,
 }
 
-REDIS_URL = "" if USE_LOCAL_TEST_SERVICES else env_str("REDIS_URL", "").strip()
-if REDIS_URL:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {
-                "hosts": [REDIS_URL],
-            },
-        }
-    }
-else:
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels.layers.InMemoryChannelLayer",
-        }
-    }
+# Axum is the only production realtime transport. Django persists business
+# events to PostgreSQL and hands committed notifications to Axum through a
+# durable Redis Stream. There is no Channels/Daphne fallback path.
+REALTIME_TRANSPORT = "axum"
+REALTIME_OUTBOX_ENABLED = env_bool("REALTIME_OUTBOX_ENABLED", True)
+REALTIME_STREAM_ENABLED = env_bool("REALTIME_STREAM_ENABLED", True)
+REALTIME_STREAM_URL = env_str("REALTIME_STREAM_URL", "").strip()
+REALTIME_STREAM_NAME = env_str("REALTIME_STREAM_NAME", "realtime:durable:v1").strip() or "realtime:durable:v1"
+REALTIME_STREAM_GROUP = env_str("REALTIME_STREAM_GROUP", "axum-single-v1").strip() or "axum-single-v1"
+REALTIME_STREAM_MAXLEN = max(1_000, env_int("REALTIME_STREAM_MAXLEN", 25_000))
+REALTIME_STREAM_CONNECT_TIMEOUT_SECONDS = float(env_str("REALTIME_STREAM_CONNECT_TIMEOUT_SECONDS", "2") or "2")
+REALTIME_STREAM_SOCKET_TIMEOUT_SECONDS = float(env_str("REALTIME_STREAM_SOCKET_TIMEOUT_SECONDS", "2") or "2")
+REALTIME_OUTBOX_BATCH_SIZE = max(1, env_int("REALTIME_OUTBOX_BATCH_SIZE", 100))
+REALTIME_OUTBOX_LEASE_SECONDS = max(15, env_int("REALTIME_OUTBOX_LEASE_SECONDS", 60))
+REALTIME_OUTBOX_RETENTION_DAYS = max(1, env_int("REALTIME_OUTBOX_RETENTION_DAYS", 7))
+REALTIME_OUTBOX_MAX_AGE_SECONDS = max(10, env_int("REALTIME_OUTBOX_MAX_AGE_SECONDS", 120))
+REALTIME_OUTBOX_MAX_FAILED = max(0, env_int("REALTIME_OUTBOX_MAX_FAILED", 25))
+REALTIME_STREAM_MAX_PENDING = max(0, env_int("REALTIME_STREAM_MAX_PENDING", 250))
+REALTIME_PRESENCE_REDIS_URL = env_str("REALTIME_PRESENCE_REDIS_URL", env_str("REDIS_CACHE_URL", "")).strip()
+REALTIME_PRESENCE_TTL_SECONDS = max(45, env_int("REALTIME_PRESENCE_TTL_SECONDS", 90))
+REALTIME_PRESENCE_METADATA_TTL_SECONDS = max(300, env_int("REALTIME_PRESENCE_METADATA_TTL_SECONDS", 3600))
 
+# Django owns the RS256 private key; Axum receives only the public key.
+REALTIME_AUTH_ENABLED = env_bool("REALTIME_AUTH_ENABLED", True)
+REALTIME_TOKEN_ALGORITHM = env_str("REALTIME_TOKEN_ALGORITHM", "RS256").strip().upper() or "RS256"
+REALTIME_TOKEN_ISSUER = env_str("REALTIME_TOKEN_ISSUER", "crescentsphere-django").strip() or "crescentsphere-django"
+REALTIME_TICKET_AUDIENCE = env_str("REALTIME_TICKET_AUDIENCE", "crescentsphere-realtime").strip() or "crescentsphere-realtime"
+REALTIME_GRANT_AUDIENCE = env_str("REALTIME_GRANT_AUDIENCE", "crescentsphere-realtime-grant").strip() or "crescentsphere-realtime-grant"
+REALTIME_CALL_GRANT_AUDIENCE = env_str("REALTIME_CALL_GRANT_AUDIENCE", "crescentsphere-realtime-call-grant").strip() or "crescentsphere-realtime-call-grant"
+REALTIME_TICKET_TTL_SECONDS = min(120, max(20, env_int("REALTIME_TICKET_TTL_SECONDS", 45)))
+REALTIME_GRANT_TTL_SECONDS = min(300, max(30, env_int("REALTIME_GRANT_TTL_SECONDS", 120)))
+REALTIME_CALL_GRANT_TTL_SECONDS = min(300, max(30, env_int("REALTIME_CALL_GRANT_TTL_SECONDS", 90)))
+REALTIME_MAX_GRANTS_PER_REQUEST = min(100, max(1, env_int("REALTIME_MAX_GRANTS_PER_REQUEST", 50)))
+REALTIME_REQUIRE_ORIGIN = env_bool("REALTIME_REQUIRE_ORIGIN", not DEBUG)
+REALTIME_ALLOWED_ORIGINS = [
+    origin.rstrip("/")
+    for origin in env_csv(
+        "REALTIME_ALLOWED_ORIGINS",
+        ",".join(dict.fromkeys([env_str("SITE_URL", ""), env_str("FRONTEND_BASE_URL", "")])),
+    )
+    if origin.strip()
+]
+REALTIME_SIGNING_PRIVATE_KEY = env_str("REALTIME_SIGNING_PRIVATE_KEY", "").replace("\\n", "\n")
+REALTIME_SIGNING_PUBLIC_KEY = env_str("REALTIME_SIGNING_PUBLIC_KEY", "").replace("\\n", "\n")
+REALTIME_SIGNING_PRIVATE_KEY_PATH = env_str("REALTIME_SIGNING_PRIVATE_KEY_PATH", "/run/secrets/realtime-private.pem").strip()
+REALTIME_SIGNING_PUBLIC_KEY_PATH = env_str("REALTIME_SIGNING_PUBLIC_KEY_PATH", "/run/secrets/realtime-public.pem").strip()
+
+if not REALTIME_OUTBOX_ENABLED:
+    raise ImproperlyConfigured("REALTIME_OUTBOX_ENABLED must remain true when Axum is the realtime transport.")
+if not REALTIME_STREAM_ENABLED:
+    raise ImproperlyConfigured("REALTIME_STREAM_ENABLED must remain true when Axum is the realtime transport.")
+if not REALTIME_STREAM_URL and not USE_LOCAL_TEST_SERVICES:
+    raise ImproperlyConfigured("REALTIME_STREAM_URL is required for the Axum realtime transport.")
+if REALTIME_TOKEN_ALGORITHM != "RS256":
+    raise ImproperlyConfigured("REALTIME_TOKEN_ALGORITHM must be RS256.")
+if not REALTIME_AUTH_ENABLED:
+    raise ImproperlyConfigured("REALTIME_AUTH_ENABLED must remain true for public Axum sockets.")
+if not REALTIME_SIGNING_PRIVATE_KEY and not REALTIME_SIGNING_PRIVATE_KEY_PATH:
+    raise ImproperlyConfigured("A realtime RS256 private key must be configured.")
+if not REALTIME_SIGNING_PUBLIC_KEY and not REALTIME_SIGNING_PUBLIC_KEY_PATH:
+    raise ImproperlyConfigured("A realtime RS256 public key must be configured.")
+if REALTIME_REQUIRE_ORIGIN and not REALTIME_ALLOWED_ORIGINS:
+    raise ImproperlyConfigured("REALTIME_ALLOWED_ORIGINS is required when realtime origin checks are enabled.")
+
+REDIS_URL = "" if USE_LOCAL_TEST_SERVICES else env_str("REDIS_URL", "").strip()
 cache_location = "" if USE_LOCAL_TEST_SERVICES else env_str("REDIS_CACHE_URL", "")
 if cache_location:
     CACHES = {
@@ -374,6 +424,8 @@ else:
             "LOCATION": "messenger-api",
         }
     }
+
+SUPPORT_PUBLIC_KB_CACHE_TTL_SECONDS = env_int("SUPPORT_PUBLIC_KB_CACHE_TTL_SECONDS", 60)
 
 MAX_UPLOAD_BYTES = env_int("MAX_UPLOAD_BYTES", 15 * 1024 * 1024)
 ALLOWED_UPLOAD_EXTENSIONS = [
@@ -409,7 +461,25 @@ CHAT_ATTACHMENT_FORCE_DOWNLOAD = env_bool("CHAT_ATTACHMENT_FORCE_DOWNLOAD", True
 CELERY_BROKER_URL = "memory://" if USE_LOCAL_TEST_SERVICES else env_str("CELERY_BROKER_URL", REDIS_URL or "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = "cache+memory://" if USE_LOCAL_TEST_SERVICES else env_str("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_TASK_ALWAYS_EAGER = True if USE_LOCAL_TEST_SERVICES else env_bool("CELERY_TASK_ALWAYS_EAGER", True)
+CELERY_TASK_ALWAYS_EAGER = True if USE_LOCAL_TEST_SERVICES else env_bool("CELERY_TASK_ALWAYS_EAGER", False)
+CELERY_TASK_IGNORE_RESULT = env_bool("CELERY_TASK_IGNORE_RESULT", True)
+CELERY_RESULT_EXPIRES = max(300, env_int("CELERY_RESULT_EXPIRES", 3600))
+CELERY_WORKER_MAX_TASKS_PER_CHILD = max(50, env_int("CELERY_WORKER_MAX_TASKS_PER_CHILD", 500))
+CELERY_WORKER_PREFETCH_MULTIPLIER = max(1, env_int("CELERY_WORKER_PREFETCH_MULTIPLIER", 1))
+CELERY_BROKER_POOL_LIMIT = max(1, env_int("CELERY_BROKER_POOL_LIMIT", 5))
+CELERY_BROKER_HEARTBEAT = max(10, env_int("CELERY_BROKER_HEARTBEAT", 30))
+CELERY_TASK_TRACK_STARTED = False
+CELERY_TASK_TIME_LIMIT = max(60, env_int("CELERY_TASK_TIME_LIMIT", 900))
+CELERY_TASK_SOFT_TIME_LIMIT = min(
+    CELERY_TASK_TIME_LIMIT - 5,
+    max(30, env_int("CELERY_TASK_SOFT_TIME_LIMIT", 840)),
+)
+CELERY_WORKER_CANCEL_LONG_RUNNING_TASKS_ON_CONNECTION_LOSS = True
+REALTIME_OUTBOX_DELETE_BATCH_SIZE = max(100, env_int("REALTIME_OUTBOX_DELETE_BATCH_SIZE", 1000))
+REALTIME_OUTBOX_DELETE_MAX_BATCHES = max(1, env_int("REALTIME_OUTBOX_DELETE_MAX_BATCHES", 20))
+UPLOAD_EXPIRY_BATCH_SIZE = max(50, env_int("UPLOAD_EXPIRY_BATCH_SIZE", 500))
+SUPPORT_WEBHOOK_DISPATCH_BATCH_SIZE = max(1, env_int("SUPPORT_WEBHOOK_DISPATCH_BATCH_SIZE", 100))
+SUPPORT_WEBHOOK_LEASE_SECONDS = max(30, env_int("SUPPORT_WEBHOOK_LEASE_SECONDS", 120))
 
 CHAT_USE_S3_STORAGE = env_bool("CHAT_USE_S3_STORAGE", False)
 CLOUDFLARE_R2_ACCOUNT_ID = env_str("CLOUDFLARE_R2_ACCOUNT_ID", "").strip()
@@ -418,6 +488,14 @@ CLOUDFLARE_R2_ACCESS_KEY_ID = env_str("CLOUDFLARE_R2_ACCESS_KEY_ID", "").strip()
 CLOUDFLARE_R2_SECRET_ACCESS_KEY = env_str("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "").strip()
 CLOUDFLARE_R2_ENDPOINT_URL = env_str("CLOUDFLARE_R2_ENDPOINT_URL", "").strip()
 CLOUDFLARE_R2_CUSTOM_DOMAIN = env_str("CLOUDFLARE_R2_CUSTOM_DOMAIN", "").strip()
+
+# Encrypted PostgreSQL/configuration backup uploads. Use a dedicated private R2
+# bucket where possible; the command refuses to upload when the bucket is unset.
+BACKUP_R2_BUCKET_NAME = env_str("BACKUP_R2_BUCKET_NAME", "").strip()
+BACKUP_R2_PREFIX = env_str("BACKUP_R2_PREFIX", "system-backups").strip().strip("/") or "system-backups"
+BACKUP_R2_RETENTION_DAYS = max(1, env_int("BACKUP_R2_RETENTION_DAYS", 30))
+BACKUP_R2_KEEP_LATEST = max(1, env_int("BACKUP_R2_KEEP_LATEST", 7))
+BACKUP_MAX_UPLOAD_BYTES = max(1_048_576, env_int("BACKUP_MAX_UPLOAD_BYTES", 2_147_483_648))
 R2_STORAGE_CONFIGURED = all(
     [
         CLOUDFLARE_R2_BUCKET_NAME,
@@ -531,11 +609,21 @@ CALL_DOMINANT_SPEAKER_HOLD_MS = env_int("CALL_DOMINANT_SPEAKER_HOLD_MS", 2500)
 CALL_SPEAKER_LEVEL_THRESHOLD = env_int("CALL_SPEAKER_LEVEL_THRESHOLD", 35)
 CALL_GRID_LAYOUT_THRESHOLD = env_int("CALL_GRID_LAYOUT_THRESHOLD", 4)
 CALL_ALLOW_SIMULTANEOUS_SCREEN_SHARES = env_int("CALL_ALLOW_SIMULTANEOUS_SCREEN_SHARES", 0)
+TURN_PROVIDER = env_str("TURN_PROVIDER", "legacy").strip().lower() or "legacy"
+TURN_CREDENTIAL_TTL_SECONDS = min(86400, max(300, env_int("TURN_CREDENTIAL_TTL_SECONDS", 21600)))
+CLOUDFLARE_TURN_KEY_ID = env_str("CLOUDFLARE_TURN_KEY_ID", "").strip()
+CLOUDFLARE_TURN_API_TOKEN = env_str("CLOUDFLARE_TURN_API_TOKEN", "").strip()
+CLOUDFLARE_TURN_API_BASE_URL = env_str(
+    "CLOUDFLARE_TURN_API_BASE_URL",
+    "https://rtc.live.cloudflare.com/v1/turn",
+).strip().rstrip("/")
+CLOUDFLARE_TURN_REQUEST_TIMEOUT_SECONDS = max(1.0, float(env_str("CLOUDFLARE_TURN_REQUEST_TIMEOUT_SECONDS", "5") or "5"))
+CLOUDFLARE_TURN_FILTER_BROWSER_PORT_53 = env_bool("CLOUDFLARE_TURN_FILTER_BROWSER_PORT_53", True)
+# Legacy/self-hosted TURN remains available for development and rollback only.
 TURN_URIS_JSON = env_str("TURN_URIS_JSON", "")
 TURN_SHARED_SECRET = env_str("TURN_SHARED_SECRET", "")
 TURN_STATIC_USERNAME = env_str("TURN_STATIC_USERNAME", "")
 TURN_STATIC_PASSWORD = env_str("TURN_STATIC_PASSWORD", "")
-TURN_CREDENTIAL_TTL_SECONDS = env_int("TURN_CREDENTIAL_TTL_SECONDS", 3600)
 TURN_REALM = env_str("TURN_REALM", "")
 TURN_EXTERNAL_IP = env_str("TURN_EXTERNAL_IP", env_str("DROPLET_PUBLIC_IP", ""))
 TURN_RELAY_MIN_PORT = env_int("TURN_RELAY_MIN_PORT", 49160)
@@ -548,6 +636,16 @@ X_FRAME_OPTIONS = "DENY"
 REQUEST_LOG_LEVEL = env_str("REQUEST_LOG_LEVEL", "INFO")
 DJANGO_LOG_LEVEL = env_str("DJANGO_LOG_LEVEL", "INFO")
 CHAT_LOG_LEVEL = env_str("CHAT_LOG_LEVEL", "INFO")
+
+# Aggregate request/SQL measurement. SQL text and parameters are never logged.
+DJANGO_QUERY_METRICS_ENABLED = env_bool("DJANGO_QUERY_METRICS_ENABLED", DEBUG)
+DJANGO_QUERY_METRICS_LOG_ALL = env_bool("DJANGO_QUERY_METRICS_LOG_ALL", False)
+DJANGO_QUERY_METRICS_REQUEST_MS = max(1, env_int("DJANGO_QUERY_METRICS_REQUEST_MS", 250))
+DJANGO_QUERY_METRICS_DB_MS = max(1, env_int("DJANGO_QUERY_METRICS_DB_MS", 100))
+DJANGO_QUERY_METRICS_MAX_QUERIES = max(1, env_int("DJANGO_QUERY_METRICS_MAX_QUERIES", 20))
+DJANGO_QUERY_METRICS_EXCLUDE_PREFIXES = tuple(
+    env_csv("DJANGO_QUERY_METRICS_EXCLUDE_PREFIXES", "/health,/static,/media")
+)
 
 LOGGING = {
     "version": 1,
@@ -573,6 +671,7 @@ LOGGING = {
         "django": {"handlers": ["console"], "level": DJANGO_LOG_LEVEL},
         "apps.chat": {"handlers": ["console"], "level": CHAT_LOG_LEVEL, "propagate": False},
         "django.request": {"handlers": ["console"], "level": REQUEST_LOG_LEVEL, "propagate": False},
+        "performance.django": {"handlers": ["console"], "level": "INFO", "propagate": False},
     },
 }
 
@@ -610,6 +709,8 @@ def _validate_production_settings() -> None:
         raise ImproperlyConfigured("DB_ENGINE must be postgres in production.")
     if not DB_ENGINE == "postgres" or not env_str("DB_PASSWORD", "").strip():
         raise ImproperlyConfigured("DB_PASSWORD must be set in production.")
+    if not DATABASE_CONN_HEALTH_CHECKS:
+        raise ImproperlyConfigured("DATABASE_CONN_HEALTH_CHECKS must be true in production.")
     jwt_issuer = str(SIMPLE_JWT.get("ISSUER") or "").strip()
     jwt_audience = str(SIMPLE_JWT.get("AUDIENCE") or "").strip()
     if not jwt_issuer or not jwt_audience:
@@ -629,11 +730,15 @@ def _validate_production_settings() -> None:
             "AUTH_PAYMENT_ADMIN_SERVICE_KEY and AUTH_PAYMENT_ADMIN_SIGNING_SECRET must be set in production."
         )
     if not REDIS_URL:
-        raise ImproperlyConfigured("REDIS_URL must be set in production for websocket channel delivery.")
+        raise ImproperlyConfigured("REDIS_URL must be set in production for background coordination.")
     if not cache_location:
         raise ImproperlyConfigured("REDIS_CACHE_URL must be set in production.")
     if CELERY_TASK_ALWAYS_EAGER:
         raise ImproperlyConfigured("CELERY_TASK_ALWAYS_EAGER must be false in production.")
+    if not CELERY_TASK_IGNORE_RESULT:
+        raise ImproperlyConfigured("CELERY_TASK_IGNORE_RESULT must be true in production to avoid Redis result bloat.")
+    if not UPLOAD_SCAN_ASYNC:
+        raise ImproperlyConfigured("UPLOAD_SCAN_ASYNC must be true in production.")
     if EMAIL_BACKEND.endswith(".console.EmailBackend") or DEFAULT_FROM_EMAIL.endswith("@localhost"):
         raise ImproperlyConfigured("Production email settings must use a real SMTP backend and sender.")
     if EMAIL_BACKEND.endswith(".smtp.EmailBackend") and not (EMAIL_HOST and EMAIL_HOST_USER and EMAIL_HOST_PASSWORD):
@@ -642,10 +747,12 @@ def _validate_production_settings() -> None:
         raise ImproperlyConfigured("Private Cloudflare R2 storage must be fully configured in production.")
     if CLOUDFLARE_R2_CUSTOM_DOMAIN:
         raise ImproperlyConfigured("Private chat R2 storage must not use a public custom domain.")
-    if not (TURN_URIS_JSON and TURN_SHARED_SECRET and TURN_REALM and TURN_EXTERNAL_IP):
-        raise ImproperlyConfigured("TURN endpoints, secret, realm, and external IP are required in production.")
-    if len(TURN_SHARED_SECRET) < 32:
-        raise ImproperlyConfigured("TURN_SHARED_SECRET must be at least 32 characters in production.")
+    if TURN_PROVIDER != "cloudflare":
+        raise ImproperlyConfigured("TURN_PROVIDER must be cloudflare in production.")
+    if not (CLOUDFLARE_TURN_KEY_ID and CLOUDFLARE_TURN_API_TOKEN):
+        raise ImproperlyConfigured("Cloudflare TURN key ID and API token are required in production.")
+    if not CLOUDFLARE_TURN_API_BASE_URL.startswith("https://"):
+        raise ImproperlyConfigured("CLOUDFLARE_TURN_API_BASE_URL must use HTTPS.")
     if not AUTH_REQUIRE_EMAIL_VERIFICATION:
         raise ImproperlyConfigured("AUTH_REQUIRE_EMAIL_VERIFICATION must be true in production.")
     if not (SECURE_SSL_REDIRECT and SESSION_COOKIE_SECURE and CSRF_COOKIE_SECURE):

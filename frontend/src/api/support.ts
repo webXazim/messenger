@@ -464,8 +464,12 @@ export const supportApi = {
     return unwrapData<SupportConversation>(response.data);
   },
 
-  async markConversationRead(conversationId: string) {
-    await http.post(`/support/conversations/${conversationId}/read/`);
+  async markConversationDelivered(conversationId: string, messageId?: string) {
+    await http.post(`/support/conversations/${conversationId}/delivered/`, messageId ? { message_id: messageId } : {});
+  },
+
+  async markConversationRead(conversationId: string, messageId?: string) {
+    await http.post(`/support/conversations/${conversationId}/read/`, messageId ? { message_id: messageId } : {});
   },
 
   async listWebsites(signal?: AbortSignal) {

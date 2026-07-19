@@ -33,6 +33,7 @@ User = get_user_model()
     SUPPORT_CALLS_ENABLED=True,
     SUPPORT_CALL_RING_TIMEOUT_SECONDS=45,
     SUPPORT_CALL_SIGNAL_MAX_BYTES=131072,
+    TURN_PROVIDER="legacy",
     TURN_URIS_JSON='["turn:turn.example.com:3478?transport=udp","turns:turn.example.com:5349?transport=tcp"]',
     TURN_SHARED_SECRET="support-test-turn-shared-secret-that-is-long-enough",
 )
@@ -390,7 +391,6 @@ class SupportGuestCallTests(APITestCase):
         self.assertEqual(result["duration_ended"], 1)
         self.assertFalse(SupportCallSignal.objects.filter(pk=signal.pk).exists())
     @override_settings(
-        CHANNEL_LAYERS={"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": ["redis://redis:6379/0"]}}},
         SUPPORT_WIDGET_SCRIPT_URL="https://messenger.example.com/support-widget/v1/widget.js",
         FRONTEND_BASE_URL="https://messenger.example.com",
     )

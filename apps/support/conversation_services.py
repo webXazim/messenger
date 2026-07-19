@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone as datetime_timezone
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Count, DateTimeField, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.chat.models import Conversation, Message
@@ -13,6 +15,7 @@ from apps.support.models import (
     SupportMessageAuthor,
     SupportConversationTag,
     SupportWidgetSession,
+    SupportWebsiteAgent,
 )
 from apps.support.realtime import publish_support_event
 from apps.support.media_services import (
@@ -56,6 +59,7 @@ def _publish_message_event(*, support_conversation: SupportConversation, message
             "website_name": support_conversation.website.name,
             "visitor_id": str(support_conversation.visitor_id),
             "message_id": str(message.id),
+            "client_temp_id": message.client_temp_id,
             "message_type": message.type,
             "text": message.text,
             "preview": media_summary(message),
@@ -204,6 +208,8 @@ def support_conversations_for_context(context: SupportContext):
             "conversation__last_message",
             "conversation__last_message__sender",
             "conversation__last_message__sender__profile",
+            "conversation__last_message__support_author",
+            "conversation__last_message__support_author__visitor",
             "website",
             "website__support_account",
             "website__support_account__service_settings",
@@ -211,15 +217,32 @@ def support_conversations_for_context(context: SupportContext):
             "assigned_agent",
             "assigned_agent__user",
             "assigned_agent__user__profile",
+            "visitor_last_read_message",
+            "visitor_last_delivered_message",
             "follow_up_created_by",
             "follow_up_created_by__profile",
+            "csat_survey",
         )
         .prefetch_related(
             Prefetch(
                 "tag_assignments",
                 queryset=SupportConversationTag.objects.select_related("tag").filter(tag__is_active=True).order_by("tag__name"),
                 to_attr="prefetched_tag_assignments",
-            )
+            ),
+            Prefetch(
+                "read_states",
+                queryset=SupportConversationReadState.objects.select_related(
+                    "last_delivered_message",
+                    "last_read_message",
+                ),
+                to_attr="prefetched_read_states",
+            ),
+            Prefetch(
+                "assigned_agent__website_assignments",
+                queryset=SupportWebsiteAgent.objects.select_related("website").order_by("website__name"),
+                to_attr="prefetched_website_assignments",
+            ),
+            "conversation__last_message__attachments",
         )
     )
     if context.role == "owner":
@@ -229,6 +252,69 @@ def support_conversations_for_context(context: SupportContext):
     if context.agent.can_view_all_conversations:
         return queryset
     return queryset.filter(Q(assigned_agent=context.agent) | Q(assigned_agent__isnull=True))
+
+
+def with_support_inbox_metrics(queryset, user):
+    """Annotate unread counts with correlated subqueries.
+
+    This avoids joining and grouping the full message table into the inbox row
+    query, so large message histories do not inflate model rows or serializer
+    memory.
+    """
+
+    epoch = Value(
+        datetime(1970, 1, 1, tzinfo=datetime_timezone.utc),
+        output_field=DateTimeField(),
+    )
+    last_read_at = SupportConversationReadState.objects.filter(
+        support_conversation_id=OuterRef("pk"),
+        user=user,
+        last_read_message__isnull=False,
+    ).values("last_read_message__created_at")[:1]
+
+    queryset = queryset.annotate(
+        _team_read_cutoff=Coalesce(
+            Subquery(last_read_at, output_field=DateTimeField()),
+            epoch,
+        ),
+        _visitor_read_cutoff=Coalesce(
+            F("visitor_last_read_message__created_at"),
+            epoch,
+        ),
+    )
+
+    team_unread = (
+        Message.objects.filter(
+            conversation_id=OuterRef("conversation_id"),
+            is_deleted=False,
+            created_at__gt=OuterRef("_team_read_cutoff"),
+        )
+        .exclude(sender_id=user.id)
+        .values("conversation_id")
+        .annotate(total=Count("id"))
+        .values("total")[:1]
+    )
+    visitor_unread = (
+        Message.objects.filter(
+            conversation_id=OuterRef("conversation_id"),
+            sender__isnull=False,
+            is_deleted=False,
+            created_at__gt=OuterRef("_visitor_read_cutoff"),
+        )
+        .values("conversation_id")
+        .annotate(total=Count("id"))
+        .values("total")[:1]
+    )
+    return queryset.annotate(
+        prefetched_team_unread_count=Coalesce(
+            Subquery(team_unread, output_field=IntegerField()),
+            Value(0),
+        ),
+        prefetched_visitor_unread_count=Coalesce(
+            Subquery(visitor_unread, output_field=IntegerField()),
+            Value(0),
+        ),
+    )
 
 
 def get_context_conversation(context: SupportContext, conversation_id) -> SupportConversation:
@@ -303,6 +389,7 @@ def send_visitor_message(
     text: str = "",
     attachment_ids=None,
     voice_note: bool = False,
+    client_temp_id: str = "",
 ) -> tuple[SupportConversation, Message]:
     support_conversation, _ = get_or_create_visitor_conversation(session)
     support_conversation = (
@@ -316,6 +403,20 @@ def send_visitor_message(
             code="conversation_closed",
             status_code=410,
         )
+
+    client_temp_id = (client_temp_id or "").strip()[:100]
+    if client_temp_id:
+        existing = (
+            Message.objects.filter(
+                conversation=support_conversation.conversation,
+                sender__isnull=True,
+                client_temp_id=client_temp_id,
+            )
+            .select_related("support_author")
+            .first()
+        )
+        if existing:
+            return support_conversation, existing
 
     clean_text = _clean_message_text(text, required=False)
     attachment_ids = attachment_ids or []
@@ -337,6 +438,7 @@ def send_visitor_message(
         type=Message.MessageType.AUDIO if voice_note else Message.MessageType.TEXT,
         text=clean_text,
         metadata={"voice_note": True} if voice_note else {},
+        client_temp_id=client_temp_id,
         delivery_status=Message.DeliveryStatus.SENT,
     )
     SupportMessageAuthor.objects.create(
@@ -391,6 +493,7 @@ def send_team_message(
     text: str = "",
     attachment_ids=None,
     voice_note: bool = False,
+    client_temp_id: str = "",
 ) -> Message:
     support_conversation = (
         # Lock only the SupportConversation row. `assigned_agent` is nullable,
@@ -415,6 +518,16 @@ def send_team_message(
     if context.agent and support_conversation.assigned_agent_id is None:
         support_conversation.assigned_agent = context.agent
 
+    client_temp_id = (client_temp_id or "").strip()[:100]
+    if client_temp_id:
+        existing = Message.objects.filter(
+            conversation=support_conversation.conversation,
+            sender=actor,
+            client_temp_id=client_temp_id,
+        ).first()
+        if existing:
+            return existing
+
     clean_text = _clean_message_text(text, required=False)
     attachment_ids = attachment_ids or []
     if not clean_text and not attachment_ids:
@@ -436,6 +549,7 @@ def send_team_message(
         type=Message.MessageType.AUDIO if voice_note else Message.MessageType.TEXT,
         text=clean_text,
         metadata={"voice_note": True} if voice_note else {},
+        client_temp_id=client_temp_id,
         delivery_status=Message.DeliveryStatus.SENT,
     )
     finalize_support_message_media(message=message, uploads=uploads, text=clean_text, voice_note=voice_note)

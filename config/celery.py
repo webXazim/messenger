@@ -1,5 +1,8 @@
 import os
+
 from celery import Celery
+from celery.schedules import crontab
+from django.conf import settings
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -7,9 +10,15 @@ app = Celery("messenger_api")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
-from celery.schedules import crontab
-
 app.conf.beat_schedule = {
+    "delete-old-realtime-outbox-daily": {
+        "task": "apps.common.tasks.delete_old_realtime_outbox_events",
+        "schedule": crontab(minute=10, hour=4),
+    },
+    "monitor-realtime-pipeline-every-five-minutes": {
+        "task": "apps.common.tasks.monitor_realtime_pipeline",
+        "schedule": crontab(minute="*/5"),
+    },
     "expire-stale-pending-uploads-hourly": {
         "task": "apps.chat.tasks.expire_stale_pending_uploads",
         "schedule": crontab(minute=0, hour="*"),
@@ -47,3 +56,11 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute=35, hour=3),
     },
 }
+
+# Avoid generating a no-op Celery task every five seconds while the current
+# Channels production transport is still active.
+if getattr(settings, "REALTIME_STREAM_ENABLED", False):
+    app.conf.beat_schedule["publish-realtime-outbox-every-5-seconds"] = {
+        "task": "apps.common.tasks.publish_realtime_outbox_events",
+        "schedule": 5.0,
+    }

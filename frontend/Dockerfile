@@ -28,7 +28,10 @@ ENV VITE_APP_NAME=$VITE_APP_NAME
 ENV VITE_SOCIAL_BASE_URL=$VITE_SOCIAL_BASE_URL
 ENV VITE_SUPPORT_PLANS_URL=$VITE_SUPPORT_PLANS_URL
 
-RUN npm run build
+RUN npm run test:realtime \
+    && npm run test:support \
+    && npm run test:call \
+    && npm run build
 
 
 FROM nginx:1.27-alpine AS runtime

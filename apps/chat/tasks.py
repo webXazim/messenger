@@ -218,10 +218,20 @@ def rescan_attachment(attachment_id):
     return attachment.scan_status
 
 
-@shared_task
+@shared_task(ignore_result=True)
 def expire_stale_pending_uploads():
+    """Expire a bounded upload batch so storage I/O cannot monopolize a worker."""
+    batch_size = max(50, min(2000, int(getattr(settings, "UPLOAD_EXPIRY_BATCH_SIZE", 500))))
     expired = 0
-    for upload in PendingUpload.objects.filter(status=PendingUpload.UploadStatus.PENDING, expires_at__lte=timezone.now()):
+    uploads = (
+        PendingUpload.objects.filter(
+            status=PendingUpload.UploadStatus.PENDING,
+            expires_at__lte=timezone.now(),
+        )
+        .only("id", "status", "expires_at", "scan_notes", "thumbnail", "updated_at")
+        .order_by("expires_at", "id")[:batch_size]
+    )
+    for upload in uploads.iterator(chunk_size=100):
         expire_pending_upload_if_needed(upload)
         expired += 1
     return expired

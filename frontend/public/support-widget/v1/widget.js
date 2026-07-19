@@ -11,7 +11,7 @@
   try { scriptUrl = new URL(script.src, window.location.href); } catch (_) { return; }
   var apiBase = scriptUrl.origin + "/api/v1/support/widget/" + encodeURIComponent(siteKey);
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
-  var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws/support/widget/" + encodeURIComponent(siteKey) + "/";
+  var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
   var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, teamTyping: false, typingStopTimer: 0, lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
@@ -160,7 +160,7 @@
 
   function sendRealtime(event, data) {
     if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
-    try { state.socket.send(JSON.stringify({ event: event, data: data || {} })); return true; } catch (_) { return false; }
+    try { state.socket.send(JSON.stringify({ v: 1, request_id: "widget-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2), event: event, data: data || {} })); return true; } catch (_) { return false; }
   }
 
   function latestTeamMessage() {
@@ -178,24 +178,21 @@
     var rank = { pending: 0, sent: 1, delivered: 2, read: 3 };
     if ((rank[currentStatus] || 0) >= rank[targetStatus]) return;
     if (state.lastReceiptAckId === String(message.id) && (rank[state.lastReceiptAckStatus] || 0) >= rank[targetStatus]) return;
-    var sent = sendRealtime(targetStatus === "read" ? "support.message.read" : "support.message.delivered", { message_id: message.id });
-    if (sent) {
-      state.lastReceiptAckId = String(message.id);
-      state.lastReceiptAckStatus = targetStatus;
-    }
+    var endpoint = targetStatus === "read" ? "/conversation/read/" : "/conversation/delivered/";
+    request(sessionPath(endpoint), { method: "POST", body: JSON.stringify({ message_id: message.id }) })
+      .then(function () {
+        state.lastReceiptAckId = String(message.id);
+        state.lastReceiptAckStatus = targetStatus;
+      })
+      .catch(function () {});
   }
 
   function reportVisitorActivity(force) {
     if (!state.session) return;
     var currentUrl = window.location.href;
-    if (!force && state.lastActivityUrl === currentUrl) {
-      sendRealtime("support.visitor.activity", { current_page_url: currentUrl, referrer: document.referrer || "" });
-      return;
-    }
+    if (!force && state.lastActivityUrl === currentUrl) return;
     state.lastActivityUrl = currentUrl;
-    if (!sendRealtime("support.visitor.activity", { current_page_url: currentUrl, referrer: document.referrer || "" })) {
-      api.updateSession({ current_page_url: currentUrl, referrer: document.referrer || "" }).catch(function () {});
-    }
+    api.updateSession({ current_page_url: currentUrl, referrer: document.referrer || "" }).catch(function () {});
   }
 
   function reportVisitorTyping(active) {
@@ -306,7 +303,7 @@
     state.draft = "";
     render();
     scrollMessages();
-    return request(sessionPath("/conversation/messages/"), { method: "POST", body: JSON.stringify({ text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) }) })
+    return request(sessionPath("/conversation/messages/"), { method: "POST", body: JSON.stringify({ client_temp_id: clientTempId, text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) }) })
       .then(function (payload) {
         state.messages = state.messages.filter(function (message) { return message.id !== clientTempId; });
         if (payload.message && !state.messages.some(function (message) { return message.id === payload.message.id; })) state.messages.push(payload.message);
@@ -689,7 +686,8 @@
 
   function scheduleRealtimeReconnect() {
     if (state.reconnectTimer || !state.session || !state.token) return;
-    var delay = Math.min(15000, 750 * Math.pow(2, Math.min(state.reconnectAttempts, 5)));
+    var baseDelay = Math.min(30000, 750 * Math.pow(2, Math.min(state.reconnectAttempts, 6)));
+    var delay = Math.round(baseDelay * (0.75 + Math.random() * 0.5));
     state.reconnectAttempts += 1;
     state.reconnectTimer = window.setTimeout(function () { state.reconnectTimer = 0; connectRealtime(); }, delay);
   }
@@ -699,19 +697,21 @@
     if (state.socket && (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)) return;
     closeRealtime(false);
     state.socketState = "connecting";
-    var socket;
-    try {
-      socket = new WebSocket(wsBase + "?session_id=" + encodeURIComponent(state.session.id) + "&token=" + encodeURIComponent(state.token));
-    } catch (_) { state.socketState = "closed"; startPolling(); scheduleRealtimeReconnect(); return; }
-    state.socket = socket;
-    socket.onopen = function () {
+    request(sessionPath("/realtime-ticket/"), { method: "POST", body: "{}" }).then(function (credential) {
+      if (!state.session || !state.token || !credential || !credential.ticket) throw new Error("Realtime ticket unavailable.");
+      var socket;
+      try {
+        socket = new WebSocket(wsBase + "?ticket=" + encodeURIComponent(credential.ticket));
+      } catch (_) { throw new Error("Realtime connection could not start."); }
+      state.socket = socket;
+      socket.onopen = function () {
       if (state.socket !== socket) return;
       state.socketState = "open";
       state.reconnectAttempts = 0;
       stopPolling();
       stopHeartbeat();
       state.heartbeatTimer = window.setInterval(function () {
-        if (state.socket === socket && socket.readyState === WebSocket.OPEN) reportVisitorActivity(false);
+        if (state.socket === socket && socket.readyState === WebSocket.OPEN) sendRealtime("support.ping", {});
       }, 25000);
       reportVisitorActivity(true);
       if (state.open) render();
@@ -723,9 +723,10 @@
         var payload = JSON.parse(event.data || "{}");
         if (payload.event === "support.message.created") {
           var senderKind = payload.data && payload.data.sender ? payload.data.sender.kind : "";
-          if (senderKind !== "visitor" && payload.data && payload.data.id) {
-            sendRealtime("support.message.delivered", { message_id: payload.data.id });
-            if (state.open && document.visibilityState === "visible") sendRealtime("support.message.read", { message_id: payload.data.id });
+          var incomingMessageId = payload.data ? (payload.data.message_id || payload.data.id || "") : "";
+          if (senderKind !== "visitor" && incomingMessageId) {
+            var receiptEndpoint = state.open && document.visibilityState === "visible" ? "/conversation/read/" : "/conversation/delivered/";
+            request(sessionPath(receiptEndpoint), { method: "POST", body: JSON.stringify({ message_id: incomingMessageId }) }).catch(function () {});
           }
           if (!state.open && senderKind !== "visitor") { updateLauncherUnread(true); return; }
           if (state.open) loadMessages().catch(function () {});
@@ -757,6 +758,11 @@
       state.socket = null; state.socketState = "closed"; stopHeartbeat(); startPolling(); scheduleRealtimeReconnect();
       if (state.open) render();
     };
+    }).catch(function () {
+      state.socketState = "closed";
+      startPolling();
+      scheduleRealtimeReconnect();
+    });
   }
 
   function stopPolling() {

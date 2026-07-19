@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from collections import Counter
 from django.conf import settings
 from pathlib import Path
 from decimal import Decimal
@@ -36,7 +37,7 @@ from apps.chat.models import (
     UserBlock,
     UserDevice,
 )
-from apps.chat.services import conversation_has_e2ee_enabled_participants, create_media_access_payload, get_calling_config, get_presence_snapshot, is_user_online
+from apps.chat.services import conversation_has_e2ee_enabled_participants, create_media_access_payload, get_calling_config, get_presence_snapshot, get_presence_snapshots, is_user_online
 from apps.chat.services import get_message_edit_policy, group_route_name_is_available, sanitize_chat_text
 from apps.chat.services import MEDIA_THUMBNAIL_MAX_BYTES, public_media_metadata, sanitize_media_metadata
 
@@ -191,6 +192,34 @@ def _attachment_aspect_ratio(width, height):
 
 
 
+class UserLiteListSerializer(serializers.ListSerializer):
+    """Batch presence and block visibility for user collections."""
+
+    def to_representation(self, data):
+        iterable = list(data.all() if hasattr(data, "all") else data)
+        user_ids = [str(user.id) for user in iterable]
+        context = self.context
+        presence_map = context.setdefault("presence_map", {})
+        missing_ids = [user_id for user_id in user_ids if user_id not in presence_map]
+        if missing_ids:
+            presence_map.update(get_presence_snapshots(missing_ids))
+
+        request = context.get("request")
+        actor = context.get("actor") or getattr(request, "user", None)
+        blocked_user_ids: set[str] = set()
+        if getattr(actor, "is_authenticated", False) and user_ids:
+            rows = UserBlock.objects.filter(
+                Q(blocker_id=actor.id, blocked_id__in=user_ids)
+                | Q(blocked_id=actor.id, blocker_id__in=user_ids)
+            ).values_list("blocker_id", "blocked_id")
+            actor_id = str(actor.id)
+            for blocker_id, blocked_id in rows:
+                other_id = str(blocked_id) if str(blocker_id) == actor_id else str(blocker_id)
+                blocked_user_ids.add(other_id)
+        context.setdefault("blocked_user_ids", set()).update(blocked_user_ids)
+        return super().to_representation(iterable)
+
+
 class UserLiteSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="pk", read_only=True)
     display_name = serializers.SerializerMethodField()
@@ -207,6 +236,7 @@ class UserLiteSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ("id", "username", "email", "display_name", "avatar", "is_online", "active_devices", "last_seen_at", "presence_label", "presence_status", "device_type", "device_types", "presence_visibility")
+        list_serializer_class = UserLiteListSerializer
 
     def get_display_name(self, obj) -> str:
         profile = getattr(obj, "profile", None)
@@ -230,21 +260,29 @@ class UserLiteSerializer(serializers.ModelSerializer):
         if actor is not None and str(actor.id) == str(obj.id):
             return True
         if actor is not None:
-            cache = self.context.setdefault("_presence_block_cache", {})
-            pair = tuple(sorted((str(actor.id), str(obj.id))))
-            blocked = cache.get(pair)
-            if blocked is None:
-                blocked = UserBlock.objects.filter(
-                    Q(blocker_id=actor.id, blocked_id=obj.id)
-                    | Q(blocker_id=obj.id, blocked_id=actor.id)
-                ).exists()
-                cache[pair] = blocked
-            if blocked:
-                return False
+            blocked_user_ids = self.context.get("blocked_user_ids")
+            if blocked_user_ids is not None:
+                if str(obj.id) in blocked_user_ids:
+                    return False
+            else:
+                cache = self.context.setdefault("_presence_block_cache", {})
+                pair = tuple(sorted((str(actor.id), str(obj.id))))
+                blocked = cache.get(pair)
+                if blocked is None:
+                    blocked = UserBlock.objects.filter(
+                        Q(blocker_id=actor.id, blocked_id=obj.id)
+                        | Q(blocker_id=obj.id, blocked_id=actor.id)
+                    ).exists()
+                    cache[pair] = blocked
+                if blocked:
+                    return False
         profile = getattr(obj, "profile", None)
         return profile is None or bool(getattr(profile, "show_online_status", True))
 
     def _presence_snapshot(self, obj):
+        presence_map = self.context.get("presence_map")
+        if presence_map is not None and str(obj.id) in presence_map:
+            return presence_map[str(obj.id)]
         cache_key = f"_user_presence_{obj.id}"
         if not hasattr(self, cache_key):
             setattr(self, cache_key, get_presence_snapshot(obj.id))
@@ -1489,6 +1527,39 @@ class CallParticipantSerializer(serializers.ModelSerializer):
         fields = ("id", "user", "state", "network_quality", "preferred_video_quality", "audio_enabled", "video_enabled", "is_on_hold", "reconnecting", "connection_state", "audio_route", "screen_share_enabled", "screen_share_started_at", "raised_hand_at", "is_speaking", "speaking_level", "last_spoke_at", "last_heartbeat_at", "packet_loss_pct", "jitter_ms", "round_trip_time_ms", "bitrate_kbps", "frame_rate", "quality_score", "quality_alert", "invited_at", "joined_at", "left_at")
 
 
+def _serializer_call_participants(call):
+    cache = getattr(call, "_prefetched_objects_cache", None)
+    if cache is not None and "participants" in cache:
+        return list(cache["participants"])
+    participants = list(
+        call.participants.select_related("user", "user__profile").all()
+    )
+    if cache is None:
+        cache = {}
+        call._prefetched_objects_cache = cache
+    cache["participants"] = participants
+    return participants
+
+
+class CallSessionListSerializer(serializers.ListSerializer):
+    """Batch call-participant presence across a page of calls."""
+
+    def to_representation(self, data):
+        iterable = list(data.all() if hasattr(data, "all") else data)
+        user_ids: set[str] = set()
+        for call in iterable:
+            if call.initiated_by_id:
+                user_ids.add(str(call.initiated_by_id))
+            if call.answered_by_id:
+                user_ids.add(str(call.answered_by_id))
+            user_ids.update(str(item.user_id) for item in _serializer_call_participants(call))
+        presence_map = self.context.setdefault("presence_map", {})
+        missing_ids = [user_id for user_id in user_ids if user_id not in presence_map]
+        if missing_ids:
+            presence_map.update(get_presence_snapshots(missing_ids))
+        return super().to_representation(iterable)
+
+
 class CallSessionSerializer(serializers.ModelSerializer):
     initiated_by = UserLiteSerializer(read_only=True)
     answered_by = UserLiteSerializer(read_only=True)
@@ -1502,6 +1573,7 @@ class CallSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CallSession
+        list_serializer_class = CallSessionListSerializer
         fields = (
             "id",
             "conversation",
@@ -1525,6 +1597,25 @@ class CallSessionSerializer(serializers.ModelSerializer):
             "network_recommendation",
         )
 
+    def to_representation(self, instance):
+        user_ids = {str(item.user_id) for item in _serializer_call_participants(instance)}
+        if instance.initiated_by_id:
+            user_ids.add(str(instance.initiated_by_id))
+        if instance.answered_by_id:
+            user_ids.add(str(instance.answered_by_id))
+        presence_map = self.context.setdefault("presence_map", {})
+        missing_ids = [user_id for user_id in user_ids if user_id not in presence_map]
+        if missing_ids:
+            presence_map.update(get_presence_snapshots(missing_ids))
+        return super().to_representation(instance)
+
+    def _is_online(self, user_id) -> bool:
+        presence_map = self.context.get("presence_map") or {}
+        snapshot = presence_map.get(str(user_id))
+        if snapshot is not None:
+            return bool(snapshot.get("is_online"))
+        return is_user_online(user_id)
+
     def get_duration_seconds(self, obj) -> int:
         end_time = obj.ended_at or timezone.now()
         start_time = obj.answered_at or obj.started_at
@@ -1546,14 +1637,14 @@ class CallSessionSerializer(serializers.ModelSerializer):
         status_value = (obj.status or "").lower()
         if status_value in {"ended", "declined", "missed", "failed"}:
             return status_value
-        participants = list(obj.participants.all())
+        participants = _serializer_call_participants(obj)
         request = self.context.get("request")
         actor_id = str(getattr(getattr(request, "user", None), "id", "") or "")
         actor_participant = next((p for p in participants if str(p.user_id) == actor_id), None)
         remote_participants = [p for p in participants if str(p.user_id) != actor_id]
         remote_ringing = [p for p in remote_participants if p.state == CallParticipant.State.RINGING]
         remote_joined = [p for p in remote_participants if p.state == CallParticipant.State.JOINED]
-        remote_online = [p for p in remote_participants if is_user_online(p.user_id)]
+        remote_online = [p for p in remote_participants if self._is_online(p.user_id)]
 
         if status_value == CallSession.Status.ONGOING:
             return "ongoing" if remote_joined or obj.conversation.type == Conversation.ConversationType.GROUP else "connecting"
@@ -1568,12 +1659,11 @@ class CallSessionSerializer(serializers.ModelSerializer):
         return status_value or "unknown"
 
     def get_participant_summary(self, obj) -> dict[str, int]:
-        counts = obj.participants.values("state").annotate(count=Count("id"))
-        summary = {item["state"]: item["count"] for item in counts}
-        participant_user_ids = list(obj.participants.values_list("user_id", flat=True))
-        online_count = sum(1 for user_id in participant_user_ids if is_user_online(user_id))
+        participants = _serializer_call_participants(obj)
+        summary = dict(Counter(item.state for item in participants))
+        online_count = sum(1 for item in participants if self._is_online(item.user_id))
         summary["online"] = online_count
-        summary["offline"] = max(len(participant_user_ids) - online_count, 0)
+        summary["offline"] = max(len(participants) - online_count, 0)
         return summary
 
     def get_network_recommendation(self, obj) -> dict[str, Any]:

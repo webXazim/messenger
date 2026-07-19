@@ -31,3 +31,6 @@ yarn-error.log*
 
 secrets/
 backups/
+realtime/target/
+
+logs/

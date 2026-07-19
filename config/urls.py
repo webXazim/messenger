@@ -9,6 +9,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 from apps.chat.api import urls as chat_api_urls
 from apps.support.api import urls as support_api_urls
 from apps.accounts.api import urls as accounts_api_urls
+from apps.common.api import urls as common_api_urls
 from apps.accounts.api.views import AvatarView, LoginView, MeView, RefreshView, RegisterView, UsernameAvailabilityView
 from config.centralization_views import admin_action_catalog, admin_action_execute, centralization_control_snapshot, centralization_readiness, internal_admin_monitoring
 from config.admin_gate import project_admin_entry
@@ -34,6 +35,7 @@ urlpatterns = [
     path("api/v1/users/me/", MeView.as_view(), name="local-auth-me"),
     path("api/v1/users/me/avatar/", AvatarView.as_view(), name="local-auth-me-avatar"),
     path("api/v1/accounts/", include(accounts_api_urls.urlpatterns)),
+    path("api/v1/realtime/", include((common_api_urls.urlpatterns, "realtime"), namespace="realtime")),
     path("api/centralization/readiness/", centralization_readiness, name="centralization-readiness"),
     path("api/centralization/control-snapshot/", centralization_control_snapshot, name="centralization-control-snapshot"),
     path("api/centralization/admin-actions/", admin_action_catalog, name="centralization-admin-actions"),

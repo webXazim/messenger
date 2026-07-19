@@ -2,8 +2,7 @@ from io import BytesIO, StringIO
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import skipUnless
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 import json
 from PIL import Image
 
@@ -11,11 +10,10 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase, APIRequestFactory
-from rest_framework_simplejwt.tokens import AccessToken
 
 from config.throttling import UnsafeUserRateThrottle
 from apps.chat.antivirus import AntivirusResult, antivirus_healthcheck
@@ -170,10 +168,10 @@ class DeployCheckTests(TestCase):
             SECURE_HSTS_SECONDS=31536000,
             SESSION_COOKIE_SECURE=True,
             CSRF_COOKIE_SECURE=True,
-            TURN_URIS_JSON="",
-            TURN_SHARED_SECRET="",
-            TURN_STATIC_USERNAME="",
-            TURN_STATIC_PASSWORD="",
+            TURN_PROVIDER="cloudflare",
+            CLOUDFLARE_TURN_KEY_ID="",
+            CLOUDFLARE_TURN_API_TOKEN="",
+            CLOUDFLARE_TURN_API_BASE_URL="https://rtc.live.cloudflare.com/v1/turn",
             FIREBASE_PROJECT_ID="",
             FIREBASE_SERVICE_ACCOUNT_PATH="",
             FCM_DRY_RUN=True,
@@ -204,6 +202,7 @@ class DeployCheckTests(TestCase):
                 SECURE_HSTS_SECONDS=31536000,
                 SESSION_COOKIE_SECURE=True,
                 CSRF_COOKIE_SECURE=True,
+                TURN_PROVIDER="legacy",
                 TURN_URIS_JSON='["turns:turn.example.com:5349?transport=tcp"]',
                 TURN_SHARED_SECRET="dev-turn-shared-secret-change-me",
                 FIREBASE_PROJECT_ID="sn-messenger-faa15",
@@ -233,10 +232,10 @@ class DeployCheckTests(TestCase):
                 SECURE_HSTS_SECONDS=31536000,
                 SESSION_COOKIE_SECURE=True,
                 CSRF_COOKIE_SECURE=True,
-                TURN_URIS_JSON='["turns:turn.example.com:5349?transport=tcp"]',
-                TURN_SHARED_SECRET="super-secret-turn",
-                TURN_STATIC_USERNAME="",
-                TURN_STATIC_PASSWORD="",
+                TURN_PROVIDER="cloudflare",
+                CLOUDFLARE_TURN_KEY_ID="production-turn-key",
+                CLOUDFLARE_TURN_API_TOKEN="production-turn-api-token",
+                CLOUDFLARE_TURN_API_BASE_URL="https://rtc.live.cloudflare.com/v1/turn",
                 FIREBASE_PROJECT_ID="sn-messenger-faa15",
                 FIREBASE_SERVICE_ACCOUNT_PATH=str(service_account),
                 FCM_DRY_RUN=False,
@@ -269,14 +268,17 @@ class DeployCheckTests(TestCase):
                 SESSION_COOKIE_SECURE=True,
                 CSRF_COOKIE_SECURE=True,
                 DB_ENGINE="sqlite",
-                CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
+                REALTIME_TRANSPORT="disabled",
+                REALTIME_STREAM_ENABLED=False,
+                REALTIME_OUTBOX_ENABLED=False,
+                REALTIME_AUTH_ENABLED=False,
                 CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "test"}},
                 CELERY_TASK_ALWAYS_EAGER=True,
                 EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend",
-                TURN_URIS_JSON='["turns:turn.example.com:5349?transport=tcp"]',
-                TURN_SHARED_SECRET="super-secret-turn",
-                TURN_STATIC_USERNAME="",
-                TURN_STATIC_PASSWORD="",
+                TURN_PROVIDER="cloudflare",
+                CLOUDFLARE_TURN_KEY_ID="production-turn-key",
+                CLOUDFLARE_TURN_API_TOKEN="production-turn-api-token",
+                CLOUDFLARE_TURN_API_BASE_URL="https://rtc.live.cloudflare.com/v1/turn",
                 FIREBASE_PROJECT_ID="sn-messenger-faa15",
                 FIREBASE_SERVICE_ACCOUNT_PATH=str(service_account),
                 FCM_DRY_RUN=False,
@@ -2740,160 +2742,6 @@ class ChatApiTests(TestCase):
         self.assertGreaterEqual(len(response.data["results"]), 1)
 
 
-try:
-    from channels.testing import WebsocketCommunicator
-    CHANNELS_AVAILABLE = True
-except Exception:
-    CHANNELS_AVAILABLE = False
-
-
-@skipUnless(CHANNELS_AVAILABLE, "channels testing not available")
-@override_settings(CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}})
-class ChatWebsocketTests(TransactionTestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(username="wsuser", email="wsuser@example.com", password="pass12345")
-        self.other = User.objects.create_user(username="wsother", email="wsother@example.com", password="pass12345")
-        client = APIClient()
-        client.force_authenticate(self.user)
-        self.conversation = client.post(reverse("conversation-list-create"), {"type": "direct", "participant_ids": [str(self.other.id)]}, format="json").data
-        other_client = APIClient()
-        other_client.force_authenticate(self.other)
-        self.message_id = other_client.post(reverse("message-list-create", kwargs={"conversation_id": self.conversation["id"]}), {"text": "hello"}, format="json").data["id"]
-
-    async def _connect(self, user=None):
-        from config.asgi import application
-        token = str(AccessToken.for_user(user or self.user))
-        communicator = WebsocketCommunicator(application, f"/ws/chat/?token={token}")
-        connected, _ = await communicator.connect()
-        return communicator, connected
-
-    async def _receive_event(self, communicator, expected_event, *, max_events=12):
-        observed = []
-        for _ in range(max_events):
-            payload = await communicator.receive_json_from(timeout=2)
-            observed.append(payload.get("event"))
-            if payload.get("event") == expected_event:
-                return payload
-        self.fail(f"Expected websocket event {expected_event!r}; observed {observed!r}")
-
-    def test_websocket_subscribe_and_delivered_event(self):
-        import asyncio
-
-        async def runner():
-            communicator, connected = await self._connect()
-            self.assertTrue(connected)
-            await communicator.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            first = await communicator.receive_json_from()
-            self.assertEqual(first["event"], "conversation.subscribed")
-            delivered = await communicator.receive_json_from()
-            self.assertEqual(delivered["event"], "message.delivered")
-            await communicator.disconnect()
-
-        asyncio.run(runner())
-
-    def test_subscription_delivery_event_reaches_sender(self):
-        import asyncio
-
-        async def runner():
-            sender, sender_connected = await self._connect(self.other)
-            self.assertTrue(sender_connected)
-            await sender.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            sender_subscribed = await sender.receive_json_from()
-            self.assertEqual(sender_subscribed["event"], "conversation.subscribed")
-
-            recipient, recipient_connected = await self._connect(self.user)
-            self.assertTrue(recipient_connected)
-            await recipient.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            recipient_subscribed = await recipient.receive_json_from()
-            self.assertEqual(recipient_subscribed["event"], "conversation.subscribed")
-            recipient_delivered = await self._receive_event(recipient, "message.delivered")
-            sender_delivered = await self._receive_event(sender, "message.delivered")
-            self.assertEqual(sender_delivered["data"]["user_id"], str(self.user.id))
-            self.assertEqual(sender_delivered["data"]["last_delivered_message_id"], self.message_id)
-            self.assertEqual(recipient_delivered["data"], sender_delivered["data"])
-            await recipient.disconnect()
-            await sender.disconnect()
-
-        asyncio.run(runner())
-
-    def test_active_recipient_read_event_reaches_sender(self):
-        import asyncio
-
-        async def runner():
-            sender, sender_connected = await self._connect(self.other)
-            recipient, recipient_connected = await self._connect(self.user)
-            self.assertTrue(sender_connected)
-            self.assertTrue(recipient_connected)
-
-            await sender.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            await recipient.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            await self._receive_event(sender, "conversation.subscribed")
-            await self._receive_event(recipient, "conversation.subscribed")
-            await self._receive_event(sender, "message.delivered")
-
-            await recipient.send_json_to({
-                "event": "message.read",
-                "data": {"conversation_id": self.conversation["id"], "message_id": self.message_id},
-            })
-            sender_read = await self._receive_event(sender, "message.read")
-            recipient_read = await self._receive_event(recipient, "message.read")
-            self.assertEqual(sender_read["data"]["user_id"], str(self.user.id))
-            self.assertEqual(sender_read["data"]["last_read_message_id"], self.message_id)
-            self.assertEqual(sender_read["data"], recipient_read["data"])
-            await recipient.disconnect()
-            await sender.disconnect()
-
-        asyncio.run(runner())
-
-    def test_websocket_send_edit_react_and_presence(self):
-        import asyncio
-
-        async def runner():
-            communicator, connected = await self._connect()
-            self.assertTrue(connected)
-            await communicator.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            await communicator.receive_json_from()
-            await communicator.receive_json_from()
-            await communicator.send_json_to({"event": "message.send", "data": {"conversation_id": self.conversation["id"], "text": "from ws", "client_temp_id": "tmp-1"}})
-            created = await communicator.receive_json_from()
-            self.assertEqual(created["event"], "message.created")
-            self.assertTrue(created.get("event_id"))
-            self.assertTrue(created.get("occurred_at"))
-            created_id = created["data"]["id"]
-
-            await communicator.send_json_to({"event": "message.edit", "data": {"conversation_id": self.conversation["id"], "message_id": created_id, "text": "edited"}})
-            updated = await self._receive_event(communicator, "message.updated")
-            self.assertEqual(updated["event"], "message.updated")
-            self.assertEqual(updated["data"]["text"], "edited")
-
-            await communicator.send_json_to({"event": "message.react", "data": {"conversation_id": self.conversation["id"], "message_id": self.message_id, "emoji": "👍"}})
-            reacted = await self._receive_event(communicator, "message.reaction_updated")
-            self.assertEqual(reacted["event"], "message.reaction_updated")
-
-            await communicator.send_json_to({"event": "presence.ping", "data": {}})
-            pong = await self._receive_event(communicator, "presence.pong")
-            self.assertEqual(pong["event"], "presence.pong")
-            await communicator.disconnect()
-
-        asyncio.run(runner())
-
-    def test_consumer_typing_does_not_echo_to_sender(self):
-        import asyncio
-
-        async def runner():
-            from apps.chat.consumers import ChatConsumer
-
-            consumer = ChatConsumer()
-            consumer.user = self.user
-            consumer.send_json = AsyncMock()
-
-            await consumer.chat_event({"event": "typing.started", "data": {"user_id": str(self.user.id)}})
-            consumer.send_json.assert_not_awaited()
-
-            await consumer.chat_event({"event": "typing.started", "data": {"user_id": str(self.other.id)}})
-            consumer.send_json.assert_awaited_once()
-
-        asyncio.run(runner())
 
 
 class ChatBackgroundTaskTests(TestCase):
@@ -3122,183 +2970,6 @@ class ChatBackgroundTaskTests(TestCase):
 
 
 
-@skipUnless(CHANNELS_AVAILABLE, "channels testing not available")
-@override_settings(CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}})
-class ChatWebsocketHardeningTests(TransactionTestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(username="hwsuser", password="pass12345")
-        self.other = User.objects.create_user(username="hwsother", password="pass12345")
-        client = APIClient()
-        client.force_authenticate(self.user)
-        self.conversation = client.post(reverse("conversation-list-create"), {"type": "direct", "participant_ids": [str(self.other.id)]}, format="json").data
-
-    async def _connect(self, user):
-        from config.asgi import application
-        token = str(AccessToken.for_user(user))
-        communicator = WebsocketCommunicator(application, f"/ws/chat/?token={token}")
-        connected, _ = await communicator.connect()
-        return communicator, connected
-
-    async def _receive_event(self, communicator, expected_event, *, max_events=12):
-        observed = []
-        for _ in range(max_events):
-            payload = await communicator.receive_json_from(timeout=2)
-            observed.append(payload.get("event"))
-            if payload.get("event") == expected_event:
-                return payload
-        self.fail(f"Expected websocket event {expected_event!r}; observed {observed!r}")
-
-    def test_websocket_read_delete_and_unreact_flow(self):
-        import asyncio
-
-        async def runner():
-            communicator, connected = await self._connect(self.user)
-            self.assertTrue(connected)
-            await communicator.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            subscribed = await communicator.receive_json_from()
-            self.assertEqual(subscribed["event"], "conversation.subscribed")
-            await communicator.send_json_to({"event": "message.send", "data": {"conversation_id": self.conversation["id"], "text": "ws msg"}})
-            created = await self._receive_event(communicator, "message.created")
-            message_id = created["data"]["id"]
-            await communicator.send_json_to({"event": "message.react", "data": {"conversation_id": self.conversation["id"], "message_id": message_id, "emoji": "🔥"}})
-            reacted = await self._receive_event(communicator, "message.reaction_updated")
-            self.assertEqual(reacted["event"], "message.reaction_updated")
-            await communicator.send_json_to({"event": "message.unreact", "data": {"conversation_id": self.conversation["id"], "message_id": message_id, "emoji": "🔥"}})
-            unreacted = await self._receive_event(communicator, "message.reaction_updated")
-            self.assertEqual(unreacted["event"], "message.reaction_updated")
-            await communicator.send_json_to({"event": "message.read", "data": {"conversation_id": self.conversation["id"], "message_id": message_id}})
-            read = await self._receive_event(communicator, "message.read")
-            self.assertEqual(read["event"], "message.read")
-            await communicator.send_json_to({"event": "message.delete", "data": {"conversation_id": self.conversation["id"], "message_id": message_id}})
-            deleted = await self._receive_event(communicator, "message.deleted")
-            self.assertEqual(deleted["event"], "message.deleted")
-            await communicator.disconnect()
-
-        asyncio.run(runner())
-
-    def test_two_users_receive_same_created_event(self):
-        import asyncio
-
-        async def runner():
-            user_ws, connected1 = await self._connect(self.user)
-            other_ws, connected2 = await self._connect(self.other)
-            self.assertTrue(connected1)
-            self.assertTrue(connected2)
-            await user_ws.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            await other_ws.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": self.conversation["id"]}})
-            await self._receive_event(user_ws, "conversation.subscribed")
-            await self._receive_event(other_ws, "conversation.subscribed")
-            await user_ws.send_json_to({"event": "message.send", "data": {"conversation_id": self.conversation["id"], "text": "broadcast"}})
-            event1 = await self._receive_event(user_ws, "message.created")
-            event2 = await self._receive_event(other_ws, "message.created")
-            self.assertEqual(event1["data"]["text"], "broadcast")
-            self.assertEqual(event2["data"]["text"], "broadcast")
-            await user_ws.disconnect()
-            await other_ws.disconnect()
-
-        asyncio.run(runner())
-
-    def test_connected_user_receives_conversation_update_without_manual_subscription(self):
-        import asyncio
-        from asgiref.sync import sync_to_async
-
-        async def runner():
-            other_ws, connected = await self._connect(self.other)
-            self.assertTrue(connected)
-            client = APIClient()
-            client.force_authenticate(self.user)
-            created = await sync_to_async(client.post)(
-                reverse("message-list-create", kwargs={"conversation_id": self.conversation["id"]}),
-                {"text": "hello inbox"},
-                format="json",
-            )
-            self.assertEqual(created.status_code, 201)
-            event = await self._receive_event(other_ws, "conversation.updated")
-            self.assertEqual(event["data"]["id"], self.conversation["id"])
-            self.assertEqual(event["data"]["last_message"]["text"], "hello inbox")
-            self.assertGreaterEqual(int(event["data"]["unread_count"]), 1)
-            await other_ws.disconnect()
-
-        asyncio.run(runner())
-
-    def test_targeted_call_signal_is_not_broadcast_to_non_recipient(self):
-        import asyncio
-
-        third = User.objects.create_user(username="hwsthird", password="pass12345")
-        client = APIClient()
-        client.force_authenticate(self.user)
-        conversation = client.post(
-            reverse("conversation-list-create"),
-            {"type": "group", "title": "Callers", "participant_ids": [str(self.other.id), str(third.id)]},
-            format="json",
-        ).data
-        call = client.post(
-            reverse("call-start", kwargs={"conversation_id": conversation["id"]}),
-            {"call_type": "video"},
-            format="json",
-        ).data
-
-        async def runner():
-            sender_ws, sender_connected = await self._connect(self.user)
-            recipient_ws, recipient_connected = await self._connect(self.other)
-            third_ws, third_connected = await self._connect(third)
-            self.assertTrue(sender_connected)
-            self.assertTrue(recipient_connected)
-            self.assertTrue(third_connected)
-
-            for communicator in (sender_ws, recipient_ws, third_ws):
-                await communicator.send_json_to({"event": "conversation.subscribe", "data": {"conversation_id": conversation["id"]}})
-                await self._receive_event(communicator, "conversation.subscribed")
-
-            await sender_ws.send_json_to(
-                {
-                    "event": "call.signal",
-                    "data": {
-                        "call_id": call["id"],
-                        "to_user_id": str(self.other.id),
-                        "signal_type": "offer",
-                        "payload": {"sdp": "secret-offer"},
-                    },
-                }
-            )
-
-            recipient_event = await self._receive_event(recipient_ws, "call.signal")
-            self.assertEqual(recipient_event["data"]["payload"]["sdp"], "secret-offer")
-            self.assertEqual(recipient_event["data"]["to_user_id"], str(self.other.id))
-
-            async def assert_no_call_signal(communicator):
-                deadline = asyncio.get_running_loop().time() + 0.3
-                while True:
-                    remaining = deadline - asyncio.get_running_loop().time()
-                    if remaining <= 0:
-                        return
-                    try:
-                        event = await asyncio.wait_for(communicator.receive_json_from(), timeout=remaining)
-                    except asyncio.TimeoutError:
-                        return
-                    self.assertNotEqual(event.get("event"), "call.signal")
-
-            await assert_no_call_signal(sender_ws)
-            await assert_no_call_signal(third_ws)
-
-            await sender_ws.disconnect()
-            await recipient_ws.disconnect()
-            await third_ws.disconnect()
-
-        asyncio.run(runner())
-
-    def test_websocket_rejects_unsubscribed_conversation_access(self):
-        import asyncio
-
-        async def runner():
-            communicator, connected = await self._connect(self.other)
-            self.assertTrue(connected)
-            await communicator.send_json_to({"event": "message.send", "data": {"conversation_id": "00000000-0000-0000-0000-000000000000", "text": "bad"}})
-            error = await communicator.receive_json_from()
-            self.assertEqual(error["event"], "error")
-            await communicator.disconnect()
-
-        asyncio.run(runner())
 
 
 class ChatIntegrationUtilityTests(TestCase):
@@ -3433,7 +3104,10 @@ class PlatformStabilityTests(TestCase):
         self.assertIn("migrations:", output)
 
     @override_settings(
-        CHANNEL_LAYERS={"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}},
+        REALTIME_TRANSPORT="disabled",
+        REALTIME_STREAM_ENABLED=False,
+        REALTIME_OUTBOX_ENABLED=False,
+        REALTIME_AUTH_ENABLED=False,
         CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "health-tests"}},
         CELERY_TASK_ALWAYS_EAGER=True,
         EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend",
@@ -3442,9 +3116,12 @@ class PlatformStabilityTests(TestCase):
         out = StringIO()
         call_command("check_chat_readiness", stdout=out)
         output = out.getvalue()
-        self.assertIn("channel layer hosts: in-memory", output)
+        self.assertIn("realtime transport: disabled", output)
         self.assertIn("Readiness warnings:", output)
-        self.assertIn("Channel layer is in-memory", output)
+        self.assertIn("REALTIME_TRANSPORT is not axum", output)
+        self.assertIn("Realtime Redis Stream delivery is disabled", output)
+        self.assertIn("Realtime outbox durability is disabled", output)
+        self.assertIn("Realtime ticket authentication is disabled", output)
         self.assertIn("Cache backend is local memory", output)
         self.assertIn("Celery tasks are running eagerly", output)
         self.assertIn("Email backend is console", output)
@@ -3764,6 +3441,13 @@ class CallingV15UpgradeTests(APITestCase):
         self.assertFalse(response.data["audio_enabled"])
         self.assertTrue(response.data["is_on_hold"])
 
+    @override_settings(
+        TURN_PROVIDER="legacy",
+        TURN_URIS_JSON="",
+        TURN_SHARED_SECRET="",
+        TURN_STATIC_USERNAME="",
+        TURN_STATIC_PASSWORD="",
+    )
     def test_turn_credentials_endpoint(self):
         url = "/api/v1/chat/calls/turn-credentials/"
         response = self.client.get(url)
@@ -3771,6 +3455,7 @@ class CallingV15UpgradeTests(APITestCase):
         self.assertIn("configured", response.data)
 
     @override_settings(
+        TURN_PROVIDER="legacy",
         TURN_URIS_JSON='["turn:turn.example.com:3478?transport=udp"]',
         TURN_SHARED_SECRET="",
         TURN_STATIC_USERNAME="turn-user",
@@ -3783,6 +3468,53 @@ class CallingV15UpgradeTests(APITestCase):
         self.assertTrue(response.data["configured"])
         self.assertEqual(response.data["ice_servers"][0]["username"], "turn-user")
         self.assertEqual(response.data["ice_servers"][0]["credential"], "turn-pass")
+
+    @override_settings(
+        TURN_PROVIDER="cloudflare",
+        CLOUDFLARE_TURN_KEY_ID="turn-key-1",
+        CLOUDFLARE_TURN_API_TOKEN="turn-api-token-1",
+        CLOUDFLARE_TURN_API_BASE_URL="https://rtc.live.cloudflare.com/v1/turn",
+        CLOUDFLARE_TURN_FILTER_BROWSER_PORT_53=True,
+        TURN_CREDENTIAL_TTL_SECONDS=3600,
+    )
+    @patch("apps.chat.services.requests.post")
+    def test_turn_credentials_endpoint_generates_cloudflare_ice_servers(self, mock_post):
+        cache.clear()
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "iceServers": [
+                {"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"]},
+                {
+                    "urls": [
+                        "turn:turn.cloudflare.com:3478?transport=udp",
+                        "turn:turn.cloudflare.com:53?transport=udp",
+                        "turns:turn.cloudflare.com:443?transport=tcp",
+                        "turns:turn.cloudflare.com:5349?transport=tcp",
+                    ],
+                    "username": "temporary-user",
+                    "credential": "temporary-password",
+                },
+            ]
+        }
+        mock_post.return_value = response
+
+        result = self.client.get("/api/v1/chat/calls/turn-credentials/")
+
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(result.data["configured"])
+        self.assertEqual(result.data["provider"], "cloudflare")
+        self.assertEqual(result.data["ice_servers"][1]["username"], "temporary-user")
+        serialized_servers = json.dumps(result.data["ice_servers"])
+        self.assertNotIn("turn.cloudflare.com:53?", serialized_servers)
+        self.assertNotIn('stun.cloudflare.com:53"', serialized_servers)
+        self.assertIn("turn.cloudflare.com:5349?", serialized_servers)
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.call_args.kwargs["json"], {"ttl": 3600})
+        self.assertEqual(
+            mock_post.call_args.kwargs["headers"]["Authorization"],
+            "Bearer turn-api-token-1",
+        )
 
     def test_call_diagnostics_endpoint(self):
         url = reverse("chat:call-diagnostics", kwargs={"call_id": self.call.id})

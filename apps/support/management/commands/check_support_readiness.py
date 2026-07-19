@@ -46,17 +46,26 @@ class Command(BaseCommand):
         if calls_enabled:
             if not widget_enabled:
                 failures.append("The public widget must be enabled for visitor calls.")
-            if not str(getattr(settings, "TURN_URIS_JSON", "") or "").strip():
-                failures.append("TURN_URIS_JSON is not configured.")
-            has_turn_auth = bool(str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()) or bool(
-                str(getattr(settings, "TURN_STATIC_USERNAME", "") or "").strip()
-                and str(getattr(settings, "TURN_STATIC_PASSWORD", "") or "").strip()
-            )
-            if not has_turn_auth:
-                failures.append("TURN authentication is not configured.")
-            backend = str(settings.CHANNEL_LAYERS.get("default", {}).get("BACKEND", "") or "")
-            if backend.endswith("InMemoryChannelLayer"):
-                failures.append("Guest calls require a shared Redis channel layer.")
+            turn_provider = str(getattr(settings, "TURN_PROVIDER", "legacy") or "legacy").strip().lower()
+            self.stdout.write(f"- TURN provider: {turn_provider}")
+            if turn_provider == "cloudflare":
+                if not str(getattr(settings, "CLOUDFLARE_TURN_KEY_ID", "") or "").strip():
+                    failures.append("CLOUDFLARE_TURN_KEY_ID is not configured.")
+                if not str(getattr(settings, "CLOUDFLARE_TURN_API_TOKEN", "") or "").strip():
+                    failures.append("CLOUDFLARE_TURN_API_TOKEN is not configured.")
+            else:
+                if not str(getattr(settings, "TURN_URIS_JSON", "") or "").strip():
+                    failures.append("TURN_URIS_JSON is not configured for legacy TURN.")
+                has_turn_auth = bool(str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()) or bool(
+                    str(getattr(settings, "TURN_STATIC_USERNAME", "") or "").strip()
+                    and str(getattr(settings, "TURN_STATIC_PASSWORD", "") or "").strip()
+                )
+                if not has_turn_auth:
+                    failures.append("Legacy TURN authentication is not configured.")
+            if str(getattr(settings, "REALTIME_TRANSPORT", "") or "").lower() != "axum":
+                failures.append("Guest calls require the Axum realtime transport.")
+            if not bool(getattr(settings, "REALTIME_STREAM_ENABLED", False)):
+                failures.append("Guest calls require the realtime Redis Stream bridge.")
 
         beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None)
         if beat_schedule is None:

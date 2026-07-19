@@ -485,10 +485,11 @@ export function AppShell() {
         const messageId = String(message.id || payload.data?.message_id || "");
         const chatIsOpenAtLatest = isConversationActivelyViewedAtLatest(conversationId);
         if (sender && !isSameUserIdentity(sender, user) && conversationId && messageId) {
-          socket.send({ event: "message.delivered", data: { conversation_id: conversationId, message_id: messageId } });
           if (chatIsOpenAtLatest) {
             markConversationReadInCaches(queryClient, conversationId);
-            socket.send({ event: "message.read", data: { conversation_id: conversationId, message_id: messageId } });
+            void chatApi.markConversationRead(conversationId, { message_id: messageId }).then((receipt) => {
+              patchConversationReceiptCaches(queryClient, conversationId, "message.read", receipt);
+            }).catch(() => undefined);
           }
           void chatApi.markConversationDelivered(conversationId, { message_id: messageId }).then((receipt) => {
             patchConversationReceiptCaches(queryClient, conversationId, "message.delivered", receipt);

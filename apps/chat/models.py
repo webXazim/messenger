@@ -287,7 +287,27 @@ class Message(BaseUUIDModel):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["conversation", "-created_at"]), models.Index(fields=["sender", "-created_at"])]
+        indexes = [
+            models.Index(fields=["conversation", "-created_at"]),
+            models.Index(fields=["sender", "-created_at"]),
+            models.Index(
+                fields=["conversation", "created_at", "id"],
+                condition=models.Q(is_deleted=False),
+                name="chat_msg_conv_live_time_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "sender", "client_temp_id"],
+                condition=models.Q(client_temp_id__gt="", sender__isnull=False),
+                name="uniq_msg_conv_sender_client_tmp",
+            ),
+            models.UniqueConstraint(
+                fields=["conversation", "client_temp_id"],
+                condition=models.Q(client_temp_id__gt="", sender__isnull=True),
+                name="uniq_msg_conv_external_client_tmp",
+            ),
+        ]
 
 
 class MessageEditHistory(BaseUUIDModel):
@@ -517,7 +537,10 @@ class UserBlock(BaseUUIDModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["blocker", "blocked"], name="uniq_blocker_blocked")]
-        indexes = [models.Index(fields=["blocker", "blocked"])]
+        indexes = [
+            models.Index(fields=["blocker", "blocked"]),
+            models.Index(fields=["blocked", "blocker"], name="chat_block_reverse_idx"),
+        ]
 
 
 class MessageReport(BaseUUIDModel):

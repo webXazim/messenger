@@ -1,4 +1,10 @@
+from datetime import timedelta
+
 from celery import shared_task
+from django.conf import settings
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 
 from apps.support.service_operations import scan_service_operations
 from apps.support.services import support_chat_enabled
@@ -22,21 +28,46 @@ def deliver_support_webhook(delivery_id: str):
     return str(deliver_webhook(delivery).status)
 
 
-@shared_task(name="apps.support.tasks.retry_pending_support_webhooks")
+@shared_task(name="apps.support.tasks.retry_pending_support_webhooks", ignore_result=True)
 def retry_pending_support_webhooks():
-    from django.utils import timezone
-    from apps.support.models import SupportWebhookDelivery
-    from apps.support.webhook_services import deliver_webhook
+    """Lease due webhook deliveries and fan them out to short worker tasks.
 
-    deliveries = list(
-        SupportWebhookDelivery.objects.filter(
-            status=SupportWebhookDelivery.Status.PENDING,
-            next_attempt_at__lte=timezone.now(),
-        ).order_by("next_attempt_at")[:100]
-    )
-    for delivery in deliveries:
-        deliver_webhook(delivery)
-    return len(deliveries)
+    The lease prevents overlapping Celery Beat executions from dispatching the
+    same delivery repeatedly. Stale PROCESSING rows are reclaimed after a
+    bounded timeout so a terminated worker cannot strand them forever.
+    """
+    from apps.support.models import SupportWebhookDelivery
+
+    now = timezone.now()
+    batch_size = max(1, min(500, int(getattr(settings, "SUPPORT_WEBHOOK_DISPATCH_BATCH_SIZE", 100))))
+    lease_seconds = max(30, int(getattr(settings, "SUPPORT_WEBHOOK_LEASE_SECONDS", 120)))
+    stale_before = now - timedelta(seconds=lease_seconds)
+    with transaction.atomic():
+        deliveries = list(
+            SupportWebhookDelivery.objects.select_for_update(skip_locked=True)
+            .filter(
+                Q(status=SupportWebhookDelivery.Status.PENDING, next_attempt_at__lte=now)
+                | Q(status=SupportWebhookDelivery.Status.PROCESSING, updated_at__lte=stale_before)
+            )
+            .order_by("next_attempt_at", "id")[:batch_size]
+        )
+        ids = [delivery.id for delivery in deliveries]
+        if ids:
+            SupportWebhookDelivery.objects.filter(id__in=ids).update(
+                status=SupportWebhookDelivery.Status.PROCESSING,
+                updated_at=now,
+            )
+
+    dispatched = 0
+    for delivery_id in ids:
+        try:
+            deliver_support_webhook.apply_async(args=[str(delivery_id)], expires=lease_seconds)
+            dispatched += 1
+        except Exception:
+            SupportWebhookDelivery.objects.filter(
+                id=delivery_id, status=SupportWebhookDelivery.Status.PROCESSING
+            ).update(status=SupportWebhookDelivery.Status.PENDING, next_attempt_at=now, updated_at=timezone.now())
+    return dispatched
 
 
 @shared_task(name="apps.support.tasks.generate_support_data_export")

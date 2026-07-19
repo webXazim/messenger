@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import re
+import requests
 import shutil
 import subprocess
 import time
@@ -30,6 +31,13 @@ from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
+
+from apps.common.realtime_presence import (
+    read_many_user_presence,
+    read_user_presence,
+    remove_user_presence,
+    upsert_user_presence,
+)
 
 from .antivirus import scan_file_field
 from .models import (
@@ -1444,12 +1452,12 @@ def get_active_call_for_conversation(conversation):
         conversation=conversation,
         status__in=[CallSession.Status.INITIATED, CallSession.Status.RINGING],
         started_at__lt=_ring_timeout_cutoff(),
-    ).select_related("conversation", "initiated_by").prefetch_related("participants__user"):
+    ).select_related("conversation", "initiated_by", "initiated_by__profile").prefetch_related("participants__user__profile"):
         expire_ringing_call(stale_call)
     return CallSession.objects.filter(
         conversation=conversation,
         status__in=ACTIVE_CALL_STATUSES,
-    ).select_related("initiated_by", "answered_by").prefetch_related("participants__user").first()
+    ).select_related("initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile").first()
 
 
 def _ring_timeout_cutoff():
@@ -1635,8 +1643,97 @@ def get_call_orchestration(call, recipient=None, *, consume_signals=True):
     return payload
 
 
+def _is_cloudflare_browser_port_53_url(value: str) -> bool:
+    # TURN/STUN URLs are URI-like rather than ordinary HTTP URLs. Match an
+    # explicit `:53` authority port only, without treating `:5349` as port 53.
+    return bool(re.search(r":53(?:[/?]|$)", str(value or ""), flags=re.IGNORECASE))
+
+
+def _filter_cloudflare_browser_urls(urls):
+    if not bool(getattr(settings, "CLOUDFLARE_TURN_FILTER_BROWSER_PORT_53", True)):
+        return urls
+    if isinstance(urls, str):
+        return [] if _is_cloudflare_browser_port_53_url(urls) else urls
+    if isinstance(urls, list):
+        return [
+            value
+            for value in urls
+            if isinstance(value, str) and not _is_cloudflare_browser_port_53_url(value)
+        ]
+    return urls
+
+
+def _cloudflare_turn_credentials(actor, ttl):
+    key_id = str(getattr(settings, "CLOUDFLARE_TURN_KEY_ID", "") or "").strip()
+    api_token = str(getattr(settings, "CLOUDFLARE_TURN_API_TOKEN", "") or "").strip()
+    base_url = str(
+        getattr(settings, "CLOUDFLARE_TURN_API_BASE_URL", "https://rtc.live.cloudflare.com/v1/turn")
+        or "https://rtc.live.cloudflare.com/v1/turn"
+    ).strip().rstrip("/")
+    if not key_id or not api_token or not base_url.startswith("https://"):
+        return {"configured": False, "provider": "cloudflare", "ttl_seconds": ttl, "ice_servers": []}
+
+    identity = str(getattr(actor, "id", "anonymous") or "anonymous")
+    cache_identity = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+    cache_key = f"turn:cloudflare:{key_id}:{cache_identity}:{ttl}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, dict) and cached.get("ice_servers"):
+        return cached
+
+    endpoint = f"{base_url}/keys/{key_id}/credentials/generate-ice-servers"
+    try:
+        response = requests.post(
+            endpoint,
+            headers={
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json",
+            },
+            json={"ttl": ttl},
+            timeout=float(getattr(settings, "CLOUDFLARE_TURN_REQUEST_TIMEOUT_SECONDS", 5) or 5),
+        )
+        response.raise_for_status()
+        body = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Cloudflare TURN credential generation failed: %s", exc.__class__.__name__)
+        return {"configured": False, "provider": "cloudflare", "ttl_seconds": ttl, "ice_servers": []}
+
+    raw_servers = body.get("iceServers") if isinstance(body, dict) else None
+    if not isinstance(raw_servers, list):
+        logger.warning("Cloudflare TURN response did not contain an iceServers list.")
+        return {"configured": False, "provider": "cloudflare", "ttl_seconds": ttl, "ice_servers": []}
+
+    ice_servers = []
+    for item in raw_servers:
+        if not isinstance(item, dict):
+            continue
+        urls = _filter_cloudflare_browser_urls(item.get("urls", []))
+        if not urls:
+            continue
+        server = {"urls": urls}
+        username = str(item.get("username") or "")
+        credential = str(item.get("credential") or "")
+        if username and credential:
+            server.update({"username": username, "credential": credential, "credentialType": "password"})
+        ice_servers.append(server)
+    if not ice_servers:
+        return {"configured": False, "provider": "cloudflare", "ttl_seconds": ttl, "ice_servers": []}
+
+    payload = {
+        "configured": True,
+        "provider": "cloudflare",
+        "ttl_seconds": ttl,
+        "ice_servers": ice_servers,
+    }
+    cache.set(cache_key, payload, timeout=max(60, ttl - min(120, ttl // 4)))
+    return payload
+
+
 def get_turn_credentials(actor=None):
-    ttl = int(getattr(settings, "TURN_CREDENTIAL_TTL_SECONDS", 3600) or 3600)
+    ttl = int(getattr(settings, "TURN_CREDENTIAL_TTL_SECONDS", 21600) or 21600)
+    provider = str(getattr(settings, "TURN_PROVIDER", "legacy") or "legacy").strip().lower()
+    if provider == "cloudflare":
+        return _cloudflare_turn_credentials(actor, ttl)
+
     uris_raw = getattr(settings, "TURN_URIS_JSON", "").strip()
     uris = []
     if uris_raw:
@@ -1647,7 +1744,7 @@ def get_turn_credentials(actor=None):
         except json.JSONDecodeError:
             logger.warning("Invalid TURN_URIS_JSON; skipping TURN credential payload.")
     if not uris:
-        return {"configured": False, "ttl_seconds": ttl, "ice_servers": []}
+        return {"configured": False, "provider": "legacy", "ttl_seconds": ttl, "ice_servers": []}
 
     static_username = getattr(settings, "TURN_STATIC_USERNAME", "").strip()
     static_password = getattr(settings, "TURN_STATIC_PASSWORD", "").strip()
@@ -1655,12 +1752,13 @@ def get_turn_credentials(actor=None):
     now_ts = int(timezone.now().timestamp())
     username_hint = str(getattr(actor, "id", "anonymous"))
     if shared_secret:
-        import base64, hashlib, hmac
+        import base64, hmac
         expiry = now_ts + ttl
         username = f"{expiry}:{username_hint}"
         credential = base64.b64encode(hmac.new(shared_secret.encode(), username.encode(), hashlib.sha1).digest()).decode()
         return {
             "configured": True,
+            "provider": "legacy",
             "ttl_seconds": ttl,
             "username": username,
             "credential": credential,
@@ -1670,13 +1768,14 @@ def get_turn_credentials(actor=None):
     if static_username and static_password:
         return {
             "configured": True,
+            "provider": "legacy",
             "ttl_seconds": ttl,
             "username": static_username,
             "credential": static_password,
             "credential_type": "password",
             "ice_servers": [{"urls": uris, "username": static_username, "credential": static_password}],
         }
-    return {"configured": False, "ttl_seconds": ttl, "ice_servers": []}
+    return {"configured": False, "provider": "legacy", "ttl_seconds": ttl, "ice_servers": []}
 
 
 def get_call_diagnostics(call):
@@ -1824,21 +1923,9 @@ def _presence_cache_lock(user_id):
 
 
 def _active_presence_devices(user_id, *, now_ts=None):
-    ttl = max(int(getattr(settings, "PRESENCE_TTL_SECONDS", 75) or 75), 15)
-    now_ts = float(now_ts or timezone.now().timestamp())
-    raw = cache.get(_presence_user_key(user_id)) or {}
-    registry = raw if isinstance(raw, dict) else {}
-    active = {}
-    for device_id, value in registry.items():
-        record = _normalize_presence_device_record(value)
-        if str(device_id) and record and now_ts - record["last_seen"] < ttl:
-            active[str(device_id)] = record
-    if active != registry:
-        if active:
-            cache.set(_presence_user_key(user_id), active, timeout=ttl * 2)
-        else:
-            cache.delete(_presence_user_key(user_id))
-    return active
+    # Axum owns live socket presence and writes the shared Redis hash. Django
+    # reads the same structure for REST responses and privacy-aware snapshots.
+    return read_user_presence(user_id)
 
 
 def get_presence_snapshot(user_id):
@@ -1846,56 +1933,43 @@ def get_presence_snapshot(user_id):
     return _presence_snapshot_from_devices(active_devices)
 
 
+def get_presence_snapshots(user_ids):
+    """Return normalized presence snapshots with one Redis pipeline."""
+
+    registries = read_many_user_presence(user_ids)
+    return {
+        str(user_id): _presence_snapshot_from_devices(active_devices)
+        for user_id, active_devices in registries.items()
+    }
+
+
 def is_user_online(user_id):
     return get_presence_snapshot(user_id)["is_online"]
 
 
 def set_presence(user, device_id="default", *, device_type=None, presence_status="active"):
-    ttl = max(int(getattr(settings, "PRESENCE_TTL_SECONDS", 75) or 75), 15)
-    device_id = str(device_id or "default")[:160]
     normalized_status = _normalize_presence_status(presence_status)
     now = timezone.now()
-    with _presence_cache_lock(user.id):
-        registry = _active_presence_devices(user.id, now_ts=now.timestamp())
-        registry[device_id] = {
-            "last_seen": now.timestamp(),
-            "device_type": _normalize_presence_device_type(device_type),
-            "presence_status": normalized_status,
-        }
-        cache.set(_presence_user_key(user.id), registry, timeout=ttl * 2)
+    registry = upsert_user_presence(
+        user.id,
+        str(device_id or "default")[:200],
+        device_type=_normalize_presence_device_type(device_type),
+        presence_status=normalized_status,
+        last_seen=now.timestamp(),
+    )
     if normalized_status == "active":
         type(user).objects.filter(id=user.id).update(last_seen_at=now)
     return _presence_snapshot_from_devices(registry)
 
 
 def clear_presence(user, device_id="default", *, include_device_connections=False):
-    ttl = max(int(getattr(settings, "PRESENCE_TTL_SECONDS", 75) or 75), 15)
-    device_id = str(device_id or "default")[:160]
     now = timezone.now()
-    removed_was_active = False
-    with _presence_cache_lock(user.id):
-        registry = _active_presence_devices(user.id, now_ts=now.timestamp())
-        if include_device_connections:
-            prefix = f"{device_id}:"
-            removed_was_active = any(
-                record.get("presence_status") == "active"
-                for registered_id, record in registry.items()
-                if registered_id == device_id or registered_id.startswith(prefix)
-            )
-            registry = {
-                registered_id: record
-                for registered_id, record in registry.items()
-                if registered_id != device_id and not registered_id.startswith(prefix)
-            }
-        else:
-            removed = registry.pop(device_id, None)
-            removed_was_active = bool(removed and removed.get("presence_status") == "active")
-        if registry:
-            cache.set(_presence_user_key(user.id), registry, timeout=ttl * 2)
-        else:
-            cache.delete(_presence_user_key(user.id))
-    if removed_was_active:
-        type(user).objects.filter(id=user.id).update(last_seen_at=now)
+    registry = remove_user_presence(
+        user.id,
+        str(device_id or "default")[:200],
+        prefix=include_device_connections,
+    )
+    type(user).objects.filter(id=user.id).update(last_seen_at=now)
     return _presence_snapshot_from_devices(registry)
 
 
@@ -2219,35 +2293,18 @@ def scan_upload_file(upload, initial_bytes=None):
 
 
 def make_realtime_event(event_name, data, *, event_id=None, occurred_at=None):
-    """Build a stable, deduplicatable websocket event envelope."""
-    return make_realtime_safe({
-        "type": "chat.event",
-        "event": str(event_name),
-        "event_id": str(event_id or uuid4().hex),
-        "occurred_at": occurred_at or timezone.now().isoformat(),
-        "data": data or {},
-    })
+    """Compatibility wrapper around the transport-neutral event envelope."""
+    return build_realtime_event(
+        event_name,
+        data,
+        event_id=event_id,
+        occurred_at=occurred_at,
+    )
 
 
 def make_realtime_safe(value):
-    """Convert non-msgpack-safe objects into websocket/cache-safe primitives."""
-    from datetime import date, datetime
-    from decimal import Decimal
-    from uuid import UUID
-
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(k): make_realtime_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [make_realtime_safe(v) for v in value]
-    return value
+    """Compatibility wrapper for existing serializers and consumers."""
+    return normalize_realtime_value(value)
 
 def build_media_access_token(*, resource_type, resource_id, user_id=None, purpose="standard"):
     payload = {
@@ -3265,8 +3322,8 @@ def _ensure_call_access(actor, call):
 
 def _reload_call_for_response(call):
     return (
-        CallSession.objects.select_related("conversation", "initiated_by", "answered_by")
-        .prefetch_related("participants__user")
+        CallSession.objects.select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile")
+        .prefetch_related("participants__user__profile")
         .get(id=call.id)
     )
 
@@ -4075,10 +4132,10 @@ def list_recent_calls_for_user(user, *, status_filter=None):
         participants__user=user,
         status__in=[CallSession.Status.INITIATED, CallSession.Status.RINGING],
         started_at__lt=_ring_timeout_cutoff(),
-    ).distinct().select_related("conversation", "initiated_by").prefetch_related("participants__user")
+    ).distinct().select_related("conversation", "initiated_by", "initiated_by__profile").prefetch_related("participants__user__profile")
     for call in stale_calls:
         expire_ringing_call(call)
-    qs = CallSession.objects.filter(participants__user=user).distinct().select_related("conversation", "initiated_by", "answered_by").prefetch_related("participants__user")
+    qs = CallSession.objects.filter(participants__user=user).distinct().select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile")
     if status_filter:
         qs = qs.filter(status=status_filter)
     return qs.order_by("-started_at")

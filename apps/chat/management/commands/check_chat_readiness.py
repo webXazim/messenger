@@ -13,8 +13,10 @@ class Command(BaseCommand):
         cache_ok, cache_detail = cache_ready()
         migrations_ok, migrations_detail = migrations_ready()
         integrations = integration_health_snapshot()
-        channel_backend = settings.CHANNEL_LAYERS.get("default", {}).get("BACKEND", "")
-        channel_hosts = settings.CHANNEL_LAYERS.get("default", {}).get("CONFIG", {}).get("hosts", [])
+        realtime_transport = str(getattr(settings, "REALTIME_TRANSPORT", "") or "")
+        realtime_stream_enabled = bool(getattr(settings, "REALTIME_STREAM_ENABLED", False))
+        realtime_outbox_enabled = bool(getattr(settings, "REALTIME_OUTBOX_ENABLED", False))
+        realtime_auth_enabled = bool(getattr(settings, "REALTIME_AUTH_ENABLED", False))
         cache_backend = settings.CACHES.get("default", {}).get("BACKEND", "")
 
         rows = [
@@ -25,14 +27,17 @@ class Command(BaseCommand):
             ("cache", f"{'ok' if cache_ok else 'fail'} ({cache_detail})"),
             ("migrations", f"{'ok' if migrations_ok else 'fail'} ({migrations_detail})"),
             ("db engine", settings.DB_ENGINE),
-            ("channel layer backend", channel_backend),
-            ("channel layer hosts", channel_hosts or "in-memory"),
+            ("realtime transport", realtime_transport),
+            ("realtime stream", realtime_stream_enabled),
+            ("realtime outbox", realtime_outbox_enabled),
+            ("realtime auth", realtime_auth_enabled),
             ("cache backend", cache_backend),
             ("ssl redirect", settings.SECURE_SSL_REDIRECT),
             ("hsts seconds", settings.SECURE_HSTS_SECONDS),
             ("session cookie secure", settings.SESSION_COOKIE_SECURE),
             ("csrf cookie secure", settings.CSRF_COOKIE_SECURE),
             ("db conn max age", settings.DATABASE_CONN_MAX_AGE),
+            ("db conn health checks", settings.DATABASE_CONN_HEALTH_CHECKS),
             ("celery eager", settings.CELERY_TASK_ALWAYS_EAGER),
             ("upload scan async", settings.UPLOAD_SCAN_ASYNC),
             ("email backend", settings.EMAIL_BACKEND),
@@ -57,14 +62,22 @@ class Command(BaseCommand):
             issues.append("CSRF_COOKIE_SECURE is disabled")
         if settings.DB_ENGINE != "postgres":
             issues.append("DB_ENGINE is not postgres")
+        if not settings.DATABASE_CONN_HEALTH_CHECKS:
+            issues.append("Database connection health checks are disabled")
         if not migrations_ok:
             issues.append("There are unapplied migrations")
         if not cache_ok:
             issues.append("Cache is not healthy")
         if not db_ok:
             issues.append("Database is not healthy")
-        if str(channel_backend).endswith("InMemoryChannelLayer"):
-            issues.append("Channel layer is in-memory")
+        if realtime_transport.lower() != "axum":
+            issues.append("REALTIME_TRANSPORT is not axum")
+        if not realtime_stream_enabled:
+            issues.append("Realtime Redis Stream delivery is disabled")
+        if not realtime_outbox_enabled:
+            issues.append("Realtime outbox durability is disabled")
+        if not realtime_auth_enabled:
+            issues.append("Realtime ticket authentication is disabled")
         if str(cache_backend).endswith("LocMemCache"):
             issues.append("Cache backend is local memory")
         if settings.CELERY_TASK_ALWAYS_EAGER:

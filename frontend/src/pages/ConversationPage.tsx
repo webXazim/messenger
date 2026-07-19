@@ -663,7 +663,6 @@ export function ConversationPage() {
     const receiptKey = `${targetConversationId}:${messageId}`;
     if (lastReadReceiptMessageRef.current === receiptKey) return;
     lastReadReceiptMessageRef.current = receiptKey;
-    socket.send({ event: "message.read", data: { conversation_id: targetConversationId, message_id: messageId } });
     void chatApi.markConversationRead(targetConversationId, { message_id: messageId }).then((receipt) => {
       applyParticipantReceiptInCache(targetConversationId, "message.read", receipt, queryClient);
       markConversationReadInCaches(queryClient, targetConversationId);
@@ -1006,7 +1005,6 @@ export function ConversationPage() {
     const receiptKey = `${conversationId}:${latestMessageId}`;
     if (lastDeliveredReceiptMessageRef.current === receiptKey) return;
     lastDeliveredReceiptMessageRef.current = receiptKey;
-    socket.send({ event: "message.delivered", data: { conversation_id: conversationId, message_id: latestMessageId } });
     void chatApi.markConversationDelivered(conversationId, { message_id: latestMessageId }).then((receipt) => {
       applyParticipantReceiptInCache(conversationId, "message.delivered", receipt, queryClient);
     }).catch(() => {

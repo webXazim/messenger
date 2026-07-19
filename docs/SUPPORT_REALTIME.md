@@ -1,84 +1,74 @@
 # Support Chat realtime and notification boundaries
 
-Support Chat uses the existing Django Channels, Redis, ASGI, and frontend shell,
-but it does not use Messenger conversation groups or Messenger unread state.
+Support Chat and personal Messenger share the Axum `/ws` transport, but their audiences, grants, message models, unread state, and business workflows remain isolated.
 
-## WebSocket routes
+## Connection and authorization
 
-- Authenticated owner/agent: `/ws/support/?token=<access-token>`
-- Website visitor: `/ws/support/widget/<site-key>/?session_id=<id>&token=<visitor-token>`
+Both authenticated owners/agents and public website visitors first request a short-lived Django-issued realtime ticket. The browser then connects to:
 
-The authenticated socket joins only:
+```text
+/ws?ticket=<single-use-ticket>
+```
 
-- `support.user.<user-id>`
-- `support.website.<website-id>` for websites currently visible to that owner or agent
+Django validates business access before signing tickets or audience grants. Axum validates the RSA signature, issuer, audience, expiry, protocol version, actor identity, and browser Origin without querying PostgreSQL.
 
-The visitor socket joins only:
+An authenticated owner or agent receives only its own self audience automatically. Each `support_website` subscription requires a short-lived grant for that exact actor, Origin, and website.
 
-- `support.visitor.<visitor-id>`
+A public widget ticket is bound to its visitor session, website, support conversation, and the website-specific allowed Origin. The widget receives only its own `support_visitor` audience automatically.
 
-Messenger continues using its existing `/ws/chat/` route and groups.
+Messenger conversation grants cannot authorize Support Chat audiences, and Support Chat grants cannot authorize Messenger conversations.
 
-## Permission enforcement
+## Event delivery
 
-Joining a channel group is not treated as authorization. Every outbound Support
-event is rechecked against the current database permissions before it is sent to
-the socket. Website assignment changes publish a user-scoped
-`support.access.updated` event. An open agent socket then drops removed website
-groups and subscribes to newly assigned website groups immediately.
+Durable Support Chat actions remain Django HTTP operations:
 
-Visitor sockets revalidate the website, origin, visitor, session, and conversation
-for every delivered event. Disabling Support Chat, revoking an agent, disabling a
-website, rotating its site key, or revoking a visitor session prevents further
-access without changing Messenger.
+- Visitor and agent messages
+- Delivery/read positions
+- Agent assignment and workflow changes
+- Call lifecycle and signaling records
+- Website and subscription changes
 
-## Events
+Django commits the business state and its realtime outbox row in PostgreSQL, publishes the event to the Redis Stream, and Axum delivers it to matching local sockets.
 
-- `support.ready`
+Disposable events use Axum directly:
+
+- `support.ping` / `support.pong`
+- Visitor and agent typing
+- Visitor presence heartbeats
+
+## Main events
+
 - `support.widget.ready`
 - `support.message.created`
 - `support.conversation.updated`
 - `support.website.updated`
 - `support.access.updated`
-- `support.ping`
-- `support.pong`
+- `support.visitor.presence`
+- `support.typing.started`
+- `support.typing.stopped`
+- `support.call.signal`
+- `support.call.accepted`
+- `support.call.media_updated`
+- `support.call.ended`
 
-Message events include the website and conversation identifiers required to
-refresh the isolated Support inbox. Generic website refresh events contain no
-visitor message body and allow restricted agents to safely remove stale rows after
-assignment changes.
+## Access changes
+
+Assignment, role, website, plan, and session changes are enforced by Django when a new ticket or grant is requested. Access-changing durable events tell the frontend to refresh its authorized website list and unsubscribe stale audiences. Tickets and grants are deliberately short-lived so an old browser session cannot retain access indefinitely.
 
 ## Reconnect and fallback
 
-The Support frontend and public website widget use exponential reconnect, heartbeat
-pings, event deduplication, and access-token refresh integration. REST polling stays
-active whenever the Support socket is unavailable and stops while realtime is
-healthy. This keeps Support usable behind restrictive networks without changing
-Messenger's socket lifecycle.
+The Support frontend and widget use exponential reconnect with jitter, ticket renewal, grant replay, heartbeats, and `event_id` deduplication. REST synchronization remains authoritative and recovers durable events missed during a disconnect or Axum restart.
 
 ## Unread notifications
 
-Support unread state uses `SupportConversationReadState`, not Messenger participant
-receipts. The authenticated frontend receives a separate account-wide total and
-per-website counts. A message from a website that is not open can produce:
-
-- Support Chat product badge
-- website-specific inbox badge
-- in-app toast
-- browser notification when permission has already been granted
-
-Opening a Support conversation updates only that user's Support read position.
-Messenger unread badges and receipts are unaffected.
+Support unread state uses `SupportConversationReadState`, not Messenger participant receipts. Opening a Support conversation updates only that user's Support read position. Messenger unread badges and receipts remain independent.
 
 ## Production configuration
 
-Normally the Support WebSocket URL is derived from `VITE_API_BASE_URL`. Set this
-only when WebSockets are served from a different public origin:
+Axum is normally served from the same public origin, so the frontend can derive the WebSocket URL automatically. Set an explicit URL only when realtime uses a different public hostname:
 
 ```env
-VITE_SUPPORT_WS_URL=wss://dm.example.com/ws/support/
+VITE_SUPPORT_WS_URL=wss://realtime.example.com/ws
 ```
 
-Nginx or the edge proxy must pass WebSocket upgrade headers for both `/ws/chat/`
-and `/ws/support/`. Redis must be shared by all ASGI instances so website and
-visitor channel groups work across containers.
+Nginx must proxy the exact `/ws` path to Axum. `/ws/*` is intentionally rejected. Redis remains private and is used for the Django-to-Axum stream, ticket replay protection, presence, Celery, and cache—not as a Django Channels layer.

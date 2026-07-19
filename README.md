@@ -15,7 +15,14 @@ production and Docker with the Compose plugin.
 - A DigitalOcean Droplet with a static public IPv4 address
 - A private Cloudflare R2 bucket
 - SMTP credentials
-- A DNS-only TURN hostname
+- A Cloudflare Realtime TURN key and API token
+
+## Django efficiency profile
+
+Axum owns long-lived realtime connections. Django is configured as a small
+Gunicorn HTTP service with staggered worker recycling, fixed-query Support Inbox
+serialization, batched Redis presence reads, asynchronous Celery work, and a
+partial live-message index. See `docs/DJANGO_EFFICIENCY.md`.
 
 ## Local development
 
@@ -131,20 +138,34 @@ Apply migration `support.0010_integrations_data_governance` and keep both the Ce
 worker and Celery Beat running. See `docs/SUPPORT_DATA_GOVERNANCE.md` for security,
 privacy, retention, export, webhook, and deletion boundaries.
 
+## Operations, monitoring, and backups
+
+The single-VPS deployment uses lightweight operational checks rather than a
+permanent monitoring stack. Generate the backup encryption key before production:
+
+```bash
+./scripts/generate-backup-key.sh
+./scripts/operational-health.sh
+./scripts/backup-production.sh
+```
+
+See `docs/OPERATIONS_RUNBOOK.md` for encrypted private-R2 backups, restore tests,
+alert thresholds, cron scheduling, incident handling, and application rollback.
+
 ## Production architecture
 
 ```text
 Cloudflare proxied application DNS
         -> HTTPS/WSS -> DigitalOcean Droplet -> Nginx
-                                             -> React + Django ASGI
+                                             -> React + Django/Gunicorn
+                                             -> Axum WebSockets
                                              -> PostgreSQL + Redis + Celery
                                              -> private Cloudflare R2
 
-DNS-only TURN hostname -> coturn on the Droplet
+Cloudflare Realtime TURN -> relayed WebRTC audio/video when direct P2P fails
 ```
 
-Do not proxy the TURN hostname through Cloudflare. PostgreSQL, Redis, Django,
-and frontend container ports must not be publicly exposed.
+PostgreSQL, Redis, Django, Axum, and frontend container ports must not be publicly exposed.
 
 ## DigitalOcean preparation
 
@@ -158,14 +179,11 @@ Configure the DigitalOcean Cloud Firewall:
 |---|---|---|---|
 | Inbound | TCP | 22 | trusted administrator IPs |
 | Inbound | TCP | 80, 443 | Cloudflare IP ranges |
-| Inbound | TCP/UDP | 3478 | internet |
-| Inbound | UDP | 49160-49200 | internet |
 | Outbound | TCP/UDP | required | internet |
 
 Create these DNS records:
 
 - Proxied `A` record for the application domain pointing to the Droplet.
-- DNS-only `A` record for the TURN hostname pointing to the Droplet.
 
 In Cloudflare, set SSL/TLS mode to **Full (strict)**. Keep the R2 bucket private
 and do not attach a public custom domain to chat media.
@@ -185,7 +203,7 @@ The production template is configured for this deployment:
 - no central authentication, payments, or admin service
 - private Cloudflare R2 bucket: `mepia`
 - Resend SMTP on `smtp.resend.com:587`
-- DNS-only TURN endpoint: `turn.crescentsphere.com:3478`
+- Cloudflare Realtime TURN with server-generated short-lived credentials
 
 Before editing `.env`, verify `crescentsphere.com` in Resend and create a
 Resend API key with sending access. In Cloudflare R2, create an API token with
@@ -199,14 +217,15 @@ secret with:
 openssl rand -base64 72
 ```
 
-Use independent generated values for `SECRET_KEY`, `DB_PASSWORD`,
-`TURN_SHARED_SECRET`, and `AUTH_PAYMENT_JWT_SIGNING_KEY`. Set the external
-credentials from the provider dashboards:
+Use independent generated values for `SECRET_KEY`, `DB_PASSWORD`, and
+`AUTH_PAYMENT_JWT_SIGNING_KEY`. Set the external credentials from the provider dashboards:
 
 ```env
 CLOUDFLARE_R2_ACCOUNT_ID=<Cloudflare account ID>
 CLOUDFLARE_R2_ACCESS_KEY_ID=<R2 token access key ID>
 CLOUDFLARE_R2_SECRET_ACCESS_KEY=<R2 token secret access key>
+CLOUDFLARE_TURN_KEY_ID=<Cloudflare Realtime TURN key ID>
+CLOUDFLARE_TURN_API_TOKEN=<API token for that TURN key>
 EMAIL_HOST_PASSWORD=<Resend API key beginning with re_>
 ```
 
@@ -247,7 +266,13 @@ Run the complete source, frontend, and backend release gates:
 ```
 
 Both commands must pass. The preflight verifies production secrets and flags,
-TLS, Cloudflare trusted IP ranges, TURN settings, and Compose configuration.
+TLS, Cloudflare trusted IP ranges, Cloudflare TURN settings, and Compose configuration.
+
+Before the first Axum build in a release directory, generate and retain the Rust lockfile:
+
+```bash
+./scripts/generate-realtime-lockfile.sh
+```
 
 ## Deploy
 
@@ -256,8 +281,8 @@ TLS, Cloudflare trusted IP ranges, TURN settings, and Compose configuration.
 ```
 
 The deployment refreshes Cloudflare IP ranges, runs preflight validation,
-builds the containers, starts PostgreSQL, Redis, Django, Celery, the frontend,
-Nginx and coturn, then probes the deployed stack.
+builds the containers, starts PostgreSQL, Redis, Django, Celery, Axum, the frontend,
+and Nginx, then probes the deployed stack.
 
 After deployment, run the deep checks:
 
@@ -311,15 +336,16 @@ taking a fresh backup:
 ```
 
 Monitor Droplet CPU, memory, disk, bandwidth, container health, PostgreSQL size,
-Redis persistence, Celery failures, coturn allocations, TLS expiration, and
-backup restore tests. The default TURN relay range contains 41 UDP ports and
-must be expanded for greater concurrent-call capacity.
+Redis persistence, Celery failures, Cloudflare TURN credential errors and usage,
+TLS expiration, and backup restore tests.
 
 ## Technical references
 
 - `docs/API_CONTRACT.md`
 - `docs/API_FRONTEND_GUIDE.md`
 - `docs/MESSENGER_UI_ARCHITECTURE.md`
+- `docs/AXUM_DIRECT_CUTOVER.md`
+- `docs/AXUM_UPGRADE_06.md`
 
 
 cd ~/csm/messenger
@@ -353,4 +379,40 @@ docker compose exec web python manage.py check_support_readiness --fail-on-warni
 ```
 
 Then enable audio/video only for a selected test website and validate calls from
-two external networks. See `UPGRADE_12.md` and `docs/SUPPORT_GUEST_CALLS.md`.
+two external networks. See `docs/AXUM_UPGRADE_06.md` and `docs/SUPPORT_GUEST_CALLS.md`.
+
+## Axum realtime runtime
+
+The active realtime server is Axum at `/ws`; Django Channels and Daphne are not part of the runtime. See `docs/AXUM_DIRECT_CUTOVER.md` for deployment and rollback instructions and `docs/AXUM_UPGRADE_06.md` for feature-parity and Cloudflare TURN requirements.
+
+## Axum realtime production
+
+Axum is the only WebSocket service. Deployment, backup, health, failure-drill, and measured-capacity commands are documented in:
+
+- `docs/AXUM_SETUP_COMPLETE.md`
+- `docs/LOAD_TESTING.md`
+- `docs/OPERATIONS_RUNBOOK.md`
+
+Run `./scripts/final-production-readiness.sh` after deployment and after any measured capacity change.
+
+## Final measured performance verification
+
+Upgrade 13 adds deployment-bound PostgreSQL plans, index audits, mixed HTTP/WebSocket load, expiring capacity reports, and fingerprint enforcement. No additional index is added unless the real PostgreSQL plan justifies it. Follow `docs/LOAD_TESTING.md` and `AXUM_UPGRADE_13.md`.
+
+After the first complete suite passes, set:
+
+```env
+REQUIRE_VERIFIED_CAPACITY_REPORT=True
+```
+
+Any application image, dependency lockfile, fixed worker/queue setting, or database connection configuration change requires a new suite.
+
+## Final Axum capacity verification
+
+The release includes authenticated k6 WebSocket/API scenarios, VPS-side resource capture, guarded reconnect/failure drills, and a capacity analyzer that keeps 20% headroom. Follow `docs/LOAD_TESTING.md`; never run the load generator on the 2 GB application VPS.
+
+
+
+## Upgrade 09: Django efficiency
+
+See `docs/UPGRADE_09_DJANGO_EFFICIENCY.md` for fixed-query inbox reads, batched presence, query budgets, runtime metrics, and deployment settings.

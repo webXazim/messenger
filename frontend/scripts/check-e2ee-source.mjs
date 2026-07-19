@@ -13,7 +13,7 @@ const api = read("src/api/chat.ts");
 const services = read("../apps/chat/services.py");
 const serializers = read("../apps/chat/api/serializers.py");
 const views = read("../apps/chat/api/views.py");
-const consumers = read("../apps/chat/consumers.py");
+const axumSocket = read("../realtime/src/websocket.rs");
 
 for (const required of [
   "identitySyncPromises",
@@ -53,7 +53,7 @@ for (const required of [
 
 assert.ok(serializers.includes("Encryption envelope is required for an encrypted edit"), "Encrypted edits are not validated by the API serializer.");
 assert.ok(serializers.includes("Encrypted attachment previews require both ciphertext and nonce"), "Encrypted attachment preview envelopes are not validated atomically.");
-assert.ok(consumers.includes('data.get("encryption")'), "WebSocket message operations do not preserve encryption envelopes.");
+assert.ok(axumSocket.includes('"message.send"') && axumSocket.includes("http_required"), "Axum must reject durable message mutation commands in favor of Django HTTP validation.");
 assert.ok(views.includes('output["security_changed"] = security_changed'), "Device registration does not report whether key material changed.");
 assert.ok(authContext.includes("identity.registrationChanged"), "Login/focus reconciliation still refreshes every conversation when no device changed.");
 assert.ok(settings.includes('["e2ee-identity", String(user?.id || "")]'), "Settings uses a duplicate E2EE identity cache key.");

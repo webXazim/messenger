@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from asgiref.sync import async_to_sync
 from django.core.cache import cache
-from channels.layers import get_channel_layer
-from django.db import transaction
 
-from apps.chat.services import make_realtime_event
+from apps.common.realtime_presence import support_visitor_online
+
+from apps.common.realtime import (
+    publish_realtime_event,
+    support_user_audience,
+    support_visitor_audience,
+    support_website_audience,
+)
 
 
 def support_website_group(website_id) -> str:
@@ -54,19 +58,7 @@ def visitor_presence_disconnected(visitor_id) -> int:
 
 
 def visitor_is_online(visitor_id) -> bool:
-    try:
-        return int(cache.get(_visitor_presence_key(visitor_id), 0) or 0) > 0
-    except (ValueError, TypeError):
-        return False
-
-
-def _send(groups: set[str], event_name: str, data: dict) -> None:
-    channel_layer = get_channel_layer()
-    if channel_layer is None:
-        return
-    payload = make_realtime_event(event_name, data)
-    for group_name in groups:
-        async_to_sync(channel_layer.group_send)(group_name, payload)
+    return support_visitor_online(visitor_id)
 
 
 def publish_support_event(
@@ -83,20 +75,21 @@ def publish_support_event(
     event contracts are never changed by these notifications.
     """
 
-    groups: set[str] = set()
+    audiences = []
     if website_id:
-        groups.add(support_website_group(website_id))
+        audiences.append(support_website_audience(website_id))
     if visitor_id:
-        groups.add(support_visitor_group(visitor_id))
-    for user_id in user_ids or []:
-        if user_id:
-            groups.add(support_user_group(user_id))
-    if not groups:
+        audiences.append(support_visitor_audience(visitor_id))
+    audiences.extend(
+        support_user_audience(user_id)
+        for user_id in (user_ids or [])
+        if user_id
+    )
+    if not audiences:
         return
-    # Realtime delivery is a best-effort enhancement. A temporary Channels or
-    # Redis outage must never make an already-committed support reply look like
-    # it failed to the agent or visitor.
-    transaction.on_commit(
-        lambda: _send(groups, event_name, data),
-        robust=True,
+    publish_realtime_event(
+        event_name=event_name,
+        data=data,
+        audiences=audiences,
+        defer_until_commit=True,
     )

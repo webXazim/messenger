@@ -663,7 +663,7 @@ Response:
   "credential_type": "password",
   "ice_servers": [
     {
-      "urls": ["stun:stun.example.com:3478"]
+      "urls": ["stun:stun.cloudflare.com:3478"]
     }
   ]
 }

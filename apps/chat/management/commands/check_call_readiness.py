@@ -1,6 +1,7 @@
 import json
 import re
 import socket
+from types import SimpleNamespace
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -59,80 +60,98 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         warnings: list[str] = []
         failures: list[str] = []
-
-        try:
-            endpoints = load_turn_endpoints()
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise CommandError(str(exc)) from exc
-
-        shared_secret = str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()
-        static_user = str(getattr(settings, "TURN_STATIC_USERNAME", "") or "").strip()
-        static_password = str(getattr(settings, "TURN_STATIC_PASSWORD", "") or "").strip()
+        provider = str(getattr(settings, "TURN_PROVIDER", "legacy") or "legacy").strip().lower()
         ice_policy = str(getattr(settings, "WEBRTC_ICE_TRANSPORT_POLICY", "all") or "all").strip().lower()
         candidate_pool = int(getattr(settings, "WEBRTC_ICE_CANDIDATE_POOL_SIZE", 0) or 0)
-        relay_min = int(getattr(settings, "TURN_RELAY_MIN_PORT", 49160) or 49160)
-        relay_max = int(getattr(settings, "TURN_RELAY_MAX_PORT", 49200) or 49200)
-        realm = str(getattr(settings, "TURN_REALM", "") or "").strip()
-        external_ip = str(getattr(settings, "TURN_EXTERNAL_IP", "") or "").strip()
+        ttl = int(getattr(settings, "TURN_CREDENTIAL_TTL_SECONDS", 3600) or 3600)
 
         self.stdout.write(self.style.NOTICE("Messenger calling readiness summary"))
-        rows = [
-            ("TURN endpoints", len(endpoints)),
-            ("TURN realm", realm or "not configured"),
-            ("TURN external IP", external_ip or "not configured"),
-            ("ICE transport policy", ice_policy),
-            ("ICE candidate pool", candidate_pool),
-            ("TURN relay range", f"{relay_min}-{relay_max}"),
-            ("TURN auth", "shared secret" if shared_secret else "static credentials" if static_user and static_password else "missing"),
-        ]
-        for key, value in rows:
-            self.stdout.write(f"- {key}: {value}")
+        self.stdout.write(f"- TURN provider: {provider}")
+        self.stdout.write(f"- Credential TTL: {ttl} seconds")
+        self.stdout.write(f"- ICE transport policy: {ice_policy}")
+        self.stdout.write(f"- ICE candidate pool: {candidate_pool}")
 
-        if not endpoints:
-            failures.append("TURN_URIS_JSON is empty; calls may fail across different networks.")
+        if provider == "cloudflare":
+            key_id = str(getattr(settings, "CLOUDFLARE_TURN_KEY_ID", "") or "").strip()
+            api_token = str(getattr(settings, "CLOUDFLARE_TURN_API_TOKEN", "") or "").strip()
+            api_url = str(getattr(settings, "CLOUDFLARE_TURN_API_BASE_URL", "") or "").strip()
+            self.stdout.write(f"- Cloudflare TURN key: {'configured' if key_id else 'missing'}")
+            self.stdout.write(f"- Cloudflare API token: {'configured' if api_token else 'missing'}")
+            if not key_id:
+                failures.append("CLOUDFLARE_TURN_KEY_ID is not configured.")
+            if not api_token:
+                failures.append("CLOUDFLARE_TURN_API_TOKEN is not configured.")
+            if not api_url.startswith("https://"):
+                failures.append("CLOUDFLARE_TURN_API_BASE_URL must use HTTPS.")
+            if options["probe"] and not failures:
+                from apps.chat.services import get_turn_credentials
+
+                payload = get_turn_credentials(SimpleNamespace(id="readiness-probe"))
+                if not payload.get("configured") or not payload.get("ice_servers"):
+                    failures.append("Cloudflare TURN credential generation probe failed.")
+                else:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"- Cloudflare credential probe: {len(payload['ice_servers'])} ICE server entries returned"
+                    ))
         else:
-            has_udp = any(item.transport == "udp" for item in endpoints)
-            has_tcp = any(item.transport == "tcp" for item in endpoints)
-            if not has_udp:
-                warnings.append("No UDP TURN endpoint is configured; call quality may be reduced.")
-            if not has_tcp:
-                warnings.append("No TCP/TLS TURN endpoint is configured for restrictive networks.")
+            try:
+                endpoints = load_turn_endpoints()
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise CommandError(str(exc)) from exc
+            shared_secret = str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()
+            static_user = str(getattr(settings, "TURN_STATIC_USERNAME", "") or "").strip()
+            static_password = str(getattr(settings, "TURN_STATIC_PASSWORD", "") or "").strip()
+            relay_min = int(getattr(settings, "TURN_RELAY_MIN_PORT", 49160) or 49160)
+            relay_max = int(getattr(settings, "TURN_RELAY_MAX_PORT", 49200) or 49200)
+            realm = str(getattr(settings, "TURN_REALM", "") or "").strip()
+            external_ip = str(getattr(settings, "TURN_EXTERNAL_IP", "") or "").strip()
+            self.stdout.write(f"- TURN endpoints: {len(endpoints)}")
+            self.stdout.write(f"- TURN realm: {realm or 'not configured'}")
+            self.stdout.write(f"- TURN external IP: {external_ip or 'not configured'}")
+            self.stdout.write(f"- TURN relay range: {relay_min}-{relay_max}")
+            self.stdout.write(f"- TURN auth: {'shared secret' if shared_secret else 'static credentials' if static_user and static_password else 'missing'}")
+            if not endpoints:
+                failures.append("TURN_URIS_JSON is empty for legacy TURN.")
+            else:
+                if not any(item.transport == "udp" for item in endpoints):
+                    warnings.append("No UDP TURN endpoint is configured; call quality may be reduced.")
+                if not any(item.transport == "tcp" for item in endpoints):
+                    warnings.append("No TCP/TLS TURN endpoint is configured for restrictive networks.")
+            if not shared_secret and not (static_user and static_password):
+                failures.append("Legacy TURN credentials are not configured.")
+            if shared_secret and len(shared_secret) < 32:
+                failures.append("TURN_SHARED_SECRET must be at least 32 characters.")
+            if relay_min < 1024 or relay_max > 65535 or relay_min > relay_max:
+                failures.append("The configured TURN relay port range is invalid.")
+            if not realm:
+                warnings.append("TURN_REALM is not configured.")
+            if not external_ip:
+                warnings.append("TURN_EXTERNAL_IP is not configured.")
+            if options["probe"]:
+                for endpoint in endpoints:
+                    try:
+                        addresses = socket.getaddrinfo(
+                            endpoint.host, endpoint.port,
+                            type=socket.SOCK_STREAM if endpoint.transport == "tcp" else socket.SOCK_DGRAM,
+                        )
+                        resolved = sorted({item[4][0] for item in addresses})
+                        self.stdout.write(f"- resolve {endpoint.host}: {', '.join(resolved)}")
+                    except OSError as exc:
+                        failures.append(f"Could not resolve {endpoint.host}: {exc}")
+                        continue
+                    if endpoint.transport == "tcp" or endpoint.scheme == "turns":
+                        try:
+                            with socket.create_connection((endpoint.host, endpoint.port), timeout=options["timeout"]):
+                                self.stdout.write(self.style.SUCCESS(f"- TCP probe {endpoint.host}:{endpoint.port}: reachable"))
+                        except OSError as exc:
+                            failures.append(f"TCP probe failed for {endpoint.host}:{endpoint.port}: {exc}")
 
-        if not shared_secret and not (static_user and static_password):
-            failures.append("TURN credentials are not configured.")
-        if shared_secret and len(shared_secret) < 32:
-            failures.append("TURN_SHARED_SECRET must be at least 32 characters.")
         if ice_policy not in {"all", "relay"}:
             failures.append("WEBRTC_ICE_TRANSPORT_POLICY must be 'all' or 'relay'.")
         if candidate_pool < 0 or candidate_pool > 16:
             warnings.append("WEBRTC_ICE_CANDIDATE_POOL_SIZE should normally be between 0 and 16.")
-        if relay_min < 1024 or relay_max > 65535 or relay_min > relay_max:
-            failures.append("The configured TURN relay port range is invalid.")
-        if relay_max - relay_min + 1 < 20:
-            warnings.append("The TURN relay range is narrow; concurrent calls may exhaust available relay ports.")
-        if not realm:
-            warnings.append("TURN_REALM is not configured.")
-        if not external_ip:
-            warnings.append("TURN_EXTERNAL_IP/DROPLET_PUBLIC_IP is not configured for NAT relay advertisement.")
-
-        if options["probe"]:
-            for endpoint in endpoints:
-                try:
-                    addresses = socket.getaddrinfo(endpoint.host, endpoint.port, type=socket.SOCK_STREAM if endpoint.transport == "tcp" else socket.SOCK_DGRAM)
-                    resolved = sorted({item[4][0] for item in addresses})
-                    self.stdout.write(f"- resolve {endpoint.host}: {', '.join(resolved)}")
-                except OSError as exc:
-                    failures.append(f"Could not resolve {endpoint.host}: {exc}")
-                    continue
-
-                if endpoint.transport == "tcp" or endpoint.scheme == "turns":
-                    try:
-                        with socket.create_connection((endpoint.host, endpoint.port), timeout=options["timeout"]):
-                            self.stdout.write(self.style.SUCCESS(f"- TCP probe {endpoint.host}:{endpoint.port}: reachable"))
-                    except OSError as exc:
-                        failures.append(f"TCP probe failed for {endpoint.host}:{endpoint.port}: {exc}")
-                else:
-                    self.stdout.write(f"- UDP endpoint {endpoint.host}:{endpoint.port}: DNS resolved; validate relay with a real WebRTC call")
+        if ttl < 300:
+            failures.append("TURN_CREDENTIAL_TTL_SECONDS must be at least 300 seconds.")
 
         if warnings:
             self.stdout.write(self.style.WARNING("\nWarnings:"))
@@ -147,3 +166,4 @@ class Command(BaseCommand):
             raise CommandError("Calling readiness check completed with warnings.")
 
         self.stdout.write(self.style.SUCCESS("\nCalling configuration passed readiness checks."))
+

@@ -133,3 +133,72 @@ class RegistrationOtpTests(APITestCase):
             format="json",
         )
         self.assertEqual(new_code.status_code, status.HTTP_200_OK)
+
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
+class UserDiscoveryEfficiencyTests(APITestCase):
+    search_url = "/api/v1/accounts/users/search/"
+
+    def setUp(self):
+        self.actor = User.objects.create_user(
+            username="efficiency-actor",
+            email="efficiency-actor@example.com",
+            password="Strong-password-8472!",
+        )
+        self.client.force_authenticate(self.actor)
+
+    @staticmethod
+    def _offline_presence(user_ids):
+        return {
+            str(user_id): {
+                "is_online": False,
+                "active_devices": 0,
+                "presence_status": "offline",
+                "presence_label": "offline",
+                "device_type": None,
+                "device_types": [],
+            }
+            for user_id in user_ids
+        }
+
+    def _create_targets(self, start, stop):
+        for index in range(start, stop):
+            User.objects.create_user(
+                username=f"efficiency-target-{index}",
+                email=f"efficiency-target-{index}@example.com",
+                password="Strong-password-8472!",
+            )
+
+    def test_search_query_count_does_not_scale_with_user_rows(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from unittest.mock import patch
+
+        self._create_targets(0, 1)
+        with patch(
+            "apps.accounts.api.serializers.get_presence_snapshots",
+            side_effect=self._offline_presence,
+        ):
+            with CaptureQueriesContext(connection) as first_capture:
+                first = self.client.get(self.search_url, {"q": "efficiency-target"})
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        baseline_queries = len(first_capture.captured_queries)
+
+        self._create_targets(1, 10)
+        with patch(
+            "apps.accounts.api.serializers.get_presence_snapshots",
+            side_effect=self._offline_presence,
+        ):
+            with CaptureQueriesContext(connection) as many_capture:
+                many = self.client.get(self.search_url, {"q": "efficiency-target"})
+        self.assertEqual(many.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(many.data), 10)
+        self.assertLessEqual(
+            len(many_capture.captured_queries),
+            baseline_queries + 1,
+            "User discovery database query count must remain effectively constant as rows grow.",
+        )
+        self.assertLessEqual(
+            len(many_capture.captured_queries),
+            6,
+            "User discovery exceeded its production database query budget.",
+        )

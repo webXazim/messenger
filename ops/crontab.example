@@ -1,0 +1,4 @@
+# Replace /srv/crescentsphere/current with your actual release directory.
+# The encrypted backup key must already exist and be copied off the VPS.
+15 2 * * * cd /srv/crescentsphere/current && ./scripts/backup-production.sh >> logs/backup.log 2>&1
+*/5 * * * * cd /srv/crescentsphere/current && ./scripts/ops-watch.sh

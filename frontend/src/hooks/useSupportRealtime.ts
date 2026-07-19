@@ -41,6 +41,11 @@ export function useSupportRealtime() {
     staleTime: 30_000,
   });
   const active = bootstrapQuery.data?.access === "active";
+  const websiteIds = useMemo(
+    () => (bootstrapQuery.data?.websites || []).map((website) => website.id).filter(Boolean),
+    [bootstrapQuery.data?.websites],
+  );
+  const websiteKey = websiteIds.join(",");
   const unreadQuery = useQuery({
     queryKey: ["support-unread-summary"],
     queryFn: ({ signal }) => supportApi.unreadSummary(signal),
@@ -62,7 +67,7 @@ export function useSupportRealtime() {
     }
     const connect = () => {
       const token = getAccessToken();
-      if (token) supportSocket.connect(token);
+      if (token) supportSocket.connect(token, websiteIds);
     };
     const reconnect = () => { if (document.visibilityState === "visible") connect(); };
     const tokenUpdated = () => connect();
@@ -91,14 +96,19 @@ export function useSupportRealtime() {
       document.removeEventListener("visibilitychange", reconnect);
       supportSocket.disconnect();
     };
-  }, [active, queryClient]);
+  }, [active, queryClient, websiteKey]);
 
   useEffect(() => {
     if (!active) return;
     const refreshSupport = (payload: SupportSocketEvent) => {
       if (payload.event === "support.ready") {
+        void queryClient.invalidateQueries({ queryKey: ["support-bootstrap"] });
         void queryClient.invalidateQueries({ queryKey: ["support-unread-summary"] });
         void queryClient.invalidateQueries({ queryKey: ["support-conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["support-conversation-messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["support-conversation-activity"] });
+        void queryClient.invalidateQueries({ queryKey: ["support-active-call"] });
+        void queryClient.invalidateQueries({ queryKey: ["support-service-alerts"] });
         return;
       }
       if (!payload.event.startsWith("support.")) return;

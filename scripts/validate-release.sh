@@ -8,7 +8,7 @@ if [[ -z "$python_bin" ]]; then
 fi
 [[ -n "$python_bin" ]] || { echo "python3 is required." >&2; exit 1; }
 
-"$python_bin" -m compileall -q config apps
+"$python_bin" -m compileall -q config apps scripts
 "$python_bin" - <<'PY'
 import json
 from pathlib import Path
@@ -25,6 +25,19 @@ PY
 for script in scripts/*.sh entrypoint.sh snm-dev.sh; do
   bash -n "$script"
 done
+
+"$python_bin" scripts/test-capacity-analyzer.py
+
+if command -v node >/dev/null; then
+  for script in loadtests/k6/*.js loadtests/k6/lib/*.js; do
+    node --check "$script"
+  done
+fi
+
+if find loadtests/data -maxdepth 1 -type f -name '*.json' -print -quit | grep -q .; then
+  echo "Temporary load-test credential JSON must be removed before release validation." >&2
+  exit 1
+fi
 
 (
   cd frontend

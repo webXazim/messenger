@@ -11,7 +11,7 @@ root = Path.cwd()
 output = Path(sys.argv[1]).expanduser().resolve()
 excluded_dirs = {
     ".git", ".idea", ".vscode", "node_modules", "dist", "__pycache__",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache", "media", "private_media", "backups",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache", "media", "private_media", "backups", "logs",
 }
 excluded_names = {".env", "db.sqlite3", ".DS_Store"}
 excluded_suffixes = {".pyc", ".pyo", ".zip", ".log"}
@@ -21,6 +21,10 @@ def include(path: Path) -> bool:
     if any(part in excluded_dirs for part in rel.parts):
         return False
     if path.name in excluded_names or path.suffix in excluded_suffixes:
+        return False
+    if rel.parts[:2] == ("loadtests", "data") and path.suffix == ".json":
+        return False
+    if rel.parts[:2] == ("loadtests", "results") and path.name != ".gitkeep":
         return False
     if rel.parts and rel.parts[0] == "secrets" and path.name not in {".gitkeep", "README.txt"}:
         return False
@@ -34,7 +38,7 @@ with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compressleve
 
 with zipfile.ZipFile(output) as archive:
     names = archive.namelist()
-    forbidden = [name for name in names if name.endswith("/.env") or "/node_modules/" in name or "/secrets/" in name and not name.endswith(("/.gitkeep", "/README.txt"))]
+    forbidden = [name for name in names if name.endswith("/.env") or "/node_modules/" in name or "/loadtests/data/" in name and name.endswith(".json") or "/loadtests/results/" in name and not name.endswith("/.gitkeep") or "/secrets/" in name and not name.endswith(("/.gitkeep", "/README.txt"))]
     if forbidden:
         raise SystemExit(f"Unsafe release entries: {forbidden[:5]}")
 print(f"Created safe release archive: {output}")

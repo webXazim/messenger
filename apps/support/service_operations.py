@@ -326,9 +326,9 @@ def _active_deadlines(conversation: SupportConversation):
     return deadlines
 
 
-def service_snapshot(conversation: SupportConversation, *, now=None) -> dict:
+def service_snapshot(conversation: SupportConversation, *, now=None, settings_obj=None) -> dict:
     now = now or timezone.now()
-    settings_obj = service_settings_for(conversation.website.support_account)
+    settings_obj = settings_obj or service_settings_for(conversation.website.support_account)
     deadlines = _active_deadlines(conversation)
     active_target = min(deadlines, key=lambda item: item[1]) if deadlines else None
     overdue = [item for item in deadlines if item[1] <= now]

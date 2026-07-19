@@ -1,28 +1,38 @@
-import { WS_BASE_URL } from "./config";
+import { REALTIME_WS_URL } from "./config";
 import { detectPresenceDeviceType, PRESENCE_IDLE_AFTER_MS, type PresenceActivityStatus } from "./devicePresence";
+import {
+  requestRealtimeGrants,
+  requestRealtimeTicket,
+  realtimeAudienceKey,
+  type RealtimeAudience,
+} from "./realtimeCredentials";
 
 export type SocketEvent = {
   event: string;
   event_id?: string;
   occurred_at?: string;
+  request_id?: string;
   data?: Record<string, unknown>;
 };
 
 export type SocketStatus = "connecting" | "open" | "closed";
-
 type Listener = (event: SocketEvent) => void;
 type StatusListener = (status: SocketStatus) => void;
 
 export const SOCKET_AUTH_FAILED_EVENT = "messenger-socket-auth-failed";
 
-function buildSocketUrl(baseUrl: string, token: string, deviceId: string, presenceStatus: PresenceActivityStatus) {
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const url = new URL(normalizedBase);
-  url.searchParams.set("token", token);
-  url.searchParams.set("device_id", deviceId);
-  url.searchParams.set("device_type", detectPresenceDeviceType());
-  url.searchParams.set("presence_status", presenceStatus);
+function buildSocketUrl(ticket: string) {
+  const url = new URL(REALTIME_WS_URL, window.location.origin);
+  url.searchParams.set("ticket", ticket);
   return url.toString();
+}
+
+function conversationAudience(conversationId: string): RealtimeAudience {
+  return { kind: "conversation", id: conversationId };
+}
+
+function requestId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function queueKey(payload: SocketEvent) {
@@ -33,7 +43,6 @@ function queueKey(payload: SocketEvent) {
     String(payload.data?.signal_type ?? ""),
     String(payload.data?.signal_id ?? payload.data?.client_temp_id ?? ""),
     String(payload.data?.message_id ?? payload.data?.id ?? ""),
-    String(payload.data?.client_temp_id ?? ""),
   ].join(":");
 }
 
@@ -64,6 +73,8 @@ export class ChatSocket {
   private activeDeviceId: string | null = null;
   private manualClose = false;
   private subscriptions = new Map<string, number>();
+  private grants = new Map<string, string>();
+  private pendingGrantRequests = new Map<string, Promise<string | null>>();
   private pendingQueue: SocketEvent[] = [];
   private heartbeatTimer: number | null = null;
   private idleTimer: number | null = null;
@@ -71,6 +82,7 @@ export class ChatSocket {
   private lastSentPresenceStatus: PresenceActivityStatus | null = null;
   private activityTracking = false;
   private seenEvents = new Map<string, number>();
+  private generation = 0;
 
   private currentPresenceStatus(): PresenceActivityStatus {
     if (document.visibilityState === "hidden") return "idle";
@@ -78,18 +90,20 @@ export class ChatSocket {
   }
 
   private presenceData() {
-    return {
-      device_type: detectPresenceDeviceType(),
-      presence_status: this.currentPresenceStatus(),
-    };
+    return { device_type: detectPresenceDeviceType(), presence_status: this.currentPresenceStatus() };
+  }
+
+  private sendWire(payload: SocketEvent) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify({ v: 1, request_id: payload.request_id || requestId(), ...payload }));
+    return true;
   }
 
   private sendPresencePing() {
-    if (this.socket?.readyState !== WebSocket.OPEN) return false;
     const data = this.presenceData();
-    this.socket.send(JSON.stringify({ event: "presence.ping", data }));
-    this.lastSentPresenceStatus = data.presence_status;
-    return true;
+    const sent = this.sendWire({ event: "presence.ping", data });
+    if (sent) this.lastSentPresenceStatus = data.presence_status;
+    return sent;
   }
 
   private scheduleIdleTransition() {
@@ -150,16 +164,14 @@ export class ChatSocket {
     this.token = token;
     this.deviceId = deviceId;
     this.manualClose = false;
-
-    const activeCredentialsMatch = token === this.activeToken && deviceId === this.activeDeviceId;
+    const activeMatch = token === this.activeToken && deviceId === this.activeDeviceId;
     if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
-      if (activeCredentialsMatch && !credentialsChanged) return;
+      if (activeMatch && !credentialsChanged) return;
       this.replaceConnection();
       return;
     }
-
     this.clearReconnectTimer();
-    this.openConnection();
+    void this.openConnection();
   }
 
   reconnect() {
@@ -169,79 +181,110 @@ export class ChatSocket {
   }
 
   private replaceConnection() {
+    this.generation += 1;
     this.clearReconnectTimer();
     this.stopHeartbeat();
     const previous = this.socket;
     this.socket = null;
     this.activeToken = null;
     this.activeDeviceId = null;
-    try {
-      previous?.close(1000, "credentials-updated");
-    } catch {
-      // The next connection still proceeds when the old socket is already gone.
-    }
-    this.openConnection();
+    this.grants.clear();
+    this.pendingGrantRequests.clear();
+    try { previous?.close(1000, "credentials-updated"); } catch { /* no-op */ }
+    void this.openConnection();
   }
 
-  private openConnection() {
+  private async openConnection() {
     if (!this.token || !this.deviceId || this.manualClose) return;
-    this.emitStatus("connecting");
-
+    const generation = ++this.generation;
     const token = this.token;
     const deviceId = this.deviceId;
-    let socket: WebSocket;
+    this.emitStatus("connecting");
     try {
-      socket = new WebSocket(buildSocketUrl(WS_BASE_URL, token, deviceId, this.currentPresenceStatus()));
-    } catch {
+      const audiences = [...this.subscriptions.keys()].map(conversationAudience);
+      const [ticket, grants] = await Promise.all([
+        requestRealtimeTicket(token, deviceId, detectPresenceDeviceType()),
+        requestRealtimeGrants(token, audiences),
+      ]);
+      if (generation !== this.generation || this.manualClose || token !== this.token) return;
+      this.grants = grants;
+      const socket = new WebSocket(buildSocketUrl(ticket.ticket));
+      this.socket = socket;
+      this.activeToken = token;
+      this.activeDeviceId = deviceId;
+      this.attachSocketHandlers(socket, generation);
+    } catch (error) {
+      if (generation !== this.generation || this.manualClose) return;
       this.emitStatus("closed");
+      const status = Number((error as { response?: { status?: number } })?.response?.status || 0);
+      if (status === 401 || status === 403) {
+        window.dispatchEvent(new CustomEvent(SOCKET_AUTH_FAILED_EVENT, { detail: { code: status } }));
+      }
       this.scheduleReconnect();
-      return;
     }
+  }
 
-    this.socket = socket;
-    this.activeToken = token;
-    this.activeDeviceId = deviceId;
-
+  private attachSocketHandlers(socket: WebSocket, generation: number) {
     socket.onopen = () => {
-      if (this.socket !== socket) return;
+      if (this.socket !== socket || generation !== this.generation) return;
       this.reconnectAttempts = 0;
       this.emitStatus("open");
       this.startHeartbeat();
-      this.subscriptions.forEach((_count, conversationId) => {
-        this.send({ event: "conversation.subscribe", data: { conversation_id: conversationId } });
-      });
+      this.subscriptions.forEach((_count, conversationId) => void this.subscribeAudience(conversationId));
       const queued = [...this.pendingQueue];
       this.pendingQueue = [];
       queued.forEach((payload) => this.send(payload));
     };
-
-    socket.onerror = () => {
-      if (this.socket === socket) this.emitStatus("closed");
-    };
-
-    socket.onclose = (event) => {
+    socket.onerror = () => { if (this.socket === socket) this.emitStatus("closed"); };
+    socket.onclose = () => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
-      this.emitStatus("closed");
       this.socket = null;
       this.activeToken = null;
       this.activeDeviceId = null;
-      if (event.code === 4401 || event.code === 4403) {
-        window.dispatchEvent(new CustomEvent(SOCKET_AUTH_FAILED_EVENT, { detail: { code: event.code } }));
-      }
+      this.grants.clear();
+      this.emitStatus("closed");
       if (!this.manualClose) this.scheduleReconnect();
     };
-
     socket.onmessage = (event) => {
       if (this.socket !== socket) return;
       try {
         const parsed = JSON.parse(event.data) as SocketEvent;
         if (!parsed?.event || this.isDuplicateIncomingEvent(parsed)) return;
         this.listeners.forEach((listener) => listener(parsed));
-      } catch {
-        // Ignore malformed payloads without breaking the live connection.
-      }
+      } catch { /* malformed frames are ignored */ }
     };
+  }
+
+  private async grantForConversation(conversationId: string) {
+    const audience = conversationAudience(conversationId);
+    const key = realtimeAudienceKey(audience);
+    const cached = this.grants.get(key);
+    if (cached) return cached;
+    const existing = this.pendingGrantRequests.get(key);
+    if (existing) return existing;
+    const token = this.token;
+    if (!token) return null;
+    const request = requestRealtimeGrants(token, [audience])
+      .then((grants) => {
+        const grant = grants.get(key) || null;
+        if (grant) this.grants.set(key, grant);
+        return grant;
+      })
+      .catch(() => null)
+      .finally(() => this.pendingGrantRequests.delete(key));
+    this.pendingGrantRequests.set(key, request);
+    return request;
+  }
+
+  private async subscribeAudience(conversationId: string) {
+    if (!this.subscriptions.has(conversationId) || this.socket?.readyState !== WebSocket.OPEN) return;
+    const grant = await this.grantForConversation(conversationId);
+    if (!grant || !this.subscriptions.has(conversationId)) return;
+    this.sendWire({
+      event: "audience.subscribe",
+      data: { audience: conversationAudience(conversationId), grant },
+    });
   }
 
   private isDuplicateIncomingEvent(payload: SocketEvent) {
@@ -250,9 +293,7 @@ export class ChatSocket {
     const previous = this.seenEvents.get(key);
     this.seenEvents.set(key, now);
     if (this.seenEvents.size > 500) {
-      for (const [eventKey, seenAt] of this.seenEvents) {
-        if (now - seenAt > 120000) this.seenEvents.delete(eventKey);
-      }
+      for (const [eventKey, seenAt] of this.seenEvents) if (now - seenAt > 120000) this.seenEvents.delete(eventKey);
       while (this.seenEvents.size > 500) {
         const first = this.seenEvents.keys().next().value as string | undefined;
         if (!first) break;
@@ -266,38 +307,34 @@ export class ChatSocket {
     this.stopHeartbeat();
     this.startActivityTracking();
     this.sendPresencePing();
-    this.heartbeatTimer = window.setInterval(() => {
-      this.sendPresencePing();
-    }, 25000);
+    this.heartbeatTimer = window.setInterval(() => this.sendPresencePing(), 25000);
   }
 
   private stopHeartbeat() {
-    if (this.heartbeatTimer) {
-      window.clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    if (this.heartbeatTimer) window.clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
     this.stopActivityTracking();
   }
 
   private clearReconnectTimer() {
-    if (this.reconnectTimer) {
-      window.clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer || !this.token || !this.deviceId || this.manualClose) return;
-    const delay = Math.min(15000, 750 * 2 ** Math.min(this.reconnectAttempts, 5));
+    const base = Math.min(30000, 750 * 2 ** Math.min(this.reconnectAttempts, 6));
+    const delay = Math.round(base * (0.75 + Math.random() * 0.5));
     this.reconnectAttempts += 1;
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
-      this.openConnection();
+      void this.openConnection();
     }, delay);
   }
 
   disconnect() {
     this.manualClose = true;
+    this.generation += 1;
     this.stopHeartbeat();
     this.clearReconnectTimer();
     this.reconnectAttempts = 0;
@@ -307,31 +344,19 @@ export class ChatSocket {
     this.deviceId = null;
     this.activeToken = null;
     this.activeDeviceId = null;
-    try {
-      previous?.close(1000, "client-disconnect");
-    } catch {
-      // The local session is already cleared even if the transport is gone.
-    }
+    this.grants.clear();
+    this.pendingGrantRequests.clear();
+    try { previous?.close(1000, "client-disconnect"); } catch { /* no-op */ }
     this.pendingQueue = [];
     this.emitStatus("closed");
   }
 
-  isOpen() {
-    return this.socket?.readyState === WebSocket.OPEN;
-  }
-
-  reportActivity() {
-    this.handleUserActivity();
-  }
+  isOpen() { return this.socket?.readyState === WebSocket.OPEN; }
+  reportActivity() { this.handleUserActivity(); }
 
   send(payload: SocketEvent) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(payload));
-      return true;
-    }
-
-    if (payload.event === "typing.start" || payload.event === "typing.stop") return false;
-
+    if (this.sendWire(payload)) return true;
+    if (["typing.start", "typing.stop", "presence.ping", "call.signal"].includes(payload.event)) return false;
     const key = queueKey(payload);
     if (this.pendingQueue.some((entry) => queueKey(entry) === key)) return false;
     this.pendingQueue = [...this.pendingQueue.slice(-49), payload];
@@ -341,8 +366,7 @@ export class ChatSocket {
   subscribeToConversation(conversationId: string) {
     const currentCount = this.subscriptions.get(conversationId) ?? 0;
     this.subscriptions.set(conversationId, currentCount + 1);
-    if (currentCount > 0) return;
-    this.send({ event: "conversation.subscribe", data: { conversation_id: conversationId } });
+    if (currentCount === 0) void this.subscribeAudience(conversationId);
   }
 
   unsubscribeFromConversation(conversationId: string) {
@@ -352,7 +376,8 @@ export class ChatSocket {
       return;
     }
     this.subscriptions.delete(conversationId);
-    this.send({ event: "conversation.unsubscribe", data: { conversation_id: conversationId } });
+    this.grants.delete(realtimeAudienceKey(conversationAudience(conversationId)));
+    this.sendWire({ event: "audience.unsubscribe", data: { audience: conversationAudience(conversationId) } });
   }
 
   subscribe(listener: Listener) {
@@ -362,13 +387,7 @@ export class ChatSocket {
 
   subscribeStatus(listener: StatusListener) {
     this.statusListeners.add(listener);
-    listener(
-      this.socket?.readyState === WebSocket.OPEN
-        ? "open"
-        : this.socket?.readyState === WebSocket.CONNECTING
-          ? "connecting"
-          : "closed",
-    );
+    listener(this.socket?.readyState === WebSocket.OPEN ? "open" : this.socket?.readyState === WebSocket.CONNECTING ? "connecting" : "closed");
     return () => this.statusListeners.delete(listener);
   }
 

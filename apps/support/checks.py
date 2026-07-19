@@ -52,24 +52,36 @@ def support_deploy_checks(app_configs, **kwargs):
                 "SUPPORT_WIDGET_ENABLED must be enabled before Support guest calls can be enabled.",
                 id="support.E004",
             ))
-        if not str(getattr(settings, "TURN_URIS_JSON", "") or "").strip():
+        turn_provider = str(getattr(settings, "TURN_PROVIDER", "legacy") or "legacy").strip().lower()
+        if turn_provider == "cloudflare":
+            if not str(getattr(settings, "CLOUDFLARE_TURN_KEY_ID", "") or "").strip():
+                issues.append(Error(
+                    "CLOUDFLARE_TURN_KEY_ID is required for production Support calls.",
+                    id="support.E005",
+                ))
+            if not str(getattr(settings, "CLOUDFLARE_TURN_API_TOKEN", "") or "").strip():
+                issues.append(Error(
+                    "CLOUDFLARE_TURN_API_TOKEN is required for production Support calls.",
+                    id="support.E006",
+                ))
+        else:
+            if not str(getattr(settings, "TURN_URIS_JSON", "") or "").strip():
+                issues.append(Error(
+                    "TURN_URIS_JSON is required for legacy Support calls.",
+                    id="support.E005",
+                ))
+            has_turn_auth = bool(str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()) or bool(
+                str(getattr(settings, "TURN_STATIC_USERNAME", "") or "").strip()
+                and str(getattr(settings, "TURN_STATIC_PASSWORD", "") or "").strip()
+            )
+            if not has_turn_auth:
+                issues.append(Error(
+                    "Legacy TURN credentials are required for Support calls.",
+                    id="support.E006",
+                ))
+        if str(getattr(settings, "REALTIME_TRANSPORT", "") or "").lower() != "axum":
             issues.append(Error(
-                "TURN_URIS_JSON is required for production Support calls.",
-                id="support.E005",
-            ))
-        has_turn_auth = bool(str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()) or bool(
-            str(getattr(settings, "TURN_STATIC_USERNAME", "") or "").strip()
-            and str(getattr(settings, "TURN_STATIC_PASSWORD", "") or "").strip()
-        )
-        if not has_turn_auth:
-            issues.append(Error(
-                "TURN credentials are required for production Support calls.",
-                id="support.E006",
-            ))
-        channel_backend = str(settings.CHANNEL_LAYERS.get("default", {}).get("BACKEND", "") or "")
-        if channel_backend.endswith("InMemoryChannelLayer"):
-            issues.append(Error(
-                "Support calls require a shared Redis channel layer in production.",
+                "Support calls require the Axum realtime transport in production.",
                 id="support.E007",
             ))
         ring_timeout = int(getattr(settings, "SUPPORT_CALL_RING_TIMEOUT_SECONDS", 45) or 45)

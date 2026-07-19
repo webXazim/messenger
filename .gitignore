@@ -64,3 +64,16 @@ secrets/tls/*
 !secrets/tls/README.txt
 backups/*
 !backups/.gitkeep
+
+# Rust realtime build output
+realtime/target/
+
+# Operational logs
+logs/*
+!logs/.gitkeep
+
+# Temporary load-test credentials and results
+loadtests/data/*.json
+!loadtests/data/.gitkeep
+loadtests/results/*
+!loadtests/results/.gitkeep

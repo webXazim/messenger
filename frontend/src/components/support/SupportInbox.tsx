@@ -735,16 +735,10 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     const latestVisitorMessage = [...messages]
       .reverse()
       .find((message) => message.sender.kind === "visitor");
-    if (!selectedId || !latestVisitorMessage || !supportSocket.isOpen()) return;
-    supportSocket.send({
-      event: "support.message.delivered",
-      data: { conversation_id: selectedId, message_id: latestVisitorMessage.id },
-    });
+    if (!selectedId || !latestVisitorMessage) return;
+    void supportApi.markConversationDelivered(selectedId, latestVisitorMessage.id);
     if (document.visibilityState === "visible") {
-      supportSocket.send({
-        event: "support.message.read",
-        data: { conversation_id: selectedId, message_id: latestVisitorMessage.id },
-      });
+      void supportApi.markConversationRead(selectedId, latestVisitorMessage.id);
     }
   }, [messagesQuery.data?.messages, selectedId, socketStatus]);
 
@@ -754,7 +748,11 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     if (selectedId && supportSocket.isOpen()) {
       supportSocket.send({
         event: "support.typing.stop",
-        data: { conversation_id: selectedId },
+        data: {
+          conversation_id: selectedId,
+          website_id: selectedConversation?.website.id || "",
+          visitor_id: selectedConversation?.visitor.id || "",
+        },
       });
     }
   }, [selectedId]);
@@ -779,8 +777,11 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
       voice_note?: boolean;
       clientTempId?: string;
     }) => {
-      const { clientTempId: _clientTempId, ...messagePayload } = payload;
-      return supportApi.sendConversationMessage(selectedId, messagePayload);
+      const { clientTempId, ...messagePayload } = payload;
+      return supportApi.sendConversationMessage(selectedId, {
+        ...messagePayload,
+        client_temp_id: clientTempId,
+      });
     },
     onMutate: () => setError(null),
     onSuccess: (message, variables) => {
@@ -975,13 +976,21 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     if (!selectedId || !supportSocket.isOpen()) return;
     supportSocket.send({
       event: "support.typing.start",
-      data: { conversation_id: selectedId },
+      data: {
+        conversation_id: selectedId,
+        website_id: selectedConversation?.website.id || "",
+        visitor_id: selectedConversation?.visitor.id || "",
+      },
     });
     if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
     typingStopTimerRef.current = window.setTimeout(() => {
       supportSocket.send({
         event: "support.typing.stop",
-        data: { conversation_id: selectedId },
+        data: {
+          conversation_id: selectedId,
+          website_id: selectedConversation?.website.id || "",
+          visitor_id: selectedConversation?.visitor.id || "",
+        },
       });
       typingStopTimerRef.current = null;
     }, 2200);

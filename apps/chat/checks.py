@@ -68,9 +68,15 @@ def enterprise_deploy_checks(app_configs, **kwargs):
     if getattr(settings, "DB_ENGINE", "").lower() != "postgres":
         issues.append(Error("DB_ENGINE must be postgres for production deployments.", id="chat.E012"))
 
-    channel_backend = str(settings.CHANNEL_LAYERS.get("default", {}).get("BACKEND", "") or "")
-    if channel_backend.endswith("InMemoryChannelLayer"):
-        issues.append(Error("CHANNEL_LAYERS must use Redis or another shared backend in production.", id="chat.E013"))
+    realtime_transport = str(getattr(settings, "REALTIME_TRANSPORT", "") or "").lower()
+    if realtime_transport != "axum":
+        issues.append(Error("REALTIME_TRANSPORT must be axum in production.", id="chat.E013"))
+    if not bool(getattr(settings, "REALTIME_STREAM_ENABLED", False)):
+        issues.append(Error("REALTIME_STREAM_ENABLED must be enabled for Axum delivery.", id="chat.E016"))
+    if not bool(getattr(settings, "REALTIME_OUTBOX_ENABLED", False)):
+        issues.append(Error("REALTIME_OUTBOX_ENABLED must be enabled for durable realtime delivery.", id="chat.E017"))
+    if not bool(getattr(settings, "REALTIME_AUTH_ENABLED", False)):
+        issues.append(Error("REALTIME_AUTH_ENABLED must be enabled in production.", id="chat.E018"))
 
     cache_backend = str(settings.CACHES.get("default", {}).get("BACKEND", "") or "")
     if cache_backend.endswith("LocMemCache"):
@@ -85,17 +91,27 @@ def enterprise_deploy_checks(app_configs, **kwargs):
     if email_backend == "django.core.mail.backends.console.EmailBackend":
         issues.append(Warning("EMAIL_BACKEND is set to console; transactional emails will not be delivered.", id="chat.W007"))
 
-    if not getattr(settings, "TURN_URIS_JSON", ""):
-        issues.append(Error("TURN_URIS_JSON must be configured for production calling.", id="chat.E006"))
-    if not getattr(settings, "TURN_SHARED_SECRET", "") and not (
-        getattr(settings, "TURN_STATIC_USERNAME", "") and getattr(settings, "TURN_STATIC_PASSWORD", "")
-    ):
-        issues.append(Error("TURN credentials must be configured for production calling.", id="chat.E007"))
-    turn_shared_secret = str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()
-    if turn_shared_secret and turn_shared_secret in DEV_TURN_SECRETS:
-        issues.append(Error("TURN_SHARED_SECRET must be replaced with a production secret.", id="chat.E011"))
-    if _turn_hosts() & LOCAL_HOSTS:
-        issues.append(Error("TURN_URIS_JSON contains local addresses; replace them with public relay hostnames before production.", id="chat.E008"))
+    turn_provider = str(getattr(settings, "TURN_PROVIDER", "legacy") or "legacy").strip().lower()
+    if turn_provider == "cloudflare":
+        if not str(getattr(settings, "CLOUDFLARE_TURN_KEY_ID", "") or "").strip():
+            issues.append(Error("CLOUDFLARE_TURN_KEY_ID is required for production calling.", id="chat.E006"))
+        if not str(getattr(settings, "CLOUDFLARE_TURN_API_TOKEN", "") or "").strip():
+            issues.append(Error("CLOUDFLARE_TURN_API_TOKEN is required for production calling.", id="chat.E007"))
+        turn_api_url = str(getattr(settings, "CLOUDFLARE_TURN_API_BASE_URL", "") or "").strip()
+        if not turn_api_url.startswith("https://"):
+            issues.append(Error("CLOUDFLARE_TURN_API_BASE_URL must use HTTPS.", id="chat.E008"))
+    else:
+        if not getattr(settings, "TURN_URIS_JSON", ""):
+            issues.append(Error("TURN_URIS_JSON must be configured for legacy TURN.", id="chat.E006"))
+        if not getattr(settings, "TURN_SHARED_SECRET", "") and not (
+            getattr(settings, "TURN_STATIC_USERNAME", "") and getattr(settings, "TURN_STATIC_PASSWORD", "")
+        ):
+            issues.append(Error("Legacy TURN credentials must be configured.", id="chat.E007"))
+        turn_shared_secret = str(getattr(settings, "TURN_SHARED_SECRET", "") or "").strip()
+        if turn_shared_secret and turn_shared_secret in DEV_TURN_SECRETS:
+            issues.append(Error("TURN_SHARED_SECRET must be replaced with a production secret.", id="chat.E011"))
+        if _turn_hosts() & LOCAL_HOSTS:
+            issues.append(Error("TURN_URIS_JSON contains local addresses; replace them with public relay hostnames before production.", id="chat.E008"))
 
     firebase_project_id = str(getattr(settings, "FIREBASE_PROJECT_ID", "") or "").strip()
     firebase_service_account_path = resolve_firebase_service_account_path()

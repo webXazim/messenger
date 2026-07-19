@@ -3,9 +3,9 @@
 ## Purpose
 
 Support guest calls let an authorized Support owner or agent call the visitor in
-an active website conversation. They share the deployment's WebRTC and TURN
-infrastructure, but all business records, access checks, signaling, settings, and
-UI remain Support-only.
+an active website conversation. Cloudflare Realtime TURN provides short-lived relay
+credentials, while all business records, access checks, signaling, settings, and UI
+remain Support-only.
 
 ## Lifecycle
 
@@ -51,5 +51,7 @@ Before enabling calls, run:
 python manage.py check_support_readiness --fail-on-warning
 ```
 
-Test UDP and TCP TURN paths from two external networks. Do not validate only from
-localhost or two devices on the same Wi-Fi network.
+Run `python manage.py check_call_readiness --probe` to verify that Django can
+request short-lived Cloudflare ICE credentials. Then test a relay-forced call between
+two external networks. Do not validate only from localhost or two devices on the same
+Wi-Fi network.

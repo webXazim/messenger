@@ -13,7 +13,11 @@ const messagingServiceWorker = read("public/firebase-messaging-sw.js");
 const activeConversationView = read("src/lib/activeConversationView.ts");
 const cache = read("src/lib/realtimeCache.ts");
 const services = read("../apps/chat/services.py");
-const consumers = read("../apps/chat/consumers.py");
+const axumSocket = read("../realtime/src/websocket.rs");
+const realtimeAuth = read("../apps/common/realtime_auth.py");
+const realtimeCredentials = read("src/lib/realtimeCredentials.ts");
+const callRoom = read("src/pages/CallRoomPage.tsx");
+const realtimePublisher = read("../apps/common/realtime.py");
 const serializers = read("../apps/chat/api/serializers.py");
 const views = read("../apps/chat/api/views.py");
 const devicePresence = read("src/lib/devicePresence.ts");
@@ -57,8 +61,6 @@ for (const required of [
   'payload.event === "message.reaction_updated"',
   "acknowledgeConversationRead(conversationId, normalized.id)",
   "timelineAtLatestRef.current",
-  'socket.send({ event: "message.read"',
-  'socket.send({ event: "message.delivered"',
   'applyParticipantReceiptInCache(targetConversationId, "message.read", receipt, queryClient)',
   'refetchInterval:',
 ]) {
@@ -75,21 +77,48 @@ for (const required of [
 }
 
 for (const required of [
-  "_stop_all_typing",
-  "_broadcast_typing_event",
-  'event.get("event_id")',
-  "_public_presence_snapshot",
+  "socket.split()",
+  "high_queue_capacity",
+  "low_queue_capacity",
+  '"typing.start" | "typing.stop"',
+  '"presence.ping"',
+  '"call.signal"',
+  "validate_grant",
 ]) {
-  assert.ok(consumers.includes(required), `Missing WebSocket consumer hardening: ${required}`);
+  assert.ok(axumSocket.includes(required), `Missing Axum realtime hardening: ${required}`);
+}
+for (const required of ["issue_user_realtime_ticket", "issue_audience_grant", "issue_call_grant", "realtime_call_grant", "RS256"]) {
+  assert.ok(realtimeAuth.includes(required), `Missing realtime credential protection: ${required}`);
 }
 
+for (const required of [
+  "requestRealtimeCallGrant",
+  'call_grant: callGrant.grant',
+  "clearRealtimeCallGrant",
+]) {
+  assert.ok(`${realtimeCredentials}\n${callRoom}`.includes(required), `Missing active-call signaling grant: ${required}`);
+}
+assert.ok(axumSocket.includes("validate_call_grant"), "Axum does not validate active-call signaling grants.");
+assert.ok(axumSocket.includes("REALTIME_MAX_CONNECTION_AGE_SECONDS") || read("../realtime/src/config.rs").includes("REALTIME_MAX_CONNECTION_AGE_SECONDS"), "Realtime connections are not periodically re-authorized.");
+assert.ok(read("../realtime/src/config.rs").includes("REALTIME_CONNECTION_REFRESH_JITTER_SECONDS"), "Credential refresh jitter is missing.");
+assert.ok(realtimePublisher.includes('redis_stream') && realtimePublisher.includes('Axum realtime event delivery failed'), "Django realtime publishing is not transport-neutral.");
+
+
+for (const required of [
+  'TURN_PROVIDER", "legacy',
+  "CLOUDFLARE_TURN_KEY_ID",
+  "generate-ice-servers",
+  '"provider": "cloudflare"',
+]) {
+  assert.ok(services.includes(required), `Missing Cloudflare TURN credential boundary: ${required}`);
+}
 assert.ok(serializers.includes("_presence_is_visible"), "Chat participant serializers still expose private presence.");
 assert.ok(cache.includes("mergeConversationPreservingPresence"), "Conversation refreshes can still overwrite newer presence state.");
 assert.ok(cache.includes("mergeConversationReceipts(current, incoming)"), "Conversation refreshes can still regress delivery and read receipts.");
 assert.ok(cache.includes("reconcileConversationPresence"), "Conversation updates do not reconcile a peer already known to be online.");
 assert.ok(cache.includes('{ queryKey: ["conversation-route"] }'), "Named conversation routes do not receive presence updates.");
 assert.ok(appShell.includes('["call.heartbeat", "call.media_state", "call.quality_report"]'), "Active call traffic does not reconcile global user presence.");
-assert.match(appShell, /payload\.event === "message\.created"[\s\S]*socket\.send\(\{ event: "message\.delivered"/, "Messages received outside the open chat are not acknowledged as delivered.");
+assert.match(appShell, /payload\.event === "message\.created"[\s\S]*chatApi\.markConversationDelivered/, "Messages received outside the open chat are not acknowledged as delivered through Django.");
 assert.ok(appShell.includes('message.conversation_id || payload.data?.conversation_id || payload.data?.conversation'), "Global delivery acknowledgement can lose the conversation id.");
 assert.ok(appShell.includes("decryptMessageTextResult"), "Foreground message notifications do not decrypt their preview locally.");
 assert.ok(appShell.includes("isConversationActivelyViewedAtLatest(conversationId)"), "Foreground notifications do not respect the exact chat's latest-view state.");
@@ -97,7 +126,7 @@ assert.ok(activeConversationView.includes("activeConversationView.conversationId
 assert.ok(activeConversationView.includes("activeConversationView.atLatest"), "Active chat notification suppression does not require the latest-message viewpoint.");
 assert.ok(conversation.includes("setActiveConversationView({ conversationId, atLatest: timelineAtLatest, visible: pageVisible })"), "Conversation pages do not publish their live latest-view state.");
 assert.match(conversation, /shouldReadImmediately[\s\S]*markConversationReadInCaches\(queryClient, conversationId\)[\s\S]*acknowledgeConversationRead/, "Visible latest-view messages are not cleared from unread state immediately.");
-assert.match(appShell, /chatIsOpenAtLatest[\s\S]*socket\.send\(\{ event: "message\.read"/, "The global realtime listener does not publish an immediate read receipt for the visible latest chat.");
+assert.match(appShell, /chatIsOpenAtLatest[\s\S]*chatApi\.markConversationRead/, "The global realtime listener does not persist an immediate read receipt through Django.");
 assert.ok(conversation.includes("new IntersectionObserver"), "Rendered message visibility is not observed for immediate read receipts.");
 assert.ok(cache.includes("applyActiveConversationReadState(reconcileConversationPresence"), "Realtime conversation updates can restore an unread badge for the actively viewed latest chat.");
 assert.ok(!appShell.includes("New chat activity"), "Foreground message notifications still expose the generic activity label.");
@@ -111,9 +140,10 @@ assert.ok(serializers.includes("return getattr(obj, \"last_seen_at\", None) if s
 assert.ok(views.includes('if getattr(participant, "_read_changed", False)'), "Unchanged read receipts are still broadcast repeatedly.");
 assert.ok(services.includes("effective_read_message"), "Duplicate read acknowledgements do not repair their delivered cursor.");
 assert.ok(views.includes("_broadcast_presence_update(request.user, snapshot)"), "REST presence changes are not propagated to peers.");
-assert.match(consumers, /_subscribe[\s\S]*group_send\(group_name, self\._event_payload\("message\.delivered"/, "Subscription delivery receipts are not broadcast to the sender.");
 assert.ok(devicePresence.includes("PRESENCE_IDLE_AFTER_MS") && devicePresence.includes("detectPresenceDeviceType"), "The client does not classify broad device type or define an idle threshold.");
 assert.ok(socket.includes("presence_status") && socket.includes("device_type") && socket.includes("visibilitychange"), "Socket heartbeats do not report activity and device presence.");
+assert.ok(!conversation.includes('socket.send({ event: "message.read"'), "Read receipts must use the durable Django HTTP path.");
+assert.ok(!conversation.includes('socket.send({ event: "message.delivered"'), "Delivery receipts must use the durable Django HTTP path.");
 assert.ok(services.includes("_presence_snapshot_from_devices") && services.includes('presence_status = "active" if actively_used else "idle"'), "Multi-device presence does not aggregate active and idle sessions.");
 assert.ok(personPresentation.includes('"Idle"') && personPresentation.includes("deviceLabel"), "Presence labels do not display idle state and device type.");
 assert.ok(conversation.includes("presenceAwareConversation") && conversation.includes("applyKnownOnlinePresence([conversation], friends)"), "The open chat header and details do not share the inbox presence snapshot.");

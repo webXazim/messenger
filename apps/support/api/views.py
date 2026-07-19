@@ -4,11 +4,13 @@ from datetime import timedelta
 from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, DateTimeField, F, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.db.models.functions import Coalesce
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -26,7 +28,14 @@ from apps.chat.api.views import (
 )
 from apps.chat.models import MessageAttachment, PendingUpload
 from apps.chat.services import dispatch_pending_upload_scan, scan_upload_file
+from apps.common.realtime_auth import RealtimeCredentialError, issue_widget_realtime_ticket
+from apps.common.realtime_presence import support_visitors_online
 from apps.support.api.permissions import IsSupportOwner
+from apps.support.api.cursors import (
+    InvalidSupportInboxCursor,
+    decode_support_inbox_cursor,
+    encode_support_inbox_cursor,
+)
 from apps.support.api.serializers import (
     SupportAccountSerializer,
     SupportAgentAvailabilitySerializer,
@@ -48,8 +57,10 @@ from apps.support.api.serializers import (
     SupportWidgetSettingsSerializer,
     SupportWebsiteWidgetConfigurationSerializer,
     SupportTagSerializer,
+    SupportTagReadSerializer,
     SupportInternalNoteSerializer,
     SupportCannedReplySerializer,
+    SupportCannedReplyReadSerializer,
     SupportCannedReplyWriteSerializer,
     SupportSavedInboxViewSerializer,
     SupportSavedInboxViewWriteSerializer,
@@ -62,6 +73,7 @@ from apps.support.api.serializers import (
     SupportCSATSubmitSerializer,
     SupportKnowledgeSettingsSerializer,
     SupportKnowledgeCategorySerializer,
+    SupportKnowledgeCategoryReadSerializer,
     SupportKnowledgeArticleSerializer,
     SupportKnowledgeArticleWriteSerializer,
     PublicKnowledgeCategorySerializer,
@@ -78,6 +90,7 @@ from apps.support.api.serializers import (
     SupportCallMediaStateSerializer,
     invitation_preview_payload,
 )
+from apps.support.cache import DEFAULT_PUBLIC_KB_TTL, public_kb_list_cache_key
 from apps.support.models import (
     SupportAccount,
     SupportAgent,
@@ -118,12 +131,15 @@ from apps.support.conversation_services import (
     claim_conversation,
     get_context_conversation,
     get_or_create_visitor_conversation,
+    mark_team_delivered,
     mark_team_read,
+    mark_visitor_delivered,
     mark_visitor_read,
     send_team_message,
     send_visitor_message,
     support_conversations_for_context,
     support_messages_qs,
+    with_support_inbox_metrics,
     team_unread_count,
     update_conversation_workflow,
 )
@@ -412,7 +428,7 @@ class SupportBootstrapView(APIView):
             })
 
         expire_stale_invitations(account)
-        websites = visible_websites(context).order_by("name")
+        websites = visible_websites(context).select_related("widget_settings").order_by("name")
         agents = (
             SupportAgent.objects.filter(support_account=account, is_active=True)
             .select_related("user", "user__profile")
@@ -523,7 +539,7 @@ class SupportWebsiteListCreateView(APIView):
         context = attach_support_context(request)
         if not support_chat_enabled() or not context.account or not context.account.has_product_access:
             return Response({"detail": "Support Chat access is not active."}, status=status.HTTP_403_FORBIDDEN)
-        websites = visible_websites(context).order_by("name")
+        websites = visible_websites(context).select_related("widget_settings").order_by("name")
         return Response(SupportWebsiteSerializer(websites, many=True).data)
 
     def post(self, request):
@@ -920,6 +936,37 @@ class SupportWidgetSessionRefreshView(APIView):
         return public_widget_response(payload)
 
 
+class SupportWidgetRealtimeTicketView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_scope = "realtime_ticket"
+
+    def post(self, request, site_key, session_id):
+        try:
+            website = website_for_public_widget(site_key)
+            origin = assert_widget_request_allowed(request, website)
+            session = authenticate_widget_session(
+                website=website,
+                session_id=session_id,
+                raw_token=token_from_request(request),
+                origin=origin,
+            )
+            issued = issue_widget_realtime_ticket(session=session, origin=origin)
+        except WidgetAccessError as error:
+            return widget_error_response(error)
+        except RealtimeCredentialError as error:
+            return Response({"detail": error.detail, "code": error.code}, status=error.status_code)
+        return public_widget_response(
+            {
+                "ticket": issued.token,
+                "expires_in": issued.expires_in,
+                "expires_at": issued.expires_at,
+                "protocol_version": 1,
+            },
+            status_code=status.HTTP_201_CREATED,
+        )
+
+
 class SupportWebsiteWidgetConfigurationView(APIView):
     def patch(self, request, website_id):
         context, error = require_owner(request, self)
@@ -1017,25 +1064,67 @@ class SupportConversationListView(APIView):
         except (TypeError, ValueError):
             limit, offset = 50, 0
 
-        queryset = queryset.order_by("-conversation__last_message_at", "-created_at")
         total = queryset.count()
-        conversations = list(queryset[offset:offset + limit])
+        queryset = with_support_inbox_metrics(queryset, request.user).annotate(
+            inbox_ordered_at=Coalesce(
+                F("conversation__last_message_at"),
+                F("created_at"),
+                output_field=DateTimeField(),
+            )
+        )
+        cursor_value = (request.query_params.get("cursor") or "").strip()
+        if cursor_value:
+            try:
+                cursor = decode_support_inbox_cursor(cursor_value)
+            except InvalidSupportInboxCursor as cursor_error:
+                return Response(
+                    {"detail": str(cursor_error), "code": "invalid_cursor"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            queryset = queryset.filter(
+                Q(inbox_ordered_at__lt=cursor.ordered_at)
+                | Q(inbox_ordered_at=cursor.ordered_at, pk__lt=cursor.conversation_id)
+            )
+            offset = 0
+
+        queryset = queryset.order_by("-inbox_ordered_at", "-pk")
+        page = list(queryset[offset:offset + limit + 1])
+        has_more = len(page) > limit
+        conversations = page[:limit]
+        next_cursor = None
+        if has_more and conversations:
+            tail = conversations[-1]
+            next_cursor = encode_support_inbox_cursor(
+                ordered_at=tail.inbox_ordered_at,
+                conversation_id=tail.pk,
+            )
+        visitor_online_map = support_visitors_online(
+            conversation.visitor_id for conversation in conversations
+        )
+        service_settings = service_settings_for(context.account)
         serializer = SupportConversationSerializer(
             conversations,
             many=True,
-            context={"user": request.user, "request": request},
+            context={
+                "user": request.user,
+                "request": request,
+                "support_visitor_online_map": visitor_online_map,
+                "support_service_settings_map": {str(context.account.id): service_settings},
+            },
         )
-        unread_total = sum(team_unread_count(conversation, request.user) for conversation in conversations)
-        website_unread = {}
+        unread_total = 0
+        website_unread: dict[str, int] = {}
         for conversation in conversations:
-            unread = team_unread_count(conversation, request.user)
+            unread = int(getattr(conversation, "prefetched_team_unread_count", 0) or 0)
+            unread_total += unread
             if unread:
                 key = str(conversation.website_id)
                 website_unread[key] = website_unread.get(key, 0) + unread
         return Response({
             "results": serializer.data,
             "count": total,
-            "next_offset": offset + limit if offset + limit < total else None,
+            "next_offset": offset + limit if not cursor_value and offset + limit < total else None,
+            "next_cursor": next_cursor,
             "unread_total": unread_total,
             "website_unread": website_unread,
         })
@@ -1046,15 +1135,18 @@ class SupportUnreadSummaryView(APIView):
         context, error = require_support_access(request)
         if error:
             return error
-        conversations = list(support_conversations_for_context(context))
+        conversations = with_support_inbox_metrics(
+            support_conversations_for_context(context),
+            request.user,
+        ).values("website_id", "prefetched_team_unread_count")
         website_unread: dict[str, int] = {}
         total = 0
         for conversation in conversations:
-            count = team_unread_count(conversation, request.user)
+            count = int(conversation["prefetched_team_unread_count"] or 0)
             if not count:
                 continue
             total += count
-            website_id = str(conversation.website_id)
+            website_id = str(conversation["website_id"])
             website_unread[website_id] = website_unread.get(website_id, 0) + count
         alert_unread = SupportServiceAlert.objects.filter(
             support_account=context.account,
@@ -1325,7 +1417,11 @@ class SupportConversationMessagesView(APIView):
         except SupportConversationError as conversation_error:
             return support_conversation_error_response(conversation_error)
         messages = list(support_messages_qs(conversation))
-        mark_team_read(support_conversation=conversation, user=request.user)
+        mark_team_read(
+                support_conversation=conversation,
+                user=request.user,
+                message_id=request.data.get("message_id") or None,
+            )
         return Response({
             "conversation": SupportConversationSerializer(conversation, context={"user": request.user, "request": request}).data,
             "messages": SupportMessageSerializer(
@@ -1350,6 +1446,7 @@ class SupportConversationMessagesView(APIView):
                 text=serializer.validated_data.get("text", ""),
                 attachment_ids=serializer.validated_data.get("attachment_ids", []),
                 voice_note=serializer.validated_data.get("voice_note", False),
+                client_temp_id=serializer.validated_data.get("client_temp_id", ""),
             )
             conversation = get_context_conversation(context, conversation.id)
             mark_team_read(support_conversation=conversation, user=request.user)
@@ -1363,6 +1460,23 @@ class SupportConversationMessagesView(APIView):
             ).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class SupportConversationDeliveredView(APIView):
+    def post(self, request, conversation_id):
+        context, error = require_support_access(request)
+        if error:
+            return error
+        try:
+            conversation = get_context_conversation(context, conversation_id)
+            mark_team_delivered(
+                support_conversation=conversation,
+                user=request.user,
+                message_id=request.data.get("message_id") or None,
+            )
+        except SupportConversationError as conversation_error:
+            return support_conversation_error_response(conversation_error)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SupportConversationReadView(APIView):
@@ -1424,7 +1538,10 @@ class SupportWidgetConversationMessagesView(APIView):
             if not conversation:
                 return public_widget_response({"conversation": None, "messages": []})
             messages = list(support_messages_qs(conversation))
-            mark_visitor_read(support_conversation=conversation)
+            mark_visitor_read(
+                    support_conversation=conversation,
+                    message_id=request.data.get("message_id") or None,
+                )
         except (WidgetAccessError, SupportConversationError) as conversation_error:
             if isinstance(conversation_error, WidgetAccessError):
                 return widget_error_response(conversation_error)
@@ -1451,6 +1568,7 @@ class SupportWidgetConversationMessagesView(APIView):
                 text=serializer.validated_data.get("text", ""),
                 attachment_ids=serializer.validated_data.get("attachment_ids", []),
                 voice_note=serializer.validated_data.get("voice_note", False),
+                client_temp_id=serializer.validated_data.get("client_temp_id", ""),
             )
             conversation = SupportConversation.objects.select_related(
                 "conversation",
@@ -1483,6 +1601,32 @@ class SupportWidgetConversationMessagesView(APIView):
         )
 
 
+class SupportWidgetConversationDeliveredView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_scope = "support_widget_resume"
+
+    def post(self, request, site_key, session_id):
+        try:
+            website = website_for_public_widget(site_key)
+            origin = assert_widget_request_allowed(request, website)
+            session = authenticate_widget_session(
+                website=website,
+                session_id=session_id,
+                raw_token=token_from_request(request),
+                origin=origin,
+            )
+            conversation = SupportConversation.objects.filter(visitor=session.visitor, website=website).first()
+            if conversation:
+                mark_visitor_delivered(
+                    support_conversation=conversation,
+                    message_id=request.data.get("message_id") or None,
+                )
+        except WidgetAccessError as widget_error:
+            return widget_error_response(widget_error)
+        return public_widget_response({}, status_code=status.HTTP_204_NO_CONTENT)
+
+
 class SupportWidgetConversationReadView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -1511,7 +1655,10 @@ class SupportTagListCreateView(APIView):
         context, error = require_support_access(request)
         if error:
             return error
-        return Response(SupportTagSerializer(visible_tags(context), many=True).data)
+        rows = visible_tags(context).values(
+            "id", "name", "color", "is_active", "created_at", "updated_at"
+        )
+        return Response(SupportTagReadSerializer(rows, many=True).data)
 
     def post(self, request):
         context, error = require_owner(request, self)
@@ -1600,7 +1747,11 @@ class SupportCannedReplyListCreateView(APIView):
             return error
         website_id = request.query_params.get("website") or None
         replies = visible_canned_replies(context, website_id=website_id)
-        return Response(SupportCannedReplySerializer(replies, many=True).data)
+        rows = replies.annotate(website_name=F("website__name")).values(
+            "id", "website_id", "website_name", "shortcut", "title", "body",
+            "is_active", "created_at", "updated_at",
+        )
+        return Response(SupportCannedReplyReadSerializer(rows, many=True).data)
 
     def post(self, request):
         context, error = require_owner(request, self)
@@ -2131,7 +2282,11 @@ class SupportKnowledgeCategoryListCreateView(APIView):
         queryset = queryset.annotate(
             article_count=Count("articles", filter=Q(articles__status=SupportKnowledgeArticle.Status.PUBLISHED))
         )
-        return Response(SupportKnowledgeCategorySerializer(queryset, many=True).data)
+        rows = queryset.values(
+            "id", "name", "description", "sort_order", "is_active",
+            "article_count", "created_at", "updated_at",
+        )
+        return Response(SupportKnowledgeCategoryReadSerializer(rows, many=True).data)
 
     def post(self, request):
         context, error = require_owner(request, self)
@@ -2377,6 +2532,20 @@ class SupportWidgetKnowledgeListView(APIView):
             return public_widget_response({"enabled": False, "categories": [], "articles": []})
         category_id = request.query_params.get("category") or None
         query_value = request.query_params.get("q") or ""
+        try:
+            requested_limit = min(10, max(1, int(request.query_params.get("limit") or settings_obj.max_suggestions)))
+        except (TypeError, ValueError):
+            requested_limit = settings_obj.max_suggestions
+        cache_key = public_kb_list_cache_key(
+            account_id=website.support_account_id,
+            website_id=website.id,
+            query=query_value,
+            category_id=category_id,
+            limit=requested_limit,
+        )
+        cached_payload = cache.get(cache_key)
+        if cached_payload is not None:
+            return public_widget_response(cached_payload)
         if not settings_obj.suggestions_enabled and not query_value.strip() and not category_id:
             articles = SupportKnowledgeArticle.objects.none()
         else:
@@ -2384,7 +2553,7 @@ class SupportWidgetKnowledgeListView(APIView):
                 website,
                 query=query_value,
                 category_id=category_id,
-                limit=request.query_params.get("limit") or settings_obj.max_suggestions,
+                limit=requested_limit,
             )
         visible_category_ids = public_articles_for_website(website).exclude(category_id=None).values_list("category_id", flat=True)
         categories = SupportKnowledgeCategory.objects.filter(
@@ -2392,13 +2561,15 @@ class SupportWidgetKnowledgeListView(APIView):
             is_active=True,
             id__in=visible_category_ids,
         ).distinct()
-        return public_widget_response({
+        payload = {
             "enabled": True,
             "suggestions_enabled": settings_obj.suggestions_enabled,
             "allow_feedback": settings_obj.allow_article_feedback,
             "categories": PublicKnowledgeCategorySerializer(categories, many=True).data,
             "articles": PublicKnowledgeArticleSerializer(articles, many=True).data,
-        })
+        }
+        cache.set(cache_key, payload, timeout=DEFAULT_PUBLIC_KB_TTL)
+        return public_widget_response(payload)
 
 
 class SupportWidgetKnowledgeArticleView(APIView):

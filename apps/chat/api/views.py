@@ -1,8 +1,6 @@
 from pathlib import Path
 import mimetypes
 from django.conf import settings
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
@@ -18,6 +16,11 @@ from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.throttling import ScopedRateThrottle
 
+from apps.common.realtime import (
+    conversation_audience,
+    publish_realtime_event,
+    user_audience,
+)
 from apps.chat.models import (
     CallSession,
     ChatAuditLog,
@@ -116,7 +119,6 @@ from apps.chat.services import (
     unblock_user,
     update_participant_role,
     validate_media_access_token,
-    make_realtime_event,
     make_realtime_safe,
     get_public_presence_snapshot,
     presence_recipient_ids,
@@ -301,29 +303,29 @@ def _build_thumbnail_file_response(file_field, *, filename, request=None):
     return response
 
 def _broadcast_to_conversation(conversation_id, event, data):
-    channel_layer = get_channel_layer()
-    if channel_layer is None:
-        return
-    payload = make_realtime_event(event, data)
-    async_to_sync(channel_layer.group_send)(f"conversation_{conversation_id}", payload)
+    publish_realtime_event(
+        event_name=event,
+        data=data,
+        audiences=[conversation_audience(conversation_id)],
+    )
 
 
 def _broadcast_to_user(user_id, event, data):
-    channel_layer = get_channel_layer()
-    if channel_layer is None:
-        return
-    payload = make_realtime_event(event, data)
-    async_to_sync(channel_layer.group_send)(f"user_{user_id}", payload)
+    publish_realtime_event(
+        event_name=event,
+        data=data,
+        audiences=[user_audience(user_id)],
+    )
 
 
 def _broadcast_presence_update(user, snapshot):
-    channel_layer = get_channel_layer()
-    if channel_layer is None:
-        return
     payload = {"user_id": str(user.id), **get_public_presence_snapshot(user, snapshot)}
-    event = make_realtime_event("presence.updated", payload)
-    for recipient_id in presence_recipient_ids(user):
-        async_to_sync(channel_layer.group_send)(f"user_{recipient_id}", event)
+    publish_realtime_event(
+        event_name="presence.updated",
+        data=payload,
+        audiences=[user_audience(recipient_id) for recipient_id in presence_recipient_ids(user)],
+        durable=False,
+    )
 
 
 def _broadcast_pair_presence_refresh(user_a, user_b):
@@ -1480,7 +1482,7 @@ class CallListView(generics.ListAPIView):
     def get_queryset(self):
         if _schema_generation(self):
             return CallSession.objects.none()
-        return CallSession.objects.filter(conversation__participants__user=self.request.user, conversation__participants__left_at__isnull=True).select_related("conversation", "initiated_by", "answered_by").prefetch_related("participants__user").distinct()
+        return CallSession.objects.filter(conversation__participants__user=self.request.user, conversation__participants__left_at__isnull=True).select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile").distinct()
 
 
 class RecentCallListView(generics.ListAPIView):
@@ -1527,14 +1529,14 @@ class CallDetailView(generics.RetrieveAPIView):
     def get_queryset(self):
         if _schema_generation(self):
             return CallSession.objects.none()
-        return CallSession.objects.filter(conversation__participants__user=self.request.user, conversation__participants__left_at__isnull=True).select_related("conversation", "initiated_by", "answered_by").prefetch_related("participants__user").distinct()
+        return CallSession.objects.filter(conversation__participants__user=self.request.user, conversation__participants__left_at__isnull=True).select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile").distinct()
 
 
 class CallAcceptView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, call_id):
-        call = get_object_or_404(CallSession.objects.select_related("conversation", "initiated_by", "answered_by").prefetch_related("participants__user"), id=call_id)
+        call = get_object_or_404(CallSession.objects.select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile"), id=call_id)
         call = accept_call(request.user, call)
         output = CallSessionSerializer(call, context={"request": request}).data
         _broadcast_to_conversation(str(call.conversation_id), "call.accepted", output)
@@ -1547,7 +1549,7 @@ class CallDeclineView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, call_id):
-        call = get_object_or_404(CallSession.objects.select_related("conversation", "initiated_by", "answered_by").prefetch_related("participants__user"), id=call_id)
+        call = get_object_or_404(CallSession.objects.select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile"), id=call_id)
         serializer = CallActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         call = decline_call(request.user, call, serializer.validated_data.get("reason") or "declined")
@@ -1562,7 +1564,7 @@ class CallEndView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, call_id):
-        call = get_object_or_404(CallSession.objects.select_related("conversation", "initiated_by", "answered_by").prefetch_related("participants__user"), id=call_id)
+        call = get_object_or_404(CallSession.objects.select_related("conversation", "initiated_by", "initiated_by__profile", "answered_by", "answered_by__profile").prefetch_related("participants__user__profile"), id=call_id)
         serializer = CallActionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         call = end_call(request.user, call, serializer.validated_data.get("reason") or "ended")
@@ -1646,7 +1648,7 @@ class CallOrchestrationView(views.APIView):
 
     def get(self, request, call_id):
         call = get_object_or_404(
-            CallSession.objects.prefetch_related("participants__user"),
+            CallSession.objects.prefetch_related("participants__user__profile"),
             id=call_id,
             conversation__participants__user=request.user,
         )
@@ -1670,7 +1672,7 @@ class CallDiagnosticsView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, call_id):
-        call = get_object_or_404(CallSession.objects.prefetch_related("participants__user"), id=call_id, conversation__participants__user=request.user)
+        call = get_object_or_404(CallSession.objects.prefetch_related("participants__user__profile"), id=call_id, conversation__participants__user=request.user)
         expire_stale_call_participants()
         payload = get_call_diagnostics(call)
         serializer = CallDiagnosticsSerializer(payload)

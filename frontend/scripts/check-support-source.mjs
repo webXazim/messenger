@@ -217,6 +217,12 @@ assert.ok(appShell.includes("supportRealtime.socketStatus"), "Support and Messen
 assert.ok(supportInbox.includes('socketStatus === "open" ? false'), "Support polling fallback does not stop while realtime is healthy.");
 assert.ok(widgetLoader.includes("connectRealtime"), "Public widget realtime delivery is missing.");
 assert.ok(widgetLoader.includes("scheduleRealtimeReconnect"), "Public widget reconnect recovery is missing.");
+assert.ok(supportSocket.includes('payload.event === "connection.ready"'), "Support sockets do not translate Axum readiness into recovery refreshes.");
+assert.ok(supportRealtime.includes('payload.event === "support.ready"'), "Support reconnects do not invalidate durable state.");
+assert.ok(supportInbox.includes("client_temp_id: clientTempId"), "Support agent optimistic IDs are not persisted for idempotency.");
+assert.ok(widgetLoader.includes("client_temp_id: clientTempId"), "Support visitor optimistic IDs are not persisted for idempotency.");
+assert.ok(widgetLoader.includes("payload.data.message_id || payload.data.id"), "Widget realtime delivery receipts do not resolve the authoritative message ID.");
+
 
 assert.ok(css.includes("@media (max-width: 760px)"), "Support responsive tablet/mobile layout is missing.");
 assert.ok(css.includes("@media (max-width: 480px)"), "Support compact mobile layout is missing.");

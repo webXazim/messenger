@@ -12,6 +12,7 @@ import { useChatSocket } from "../hooks/useChatSocket";
 import { useCallWakeLock } from "../hooks/useCallWakeLock";
 import { buildCallMediaConstraints, getCallMediaErrorMessage, preflightCallMedia, requestCallMedia } from "../lib/mediaPermissions";
 import { patchCallCaches } from "../lib/realtimeCache";
+import { clearRealtimeCallGrant, requestRealtimeCallGrant } from "../lib/realtimeCredentials";
 import { safeId } from "../lib/safeId";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { isTerminalCall } from "../lib/callLifecycle";
@@ -752,18 +753,28 @@ export function CallRoomPage({ callIdOverride, displayMode = "full", onCallFinis
       ...(localCallUserId ? { from_user_id: localCallUserId } : {}),
     };
 
-    const wsDelivered = !options?.forceHttp && socket.send({
-      event: "call.signal",
-      data: {
-        call_id: callId,
-        conversation_id: String(callRef.current?.conversation || ""),
-        signal_id: signalId,
-        ...(remoteUserId ? { to_user_id: remoteUserId } : {}),
-        ...(localCallUserId ? { from_user_id: localCallUserId } : {}),
-        signal_type: signalType,
-        payload: envelopePayload,
-      },
-    });
+    let wsDelivered = false;
+    if (!options?.forceHttp && socket.isOpen()) {
+      try {
+        const callGrant = await requestRealtimeCallGrant(callId);
+        wsDelivered = socket.send({
+          event: "call.signal",
+          data: {
+            call_id: callId,
+            call_grant: callGrant.grant,
+            conversation_id: String(callRef.current?.conversation || ""),
+            signal_id: signalId,
+            ...(remoteUserId ? { to_user_id: remoteUserId } : {}),
+            ...(localCallUserId ? { from_user_id: localCallUserId } : {}),
+            signal_type: signalType,
+            payload: envelopePayload,
+          },
+        });
+      } catch {
+        clearRealtimeCallGrant(callId);
+        wsDelivered = false;
+      }
+    }
 
     const shouldPersistSdp = signalType === "offer" || signalType === "answer";
     if (wsDelivered && !shouldPersistSdp) {

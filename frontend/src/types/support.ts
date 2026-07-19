@@ -190,6 +190,7 @@ export type SupportAttachment = {
 };
 
 export type SupportMessageSendInput = {
+  client_temp_id?: string;
   text?: string;
   attachment_ids?: string[];
   voice_note?: boolean;
@@ -205,6 +206,7 @@ export type SupportMessageSender = {
 
 export type SupportMessage = {
   id: string;
+  client_temp_id?: string;
   type: "text" | "image" | "video" | "audio" | "file" | "system";
   text: string;
   created_at: string;
@@ -291,6 +293,7 @@ export type SupportConversationListResponse = {
   results: SupportConversation[];
   count: number;
   next_offset: number | null;
+  next_cursor?: string | null;
   unread_total: number;
   website_unread: Record<string, number>;
 };
@@ -306,6 +309,7 @@ export type SupportConversationFilters = {
   search?: string;
   status?: SupportConversation["status"] | "";
   priority?: SupportConversation["priority"] | "";
+  cursor?: string;
   tag?: string;
   limit?: number;
   offset?: number;

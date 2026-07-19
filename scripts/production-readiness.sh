@@ -40,7 +40,7 @@ require_value() {
 
 for name in APP_DOMAIN SITE_URL FRONTEND_BASE_URL ALLOWED_HOSTS CORS_ALLOWED_ORIGINS \
   CSRF_TRUSTED_ORIGINS SECRET_KEY DB_NAME DB_USER DB_PASSWORD DROPLET_PUBLIC_IP \
-  TURN_REALM TURN_SHARED_SECRET TURN_URIS_JSON CLOUDFLARE_R2_ACCOUNT_ID \
+  CLOUDFLARE_TURN_KEY_ID CLOUDFLARE_TURN_API_TOKEN CLOUDFLARE_R2_ACCOUNT_ID \
   CLOUDFLARE_R2_BUCKET_NAME CLOUDFLARE_R2_ACCESS_KEY_ID \
   CLOUDFLARE_R2_SECRET_ACCESS_KEY; do
   require_value "$name"
@@ -50,16 +50,11 @@ app_domain="$(read_env APP_DOMAIN)"
 site_url="$(read_env SITE_URL)"
 frontend_url="$(read_env FRONTEND_BASE_URL)"
 secret="$(read_env SECRET_KEY)"
-turn_secret="$(read_env TURN_SHARED_SECRET)"
-relay_min="$(read_env TURN_RELAY_MIN_PORT)"
-relay_max="$(read_env TURN_RELAY_MAX_PORT)"
 
 [[ "$site_url" == "https://${app_domain}" ]] || failures+=("SITE_URL must equal https://APP_DOMAIN")
 [[ "$frontend_url" == "https://${app_domain}" ]] || failures+=("FRONTEND_BASE_URL must equal https://APP_DOMAIN")
 [[ "$(read_env ALLOWED_HOSTS)" == "$app_domain" ]] || warnings+=("ALLOWED_HOSTS should contain only APP_DOMAIN")
 (( ${#secret} >= 50 )) || failures+=("SECRET_KEY must contain at least 50 characters")
-(( ${#turn_secret} >= 32 )) || failures+=("TURN_SHARED_SECRET must contain at least 32 characters")
-
 
 for pair in   "DEBUG:False"   "MESSENGER_ENVIRONMENT:production"   "MESSENGER_REQUIRE_SECURE_SETTINGS:True"   "SECURE_SSL_REDIRECT:True"   "SESSION_COOKIE_SECURE:True"   "CSRF_COOKIE_SECURE:True"   "SECURE_PROXY_SSL_HEADER_ENABLED:True"   "USE_X_FORWARDED_HOST:True"   "CHAT_USE_R2_STORAGE:True"   "AUTH_REQUIRE_EMAIL_VERIFICATION:True"; do
   name="${pair%%:*}"
@@ -69,14 +64,13 @@ for pair in   "DEBUG:False"   "MESSENGER_ENVIRONMENT:production"   "MESSENGER_RE
 done
 
 [[ "$(read_env NGINX_CONF_PATH)" == "./nginx/snm.production.conf" ]] ||   failures+=("NGINX_CONF_PATH must be ./nginx/snm.production.conf")
-[[ "$(read_env TURN_EXTERNAL_IP)" == "$(read_env DROPLET_PUBLIC_IP)" ]] ||   failures+=("TURN_EXTERNAL_IP must match DROPLET_PUBLIC_IP for this VPS deployment")
-[[ "$(read_env TURN_REALM)" != "$app_domain" ]] ||   warnings+=("Use a separate DNS-only TURN hostname rather than APP_DOMAIN")
-
-if [[ "$relay_min" =~ ^[0-9]+$ && "$relay_max" =~ ^[0-9]+$ ]]; then
-  (( relay_min >= 1024 && relay_max <= 65535 && relay_min <= relay_max )) || failures+=("TURN relay range is invalid")
-  (( relay_max - relay_min + 1 >= 20 )) || warnings+=("TURN relay range is narrow for concurrent calls")
+[[ "$(read_env TURN_PROVIDER)" == "cloudflare" ]] || failures+=("TURN_PROVIDER must be cloudflare in production")
+[[ "$(read_env CLOUDFLARE_TURN_API_BASE_URL)" == https://* ]] || failures+=("CLOUDFLARE_TURN_API_BASE_URL must use HTTPS")
+turn_ttl="$(read_env TURN_CREDENTIAL_TTL_SECONDS)"
+if [[ "$turn_ttl" =~ ^[0-9]+$ ]]; then
+  (( turn_ttl >= 300 && turn_ttl <= 86400 )) || failures+=("TURN_CREDENTIAL_TTL_SECONDS must be between 300 and 86400")
 else
-  failures+=("TURN_RELAY_MIN_PORT and TURN_RELAY_MAX_PORT must be integers")
+  failures+=("TURN_CREDENTIAL_TTL_SECONDS must be an integer")
 fi
 
 require_value AUTH_PAYMENT_JWT_ISSUER
@@ -106,6 +100,17 @@ fi
 for command in docker openssl curl; do
   command -v "$command" >/dev/null || failures+=("Required command is not installed: $command")
 done
+
+[[ -s secrets/realtime-private.pem ]] || failures+=("secrets/realtime-private.pem is missing; run scripts/generate-realtime-keys.sh")
+[[ -s secrets/realtime-public.pem ]] || failures+=("secrets/realtime-public.pem is missing; run scripts/generate-realtime-keys.sh")
+[[ -s secrets/backup-passphrase ]] || failures+=("secrets/backup-passphrase is missing; run scripts/generate-backup-key.sh and copy it off the VPS")
+if [[ "$(read_env BACKUP_R2_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]]; then
+  require_value BACKUP_R2_BUCKET_NAME
+fi
+[[ "$(read_env REALTIME_TRANSPORT)" == "axum" ]] || failures+=("REALTIME_TRANSPORT must be axum")
+[[ "$(read_env REALTIME_STREAM_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_STREAM_ENABLED must be true")
+[[ "$(read_env REALTIME_OUTBOX_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_OUTBOX_ENABLED must be true")
+require_value REALTIME_ALLOWED_ORIGINS
 
 python_bin="${PYTHON_BIN:-}"
 if [[ -z "$python_bin" ]]; then
@@ -145,7 +150,7 @@ echo "Production preflight passed."
 [[ "$mode" == "preflight" ]] && exit 0
 
 running_services="$("${compose[@]}" ps --status running --services)"
-for service in postgres redis web worker beat frontend nginx turn; do
+for service in postgres redis web worker beat realtime frontend nginx; do
   if ! grep -qx "$service" <<<"$running_services"; then
     echo "Required service is not running: $service" >&2
     exit 1
@@ -158,6 +163,10 @@ done
 "${compose[@]}" exec -T web python manage.py migrate --check
 "${compose[@]}" exec -T web python manage.py check_chat_readiness
 "${compose[@]}" exec -T web python manage.py check_support_readiness
+"${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null
+"${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats >/dev/null
+"${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/metrics >/dev/null
+"${compose[@]}" exec -T web python manage.py check_realtime_pipeline
 "${compose[@]}" exec -T worker celery -A config inspect ping --timeout=10
 "${compose[@]}" exec -T web python manage.py check_object_storage
 

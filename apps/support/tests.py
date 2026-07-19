@@ -508,6 +508,55 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(SupportMessageAuthor.objects.filter(message__conversation=support_conversation.conversation).count(), 2)
         self.assertEqual(User.objects.count(), 3)
 
+    def test_widget_message_client_temp_id_is_idempotent(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        endpoint = f"/api/v1/support/widget/{website.site_key}/sessions/{session['id']}/conversation/messages/"
+        payload = {"text": "Send once", "client_temp_id": "widget-once-1"}
+        first = self.client.post(
+            endpoint, payload, format="json",
+            HTTP_ORIGIN="https://main.example.com",
+            HTTP_AUTHORIZATION=f"Bearer {session['token']}",
+        )
+        second = self.client.post(
+            endpoint, payload, format="json",
+            HTTP_ORIGIN="https://main.example.com",
+            HTTP_AUTHORIZATION=f"Bearer {session['token']}",
+        )
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(first.data["message"]["id"], second.data["message"]["id"])
+        self.assertEqual(first.data["message"]["client_temp_id"], "widget-once-1")
+        self.assertEqual(Message.objects.filter(client_temp_id="widget-once-1").count(), 1)
+
+    def test_team_message_client_temp_id_is_idempotent(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        created = self._visitor_message(website, session, "Need help")
+        conversation_id = created.data["conversation"]["id"]
+        endpoint = f"/api/v1/support/conversations/{conversation_id}/messages/"
+        payload = {"text": "Send once", "client_temp_id": "team-once-1"}
+        self.client.force_authenticate(self.owner)
+        first = self.client.post(endpoint, payload, format="json")
+        second = self.client.post(endpoint, payload, format="json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(first.data["id"], second.data["id"])
+        self.assertEqual(first.data["client_temp_id"], "team-once-1")
+        self.assertEqual(Message.objects.filter(client_temp_id="team-once-1").count(), 1)
+
     def test_owner_inbox_reply_returns_to_widget_but_not_messenger_list(self):
         account = self.active_account()
         website = SupportWebsite.objects.create(
@@ -525,6 +574,13 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(inbox.status_code, 200)
         self.assertEqual(inbox.data["count"], 1)
         self.assertEqual(inbox.data["results"][0]["id"], conversation_id)
+        self.assertEqual(inbox.data["results"][0]["unread_count"], 1)
+        self.assertEqual(inbox.data["unread_total"], 1)
+        self.assertEqual(inbox.data["website_unread"], {str(website.id): 1})
+        unread_summary = self.client.get("/api/v1/support/unread-summary/")
+        self.assertEqual(unread_summary.status_code, 200)
+        self.assertEqual(unread_summary.data["unread_total"], 1)
+        self.assertEqual(unread_summary.data["website_unread"], {str(website.id): 1})
 
         reply = self.client.post(
             f"/api/v1/support/conversations/{conversation_id}/messages/",
@@ -548,6 +604,50 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual([item["text"] for item in widget_history.data["messages"]], ["Can you help?", "Yes, we can help."])
         self.assertEqual(widget_history.data["messages"][-1]["sender"]["kind"], "owner")
 
+    def test_support_inbox_query_count_does_not_scale_with_rows(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        first_session = self._create_widget_session(
+            website,
+            name="Visitor 0",
+            email="visitor0@example.com",
+        )
+        self._visitor_message(website, first_session, "Conversation 0")
+
+        self.client.force_authenticate(self.owner)
+        with CaptureQueriesContext(connection) as first_capture:
+            first_response = self.client.get("/api/v1/support/conversations/?limit=100")
+        self.assertEqual(first_response.status_code, 200)
+        baseline_queries = len(first_capture.captured_queries)
+
+        for index in range(1, 7):
+            session = self._create_widget_session(
+                website,
+                name=f"Visitor {index}",
+                email=f"visitor{index}@example.com",
+            )
+            self._visitor_message(website, session, f"Conversation {index}")
+
+        with CaptureQueriesContext(connection) as many_capture:
+            many_response = self.client.get("/api/v1/support/conversations/?limit=100")
+        self.assertEqual(many_response.status_code, 200)
+        self.assertEqual(many_response.data["count"], 7)
+        self.assertLessEqual(
+            len(many_capture.captured_queries),
+            baseline_queries + 2,
+            "Support Inbox query count must remain effectively constant as rows grow.",
+        )
+        self.assertLessEqual(
+            len(many_capture.captured_queries),
+            16,
+            "Support Inbox exceeded its production query budget.",
+        )
+
     def test_owner_reply_succeeds_when_realtime_delivery_is_unavailable(self):
         account = self.active_account()
         website = SupportWebsite.objects.create(
@@ -562,8 +662,8 @@ class SupportFoundationTests(APITestCase):
 
         self.client.force_authenticate(self.owner)
         with patch(
-            "apps.support.realtime._send",
-            side_effect=RuntimeError("channel layer unavailable"),
+            "apps.common.realtime.publish_outbox_event_to_stream",
+            side_effect=RuntimeError("realtime stream unavailable"),
         ):
             with self.captureOnCommitCallbacks(execute=True):
                 reply = self.client.post(

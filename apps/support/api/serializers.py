@@ -122,11 +122,15 @@ class SupportWebsiteSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "site_key", "widget_settings", "install_code", "created_at", "updated_at")
 
     def get_widget_settings(self, obj):
-        widget_settings = getattr(obj, "widget_settings", None)
-        if not widget_settings:
-            widget_settings, _ = SupportWidgetSettings.objects.get_or_create(
+        # Serializers must remain read-only. Website creation/bootstrap ensures
+        # this relation exists; a defensive in-memory default avoids a hidden
+        # write and an N+1 get_or_create during list serialization.
+        try:
+            widget_settings = obj.widget_settings
+        except SupportWidgetSettings.DoesNotExist:
+            widget_settings = SupportWidgetSettings(
                 website=obj,
-                defaults={"brand_name": f"{obj.name} Support"},
+                brand_name=f"{obj.name} Support",
             )
         return SupportWidgetSettingsSerializer(widget_settings).data
 
@@ -169,7 +173,10 @@ class SupportAgentSerializer(serializers.ModelSerializer):
         return user_summary(obj.user, include_email=True)
 
     def get_assigned_website_ids(self, obj):
-        return [str(assignment.website_id) for assignment in obj.website_assignments.all()]
+        assignments = getattr(obj, "prefetched_website_assignments", None)
+        if assignments is None:
+            assignments = obj.website_assignments.all()
+        return [str(assignment.website_id) for assignment in assignments]
 
 
 class SupportAgentInvitationSerializer(serializers.ModelSerializer):
@@ -200,13 +207,20 @@ class SupportAgentInvitationSerializer(serializers.ModelSerializer):
     def get_invited_by(self, obj):
         return user_summary(obj.invited_by) if obj.invited_by else None
 
+    def _website_assignments(self, obj):
+        cache = getattr(obj, "_support_assignment_cache", None)
+        if cache is None:
+            cache = list(obj.website_assignments.all())
+            obj._support_assignment_cache = cache
+        return cache
+
     def get_assigned_website_ids(self, obj):
-        return [str(assignment.website_id) for assignment in obj.website_assignments.all()]
+        return [str(assignment.website_id) for assignment in self._website_assignments(obj)]
 
     def get_assigned_websites(self, obj):
         return [
             {"id": str(assignment.website_id), "name": assignment.website.name, "domain": assignment.website.domain}
-            for assignment in obj.website_assignments.all()
+            for assignment in self._website_assignments(obj)
         ]
 
 
@@ -346,6 +360,9 @@ class SupportVisitorSerializer(serializers.ModelSerializer):
     is_online = serializers.SerializerMethodField()
 
     def get_is_online(self, obj):
+        online_map = self.context.get("support_visitor_online_map")
+        if online_map is not None:
+            return bool(online_map.get(str(obj.id), False))
         return visitor_is_online(obj.id)
 
     class Meta:
@@ -394,6 +411,7 @@ class SupportWebsiteWidgetConfigurationSerializer(serializers.Serializer):
 
 
 class SupportMessageSendSerializer(serializers.Serializer):
+    client_temp_id = serializers.CharField(max_length=100, required=False, allow_blank=True, trim_whitespace=True)
     text = serializers.CharField(max_length=10000, required=False, allow_blank=True, trim_whitespace=True)
     attachment_ids = serializers.ListField(
         child=serializers.UUIDField(),
@@ -496,6 +514,7 @@ class SupportAttachmentSerializer(serializers.Serializer):
 
 class SupportMessageSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
+    client_temp_id = serializers.CharField(read_only=True)
     type = serializers.CharField(read_only=True)
     text = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
@@ -518,12 +537,14 @@ class SupportMessageSerializer(serializers.Serializer):
         if not conversation:
             cached = {}
         else:
-            states = list(
-                conversation.read_states.select_related(
-                    "last_delivered_message",
-                    "last_read_message",
+            states = getattr(conversation, "prefetched_read_states", None)
+            if states is None:
+                states = list(
+                    conversation.read_states.select_related(
+                        "last_delivered_message",
+                        "last_read_message",
+                    )
                 )
-            )
             team_delivered = [
                 state
                 for state in states
@@ -677,32 +698,30 @@ class SupportConversationSerializer(serializers.Serializer):
         return {"id": str(obj.website_id), "name": obj.website.name, "domain": obj.website.domain}
 
     def get_visitor(self, obj):
-        return SupportVisitorSerializer(obj.visitor).data
+        return SupportVisitorSerializer(obj.visitor, context=self.context).data
 
     def get_assigned_agent(self, obj):
-        return SupportAgentSerializer(obj.assigned_agent).data if obj.assigned_agent else None
+        return SupportAgentSerializer(obj.assigned_agent, context=self.context).data if obj.assigned_agent else None
 
     def get_last_message(self, obj):
         message = obj.conversation.last_message
         if not message:
             return None
-        message = (
-            Message.objects.filter(pk=message.pk)
-            .select_related("sender", "sender__profile", "support_author", "support_author__visitor")
-            .prefetch_related("attachments")
-            .first()
-        )
         return SupportMessageSerializer(
             message,
             context={**self.context, "support_conversation": obj},
-        ).data if message else None
+        ).data
 
     def get_unread_count(self, obj):
+        prefetched = getattr(obj, "prefetched_team_unread_count", None)
+        if prefetched is not None:
+            return int(prefetched)
         user = self.context.get("user")
         return team_unread_count(obj, user) if user is not None else 0
 
     def get_visitor_unread_count(self, obj):
-        return visitor_unread_count(obj)
+        prefetched = getattr(obj, "prefetched_visitor_unread_count", None)
+        return int(prefetched) if prefetched is not None else visitor_unread_count(obj)
 
     def get_tags(self, obj):
         # Tags are private Support-team workflow metadata and must never be
@@ -719,7 +738,11 @@ class SupportConversationSerializer(serializers.Serializer):
         return SupportCSATSurveySerializer(survey).data if survey else None
 
     def get_service(self, obj):
-        snapshot = service_snapshot(obj)
+        settings_map = self.context.get("support_service_settings_map") or {}
+        snapshot = service_snapshot(
+            obj,
+            settings_obj=settings_map.get(str(obj.website.support_account_id)),
+        )
         date_field = serializers.DateTimeField(allow_null=True)
         for key in (
             "active_due_at", "first_response_due_at", "next_response_due_at",
@@ -732,6 +755,15 @@ class SupportConversationSerializer(serializers.Serializer):
             user_summary(obj.follow_up_created_by) if obj.follow_up_created_by_id else None
         )
         return snapshot
+
+
+class SupportTagReadSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    color = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
 
 
 class SupportTagSerializer(serializers.ModelSerializer):
@@ -769,6 +801,18 @@ class SupportInternalNoteSerializer(serializers.ModelSerializer):
 
     def get_author(self, obj):
         return user_summary(obj.author)
+
+
+class SupportCannedReplyReadSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    website_id = serializers.UUIDField(read_only=True, allow_null=True)
+    website_name = serializers.CharField(read_only=True, allow_null=True)
+    shortcut = serializers.CharField(read_only=True)
+    title = serializers.CharField(read_only=True)
+    body = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
 
 
 class SupportCannedReplySerializer(serializers.ModelSerializer):
@@ -1010,6 +1054,17 @@ class SupportKnowledgeSettingsSerializer(serializers.ModelSerializer):
         return value
 
 
+class SupportKnowledgeCategoryReadSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True)
+    sort_order = serializers.IntegerField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    article_count = serializers.IntegerField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
 class SupportKnowledgeCategorySerializer(serializers.ModelSerializer):
     article_count = serializers.IntegerField(read_only=True, required=False)
 
@@ -1050,11 +1105,18 @@ class SupportKnowledgeArticleSerializer(serializers.ModelSerializer):
             "created_by", "updated_by", "created_at", "updated_at",
         )
 
+    def _website_assignments(self, obj):
+        cache = getattr(obj, "_support_knowledge_assignment_cache", None)
+        if cache is None:
+            cache = list(obj.website_assignments.all())
+            obj._support_knowledge_assignment_cache = cache
+        return cache
+
     def get_website_ids(self, obj):
-        return [str(assignment.website_id) for assignment in obj.website_assignments.all()]
+        return [str(assignment.website_id) for assignment in self._website_assignments(obj)]
 
     def get_website_names(self, obj):
-        return [assignment.website.name for assignment in obj.website_assignments.all()]
+        return [assignment.website.name for assignment in self._website_assignments(obj)]
 
     def get_created_by(self, obj):
         return user_summary(obj.created_by) if obj.created_by else None
