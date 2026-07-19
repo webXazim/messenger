@@ -1487,6 +1487,19 @@
 }
 .ms-support-inbox-state--center { align-self: center; justify-self: center; }
 .ms-support-inbox-state.is-error { color: var(--ms-color-danger, #9f1d1d); }
+.ms-support-inbox-state.is-error span { display: block; }
+.ms-support-inbox-state.is-error button {
+  margin-top: var(--ms-space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--ms-radius-pill);
+  padding: 0.35rem 0.75rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ms-support-inbox-state.is-error button:disabled { cursor: wait; opacity: 0.65; }
 
 @media (max-width: 1120px) {
   .ms-support-inbox { grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr); }

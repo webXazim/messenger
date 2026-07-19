@@ -1115,12 +1115,21 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
           ) : null}
           {listQuery.isError ? (
             <div className="ms-support-inbox-state is-error">
-              {
+              <span>
+                {
                 parseApiError(
                   listQuery.error,
                   "Support conversations could not be loaded.",
                 ).message
-              }
+                }
+              </span>
+              <button
+                type="button"
+                disabled={listQuery.isFetching}
+                onClick={() => void listQuery.refetch()}
+              >
+                {listQuery.isFetching ? "Retrying…" : "Retry"}
+              </button>
             </div>
           ) : null}
           {!listQuery.isLoading && !listQuery.data?.results.length ? (

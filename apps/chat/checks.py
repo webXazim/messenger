@@ -114,10 +114,23 @@ def enterprise_deploy_checks(app_configs, **kwargs):
             issues.append(Error("TURN_URIS_JSON contains local addresses; replace them with public relay hostnames before production.", id="chat.E008"))
 
     firebase_project_id = str(getattr(settings, "FIREBASE_PROJECT_ID", "") or "").strip()
+    firebase_service_account_setting = str(
+        getattr(settings, "FIREBASE_SERVICE_ACCOUNT_PATH", "") or ""
+    ).strip()
     firebase_service_account_path = resolve_firebase_service_account_path()
-    if not firebase_project_id or firebase_service_account_path is None:
+    firebase_required = bool(getattr(settings, "FIREBASE_PUSH_REQUIRED", False))
+    firebase_configured = bool(firebase_project_id and firebase_service_account_path is not None)
+    firebase_partially_configured = bool(firebase_project_id or firebase_service_account_setting) and not firebase_configured
+    if firebase_required and not firebase_configured:
         issues.append(Error("Firebase Admin credentials must be configured for production push calling.", id="chat.E009"))
-    if bool(getattr(settings, "FCM_DRY_RUN", True)):
+    elif firebase_partially_configured:
+        issues.append(Error("Firebase Admin credentials are incomplete or the service-account file is unavailable.", id="chat.E009"))
+    elif not firebase_configured:
+        issues.append(Warning(
+            "Firebase push is disabled; offline devices will not receive message or incoming-call notifications.",
+            id="chat.W009",
+        ))
+    if firebase_configured and bool(getattr(settings, "FCM_DRY_RUN", True)):
         issues.append(Error("FCM_DRY_RUN must be disabled for production push delivery.", id="chat.E010"))
 
     if not getattr(settings, "CHAT_USE_S3_STORAGE", False):

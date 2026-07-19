@@ -174,6 +174,7 @@ class DeployCheckTests(TestCase):
             CLOUDFLARE_TURN_API_BASE_URL="https://rtc.live.cloudflare.com/v1/turn",
             FIREBASE_PROJECT_ID="",
             FIREBASE_SERVICE_ACCOUNT_PATH="",
+            FIREBASE_PUSH_REQUIRED=True,
             FCM_DRY_RUN=True,
             CHAT_USE_S3_STORAGE=True,
         ):
@@ -183,7 +184,23 @@ class DeployCheckTests(TestCase):
         self.assertIn("chat.E006", issue_ids)
         self.assertIn("chat.E007", issue_ids)
         self.assertIn("chat.E009", issue_ids)
-        self.assertIn("chat.E010", issue_ids)
+        self.assertNotIn("chat.E010", issue_ids)
+
+    def test_deploy_checks_allow_firebase_push_to_be_explicitly_optional(self):
+        from apps.chat.checks import enterprise_deploy_checks
+
+        with override_settings(
+            FIREBASE_PROJECT_ID="",
+            FIREBASE_SERVICE_ACCOUNT_PATH="",
+            FIREBASE_PUSH_REQUIRED=False,
+            FCM_DRY_RUN=True,
+        ):
+            issues = enterprise_deploy_checks(None)
+
+        issue_ids = {issue.id for issue in issues}
+        self.assertNotIn("chat.E009", issue_ids)
+        self.assertNotIn("chat.E010", issue_ids)
+        self.assertIn("chat.W009", issue_ids)
 
     def test_deploy_checks_reject_dev_turn_secret(self):
         from apps.chat.checks import enterprise_deploy_checks

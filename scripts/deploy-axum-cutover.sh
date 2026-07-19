@@ -65,10 +65,14 @@ for _ in $(seq 1 45); do
 done
 
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null
+"${compose[@]}" exec -T nginx nginx -t
 "${compose[@]}" exec -T web python manage.py check --deploy
+"${compose[@]}" exec -T web python manage.py check_realtime_pipeline
 if grep -Eiq '^TURN_PROVIDER=cloudflare([[:space:]]*)$' .env; then
   "${compose[@]}" exec -T web python manage.py check_call_readiness --probe
 fi
+"${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats
+printf '\n'
 "${compose[@]}" ps
 cutover_complete=1
 trap - EXIT
