@@ -5,6 +5,5 @@ dist/
 !.env.example
 *.tsbuildinfo
 npm-debug.log*
-scripts/
 tests/
 README.md

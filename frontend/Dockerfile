@@ -6,8 +6,9 @@ COPY package*.json ./
 RUN npm install --global npm@11.6.2 \
     && npm ci --no-audit --no-fund
 
-COPY index.html vite.config.ts tsconfig.json ./
+COPY index.html vite.config.ts tsconfig*.json ./
 COPY public ./public
+COPY scripts ./scripts
 COPY src ./src
 
 ARG VITE_API_BASE_URL
