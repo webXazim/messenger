@@ -71,7 +71,7 @@ async fn consume(state: Arc<AppState>) -> Result<()> {
 
 async fn ensure_group<C>(connection: &mut C, state: &AppState) -> Result<()>
 where
-    C: redis::aio::ConnectionLike + Send + Unpin,
+    C: redis::aio::ConnectionLike + Send + Sync + Unpin,
 {
     let result: redis::RedisResult<String> = redis::cmd("XGROUP")
         .arg("CREATE")
@@ -95,7 +95,7 @@ fn is_busy_group(error: &RedisError) -> bool {
 
 async fn drain_pending<C>(connection: &mut C, state: Arc<AppState>) -> Result<()>
 where
-    C: redis::aio::ConnectionLike + Send + Unpin,
+    C: redis::aio::ConnectionLike + Send + Sync + Unpin,
 {
     loop {
         let processed = read_once(connection, state.clone(), "0").await?;
@@ -107,7 +107,7 @@ where
 
 async fn read_once<C>(connection: &mut C, state: Arc<AppState>, id: &str) -> Result<usize>
 where
-    C: redis::aio::ConnectionLike + Send + Unpin,
+    C: redis::aio::ConnectionLike + Send + Sync + Unpin,
 {
     let options = StreamReadOptions::default()
         .group(&state.config.stream_group, &state.config.stream_consumer)

@@ -567,7 +567,7 @@ fn handle_subscribe(
     session: &AuthenticatedSession,
     high_tx: &mpsc::Sender<OutboundMessage>,
 ) {
-    let data: SubscriptionData = match serde_json::from_value(command.data) {
+    let data = match serde_json::from_value::<SubscriptionData>(command.data) {
         Ok(data) if data.audience.validate() => data,
         _ => {
             send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "invalid_audience"}));
@@ -603,7 +603,7 @@ fn handle_unsubscribe(
     state: Arc<AppState>,
     high_tx: &mpsc::Sender<OutboundMessage>,
 ) {
-    let data: SubscriptionData = match serde_json::from_value(command.data) {
+    let data = match serde_json::from_value::<SubscriptionData>(command.data) {
         Ok(data) if data.audience.validate() => data,
         _ => {
             send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "invalid_audience"}));
