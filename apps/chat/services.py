@@ -2770,6 +2770,7 @@ def send_message(
     encryption=None,
     attachment_encryption=None,
     view_once_attachment_ids=None,
+    dispatch_notifications=True,
 ):
     attachment_ids = attachment_ids or []
     view_once_attachment_ids = {str(value) for value in (view_once_attachment_ids or [])}
@@ -2889,7 +2890,8 @@ def send_message(
     conversation.last_message = message
     conversation.last_message_at = message.created_at
     conversation.save(update_fields=["last_message", "last_message_at", "updated_at"])
-    dispatch_message_notifications(message)
+    if dispatch_notifications:
+        dispatch_message_notifications(message)
     log_chat_event(
         ChatAuditLog.EventType.MESSAGE_SENT,
         actor=actor,

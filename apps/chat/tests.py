@@ -40,6 +40,7 @@ from apps.chat.models import (
     UserDevice,
 )
 from apps.chat.services import accept_call, clear_presence, create_direct_conversation, get_presence_snapshot, presence_recipient_ids, send_call_signal, send_message, set_presence, start_call
+from apps.common.models import RealtimeOutboxEvent
 
 User = get_user_model()
 
@@ -333,6 +334,41 @@ class ChatApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         return response.data
+
+    def test_message_send_commits_durable_event_before_fast_updates_and_push(self):
+        conversation = self.create_direct_conversation()
+        delivery_order = []
+
+        with (
+            patch(
+                "apps.common.realtime.publish_outbox_event_to_stream",
+                side_effect=lambda _row: delivery_order.append("durable") or "1-0",
+            ),
+            patch(
+                "apps.common.realtime.publish_event_to_stream",
+                side_effect=lambda **_kwargs: delivery_order.append("ephemeral") or "2-0",
+            ),
+            patch(
+                "apps.chat.tasks.fanout_push_notifications.delay",
+                side_effect=lambda _message_id: delivery_order.append("push"),
+            ),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.client.post(
+                reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+                {"text": "fast and durable", "client_temp_id": "fast-durable-1"},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(delivery_order, ["durable", "ephemeral", "ephemeral", "push"])
+        self.assertEqual(
+            RealtimeOutboxEvent.objects.filter(event_name="message.created").count(),
+            1,
+        )
+        self.assertFalse(
+            RealtimeOutboxEvent.objects.filter(event_name="conversation.updated").exists()
+        )
 
     def test_direct_conversation_resolves_by_case_insensitive_username(self):
         conversation = self.create_direct_conversation()

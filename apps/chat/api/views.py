@@ -2,6 +2,7 @@ from pathlib import Path
 import mimetypes
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
@@ -65,6 +66,7 @@ from apps.chat.services import (
     create_conversation_invite_link,
     deactivate_device,
     dismiss_message_report,
+    dispatch_message_notifications,
     edit_message,
     expire_stale_call_participants,
     conversation_has_e2ee_enabled_participants,
@@ -310,11 +312,12 @@ def _broadcast_to_conversation(conversation_id, event, data):
     )
 
 
-def _broadcast_to_user(user_id, event, data):
+def _broadcast_to_user(user_id, event, data, *, durable=True):
     publish_realtime_event(
         event_name=event,
         data=data,
         audiences=[user_audience(user_id)],
+        durable=durable,
     )
 
 
@@ -396,7 +399,15 @@ def _broadcast_conversation_update(conversation_id, *, request=None):
         if not conversation:
             continue
         payload = ConversationListSerializer(conversation, context={"request": request}).data
-        _broadcast_to_user(str(participant_id), "conversation.updated", payload)
+        # Conversation-list summaries can always be reconstructed from the
+        # durable message. Avoid one PostgreSQL outbox row plus claim/finalize
+        # writes per participant on the latency-sensitive message-send path.
+        _broadcast_to_user(
+            str(participant_id),
+            "conversation.updated",
+            payload,
+            durable=False,
+        )
 
 
 def _broadcast_call_timeline_message(call, *, request=None):
@@ -681,6 +692,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
             _broadcast_to_conversation(str(conversation.id), "message.delivered", payload)
         return super().list(request, *args, **kwargs)
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         conversation = get_object_or_404(user_conversations_qs(request.user), id=self.kwargs["conversation_id"])
         serializer = MessageCreateSerializer(data=request.data)
@@ -716,6 +728,7 @@ class MessageListCreateView(generics.ListCreateAPIView):
             entities=serializer.validated_data.get("entities", []),
             transcript_payload=transcript_payload,
             encryption=serializer.validated_data.get("encryption"),
+            dispatch_notifications=False,
         )
         if serializer.validated_data.get("is_voice_note"):
             metadata = dict(message.metadata or {})
@@ -744,6 +757,9 @@ class MessageListCreateView(generics.ListCreateAPIView):
                 reply_target_output = MessageSerializer(locked_reply_target, context={"request": request}).data
                 _broadcast_to_conversation(str(conversation.id), "message.updated", reply_target_output)
             _broadcast_conversation_update(str(conversation.id), request=request)
+            # Register push work after all live socket publications so online
+            # recipients never wait behind background notification enqueueing.
+            dispatch_message_notifications(message)
         return Response(output, status=status.HTTP_201_CREATED if not output["was_deduplicated"] else status.HTTP_200_OK)
 
 
