@@ -57,6 +57,12 @@ bash ./scripts/backup-postgres.sh
 # Replace services only after every build, validation, migration, and backup has succeeded.
 "${compose[@]}" up -d --remove-orphans postgres redis web realtime frontend nginx worker beat
 
+# Nginx mounts its configuration as a single bind-mounted file. Git may replace
+# that file's inode during a pull, leaving an existing container pinned to the
+# previous configuration even after `nginx -s reload`. Recreate only Nginx so
+# every deployment reads the exact checked-out configuration from the host.
+"${compose[@]}" up -d --force-recreate --no-deps nginx
+
 for _ in $(seq 1 45); do
   if "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null 2>&1; then
     break
