@@ -236,7 +236,7 @@ export class ChatSocket {
       queued.forEach((payload) => this.send(payload));
     };
     socket.onerror = () => { if (this.socket === socket) this.emitStatus("closed"); };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
       this.socket = null;
@@ -244,6 +244,11 @@ export class ChatSocket {
       this.activeDeviceId = null;
       this.grants.clear();
       this.emitStatus("closed");
+      if (!this.manualClose && event.code === 4001) {
+        window.dispatchEvent(new CustomEvent(SOCKET_AUTH_FAILED_EVENT, {
+          detail: { code: 401, closeCode: event.code, reason: event.reason },
+        }));
+      }
       if (!this.manualClose) this.scheduleReconnect();
     };
     socket.onmessage = (event) => {

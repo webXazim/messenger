@@ -129,7 +129,14 @@ pub async fn authenticated_websocket_handler(
     let origin = headers.get(ORIGIN).and_then(|value| value.to_str().ok());
     let session = match auth.authenticate_ticket(&query.ticket, origin).await {
         Ok(session) => session,
-        Err(error) => return auth_error_response(error),
+        Err(error) => {
+            tracing::info!(
+                origin = origin.unwrap_or(""),
+                error = %error,
+                "websocket authentication rejected"
+            );
+            return auth_error_response(error);
+        }
     };
     let Some(session_permit) = state.session_limiter.try_acquire(
         &session,
@@ -214,6 +221,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, session: Authent
     let (low_tx, low_rx) = mpsc::channel(state.config.low_queue_capacity);
     let last_seen = Arc::new(AtomicI64::new(epoch_seconds()));
     let session = Arc::new(session);
+    tracing::info!(
+        %connection_id,
+        actor_type = session.actor_type.as_str(),
+        device_type = session.device_type.as_str(),
+        "websocket connection accepted"
+    );
 
     state.registry.register(
         connection_id,
@@ -272,6 +285,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, session: Authent
         cancellation.clone(),
     ));
 
+    #[derive(Clone, Copy, Debug)]
     enum StopReason { Reader, Writer, Shutdown, CredentialsRefresh }
     let max_connection_age = state.config.max_connection_age;
     let jitter_window = state.config.connection_refresh_jitter.as_secs();
@@ -329,6 +343,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, session: Authent
         }
     }
     state.registry.remove(connection_id);
+    tracing::info!(
+        %connection_id,
+        actor_type = session.actor_type.as_str(),
+        reason = ?stop_reason,
+        "websocket connection closed"
+    );
     schedule_presence_disconnect(state, session, connection_id);
 }
 

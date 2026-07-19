@@ -111,6 +111,18 @@ fi
 [[ "$(read_env REALTIME_STREAM_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_STREAM_ENABLED must be true")
 [[ "$(read_env REALTIME_OUTBOX_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_OUTBOX_ENABLED must be true")
 require_value REALTIME_ALLOWED_ORIGINS
+realtime_origins=",$(read_env REALTIME_ALLOWED_ORIGINS),"
+realtime_origins="${realtime_origins//[[:space:]]/}"
+[[ "$realtime_origins" == *",https://${app_domain},"* ]] || \
+  failures+=("REALTIME_ALLOWED_ORIGINS must include https://${app_domain}")
+
+for name in VITE_WS_BASE_URL VITE_SUPPORT_WS_URL; do
+  websocket_url="$(read_env "$name")"
+  case "$websocket_url" in
+    ""|"/ws"|"wss://${app_domain}"|"wss://${app_domain}/ws") ;;
+    *) failures+=("$name must be empty or use the single Axum endpoint wss://${app_domain}/ws") ;;
+  esac
+done
 
 python_bin="${PYTHON_BIN:-}"
 if [[ -z "$python_bin" ]]; then

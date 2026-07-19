@@ -159,13 +159,18 @@ class SupportSocketClient {
       this.startHeartbeat();
     };
     socket.onerror = () => { if (this.socket === socket) this.emitStatus("closed"); };
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
       this.socket = null;
       this.activeToken = "";
       this.grants.clear();
       this.emitStatus("closed");
+      if (!this.manualClose && event.code === 4001) {
+        window.dispatchEvent(new CustomEvent(SUPPORT_SOCKET_AUTH_FAILED_EVENT, {
+          detail: { code: 401, closeCode: event.code, reason: event.reason },
+        }));
+      }
       if (!this.manualClose) this.scheduleReconnect();
     };
     socket.onmessage = (event) => {
