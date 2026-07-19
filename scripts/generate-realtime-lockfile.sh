@@ -19,7 +19,7 @@ docker run --rm \
   -e CARGO_NET_RETRY=5 \
   -v "$PWD/realtime:/app" \
   -w /app \
-  rust:1.85-bookworm \
+  rust:1.86-bookworm \
   cargo generate-lockfile
 
 test -s realtime/Cargo.lock || { echo "Cargo.lock generation failed." >&2; exit 1; }

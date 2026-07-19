@@ -1,4 +1,4 @@
-FROM rust:1.85-bookworm AS builder
+FROM rust:1.86-bookworm AS builder
 WORKDIR /app
 ENV CARGO_INCREMENTAL=0 \
     CARGO_BUILD_JOBS=1
