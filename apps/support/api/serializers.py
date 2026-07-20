@@ -473,6 +473,7 @@ class SupportAttachmentSerializer(serializers.Serializer):
     download_url = serializers.SerializerMethodField()
     preview_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
+    waveform = serializers.SerializerMethodField()
 
     def _route(self, kind: str, obj: MessageAttachment) -> str:
         request = self.context.get("request")
@@ -506,6 +507,20 @@ class SupportAttachmentSerializer(serializers.Serializer):
 
     def get_thumbnail_url(self, obj):
         return self._route("thumbnail", obj) if obj.thumbnail else None
+
+    def get_waveform(self, obj):
+        waveform = (obj.metadata or {}).get("waveform") or []
+        if not isinstance(waveform, list):
+            return []
+        normalized = []
+        for value in waveform[:96]:
+            if not isinstance(value, (int, float)):
+                continue
+            try:
+                normalized.append(max(0, min(100, round(float(value)))))
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return normalized
 
     def get_can_preview_inline(self, obj):
         mime = (obj.mime_type or "").lower()

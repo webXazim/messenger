@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], recordingStream: null, recordingTimer: 0, voiceDraft: null, objectUrls: [], mediaObjectUrls: {}, audioPlayback: {}, followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], recordingStream: null, recordingTimer: 0, recordingAudioContext: null, recordingAnalyser: null, recordingAnimationFrame: 0, recordingWaveform: [], voiceDraft: null, objectUrls: [], mediaObjectUrls: {}, audioPlayback: {}, followLatest: true, scrollFrame: 0, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -75,7 +75,9 @@
     form.append("original_name", file.name || "upload");
     if (file.type) form.append("mime_type", file.type);
     if (metadata && typeof metadata.durationSeconds === "number") form.append("duration_seconds", metadata.durationSeconds.toFixed(2));
-    if (metadata && Array.isArray(metadata.waveform) && metadata.waveform.length) form.append("waveform", JSON.stringify(metadata.waveform));
+    if (metadata && Array.isArray(metadata.waveform) && metadata.waveform.length) {
+      form.append("metadata", JSON.stringify({ waveform: metadata.waveform.map(function (value) { return Math.max(7, Math.min(100, Math.round(Number(value) <= 1 ? Number(value) * 100 : Number(value)))); }) }));
+    }
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.open("POST", apiBase + path, true);
@@ -469,6 +471,75 @@
     try { state.recorder.stop(); } catch (_) {}
   }
 
+  function waveformLevel(value) {
+    var numeric = Number(value);
+    if (!isFinite(numeric)) return 0.07;
+    return Math.max(0.07, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+  }
+
+  function compressWaveform(samples, count) {
+    if (!samples.length) return Array(count).fill(0.07);
+    return Array.from({ length: count }, function (_, index) {
+      var start = Math.floor((index * samples.length) / count);
+      var end = Math.max(start + 1, Math.floor(((index + 1) * samples.length) / count));
+      return samples.slice(start, end).reduce(function (highest, value) { return Math.max(highest, value); }, 0.07);
+    });
+  }
+
+  function paintLiveWaveform() {
+    if (!shadow) return;
+    var bars = shadow.querySelectorAll(".cs-recorder-wave.is-live span");
+    var visible = state.recordingWaveform.slice(-bars.length);
+    Array.prototype.forEach.call(bars, function (bar, index) {
+      var level = visible[index - Math.max(0, bars.length - visible.length)] || 0.07;
+      bar.style.height = Math.round(5 + waveformLevel(level) * 16) + "px";
+    });
+  }
+
+  function stopVoiceAnalysis() {
+    if (state.recordingAnimationFrame) window.cancelAnimationFrame(state.recordingAnimationFrame);
+    state.recordingAnimationFrame = 0;
+    if (state.recordingAnalyser) { try { state.recordingAnalyser.disconnect(); } catch (_) {} }
+    state.recordingAnalyser = null;
+    if (state.recordingAudioContext && state.recordingAudioContext.state !== "closed") state.recordingAudioContext.close().catch(function () {});
+    state.recordingAudioContext = null;
+  }
+
+  function startVoiceAnalysis(stream) {
+    var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return;
+    try {
+      var context = new AudioContextCtor();
+      var analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.72;
+      context.createMediaStreamSource(stream).connect(analyser);
+      state.recordingAudioContext = context;
+      state.recordingAnalyser = analyser;
+      var samples = new Uint8Array(analyser.fftSize);
+      var lastSampleAt = 0;
+      var update = function (timestamp) {
+        if (!state.recording || state.recordingAnalyser !== analyser) return;
+        if (timestamp - lastSampleAt >= 72) {
+          analyser.getByteTimeDomainData(samples);
+          var squares = 0; var peak = 0;
+          for (var index = 0; index < samples.length; index += 1) {
+            var normalized = (samples[index] - 128) / 128;
+            squares += normalized * normalized;
+            peak = Math.max(peak, Math.abs(normalized));
+          }
+          var rms = Math.sqrt(squares / samples.length);
+          state.recordingWaveform.push(Math.max(0.07, Math.min(1, Math.pow(Math.max(rms * 10, peak * 2.8), 0.72))));
+          paintLiveWaveform();
+          lastSampleAt = timestamp;
+        }
+        state.recordingAnimationFrame = window.requestAnimationFrame(update);
+      };
+      if (context.state === "suspended") context.resume().catch(function () {});
+      state.recordingAnimationFrame = window.requestAnimationFrame(update);
+    } catch (_) {}
+  }
+
   function discardVoiceDraft() {
     if (!state.voiceDraft) return;
     if (state.voiceDraft.url) {
@@ -528,12 +599,14 @@
       state.recorder = recorder;
       state.recordingStream = stream;
       state.recordingChunks = [];
+      state.recordingWaveform = [];
       state.recordingStartedAt = Date.now();
       recorder.ondataavailable = function (event) { if (event.data && event.data.size) state.recordingChunks.push(event.data); };
       recorder.onstop = function () {
         var durationSeconds = Math.max(0.1, (Date.now() - state.recordingStartedAt) / 1000);
         stream.getTracks().forEach(function (track) { track.stop(); });
         state.recording = false; state.recorder = null; state.recordingStream = null;
+        stopVoiceAnalysis();
         if (state.recordingTimer) window.clearInterval(state.recordingTimer);
         state.recordingTimer = 0;
         if (recorder.__sendAfterStop || !state.recordingChunks.length) { render(); return; }
@@ -547,12 +620,13 @@
           file: file,
           url: url,
           duration: durationSeconds,
-          waveform: defaultWaveform()
+          waveform: compressWaveform(state.recordingWaveform, 48)
         };
         render();
       };
       recorder.start(250);
       state.recording = true;
+      startVoiceAnalysis(stream);
       state.recordingTimer = window.setInterval(function () { updateVoiceRecorderClock(); }, 250);
       render();
     }).catch(function () { state.error = "Microphone access is required to record a voice message."; render(); });
@@ -1158,13 +1232,23 @@
     return button;
   }
 
+  function scheduleMessageScroll(callback) {
+    if (state.scrollFrame) window.cancelAnimationFrame(state.scrollFrame);
+    state.scrollFrame = window.requestAnimationFrame(function () {
+      state.scrollFrame = 0;
+      callback();
+    });
+  }
+
   function scrollMessages() {
     if (!shadow) return;
     state.followLatest = true;
-    var body = shadow.querySelector(".cs-body");
-    var jump = shadow.querySelector(".cs-jump");
-    if (jump) jump.hidden = true;
-    if (body) window.requestAnimationFrame(function () { body.scrollTop = body.scrollHeight; });
+    scheduleMessageScroll(function () {
+      var body = shadow && shadow.querySelector(".cs-body");
+      var jump = shadow && shadow.querySelector(".cs-jump");
+      if (jump) jump.hidden = true;
+      if (body) body.scrollTop = body.scrollHeight;
+    });
   }
 
   function updateLauncherUnread(hasUnread) {
@@ -1190,8 +1274,9 @@
     return Math.floor(safe / 60) + ":" + String(safe % 60).padStart(2, "0");
   }
 
-  function defaultWaveform() {
-    return [.22,.31,.46,.37,.58,.42,.66,.53,.35,.48,.72,.61,.44,.29,.54,.78,.62,.39,.51,.69,.47,.33,.57,.81,.65,.43,.28,.49,.73,.55,.38,.62,.76,.52,.34,.46,.68,.59,.41,.27,.5,.71,.56,.36,.63,.45,.32,.23];
+  function messageWaveform(attachment) {
+    var waveform = attachment && Array.isArray(attachment.waveform) ? attachment.waveform : [];
+    return waveform.length ? waveform.map(waveformLevel) : Array(48).fill(0.07);
   }
 
   function mediaCacheKey(attachment, url) {
@@ -1300,10 +1385,14 @@
     loadAuthorizedObjectUrl(attachment, source).then(function (objectUrl) {
       if (!item.isConnected) return;
       loading.remove();
-      if (attachment.media_kind === "image") {
-        var image = node("img"); image.src = objectUrl; image.alt = attachment.original_name || "Image"; image.loading = "lazy"; item.appendChild(image);
+      if (attachment.media_kind === "image" || attachment.thumbnail_url) {
+        var image = node("img"); image.src = objectUrl; image.alt = attachment.original_name || "Image"; image.loading = "lazy";
+        image.onload = function () { if (state.followLatest) scrollMessages(); };
+        item.appendChild(image);
       } else {
-        var video = node("video"); video.src = objectUrl; video.muted = true; video.preload = "metadata"; video.playsInline = true; item.appendChild(video);
+        var video = node("video"); video.src = objectUrl; video.muted = true; video.preload = "metadata"; video.playsInline = true;
+        video.onloadedmetadata = function () { if (state.followLatest) scrollMessages(); };
+        item.appendChild(video);
         var play = node("span", "cs-media-play", "▶"); play.setAttribute("aria-hidden", "true"); item.appendChild(play);
       }
     }).catch(function () {
@@ -1341,7 +1430,7 @@
     var play = node("button", "cs-voice-play", "▶"); play.type = "button"; play.setAttribute("aria-label", "Play voice message");
     var content = node("span", "cs-voice-content");
     var waveform = node("button", "cs-waveform"); waveform.type = "button"; waveform.setAttribute("aria-label", "Seek voice message");
-    var bars = defaultWaveform();
+    var bars = messageWaveform(attachment);
     bars.forEach(function (height) { var bar = node("span"); bar.style.height = Math.round(7 + height * 23) + "px"; waveform.appendChild(bar); });
     var timing = node("span", "cs-voice-timing", formatAudioTime(attachment.duration_seconds));
     content.appendChild(waveform); content.appendChild(timing);
@@ -1629,7 +1718,7 @@
         recorderPanel.appendChild(node("span", "cs-recorder-dot"));
         recorderPanel.appendChild(node("span", "cs-recorder-time", formatAudioTime((Date.now() - state.recordingStartedAt) / 1000)));
         var liveWave = node("span", "cs-recorder-wave is-live");
-        defaultWaveform().slice(0, 24).forEach(function (value, index) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; bar.style.animationDelay = (index * -37) + "ms"; liveWave.appendChild(bar); });
+        Array(24).fill(0.07).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; liveWave.appendChild(bar); });
         recorderPanel.appendChild(liveWave);
       } else {
         var draftPlay = node("button", "cs-recorder-play", "▶"); draftPlay.type = "button"; draftPlay.setAttribute("aria-label", "Play recorded voice message");
@@ -1685,7 +1774,7 @@
       var text = state.draft.trim(); var attachmentIds = state.pendingUploads.filter(function (upload) { return upload.status === "ready" && upload.id; }).map(function (upload) { return upload.id; }); if (!text && !attachmentIds.length) return;
       reportVisitorTyping(false);
       state.error = "";
-      sendMessage(text, attachmentIds, false).then(function () { render(); scrollMessages(); }).catch(function (error) { state.error = error.message; render(); });
+      sendMessage(text, attachmentIds, false).catch(function (error) { state.error = error.message; render(); });
     });
     panel.appendChild(composer);
     if (state.session && state.config.visitor_deletion_enabled) {
@@ -1710,7 +1799,7 @@
     }
     shadow.appendChild(wrap);
     if (state.open && state.session && !(state.call && !callTerminal(state.call))) {
-      window.requestAnimationFrame(function () {
+      scheduleMessageScroll(function () {
         var nextBody = shadow && shadow.querySelector(".cs-body");
         var nextJump = shadow && shadow.querySelector(".cs-jump");
         if (!nextBody) return;
