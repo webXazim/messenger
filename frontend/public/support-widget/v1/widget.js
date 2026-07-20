@@ -362,7 +362,7 @@
       sender: { kind: "visitor", display_name: "You" },
       voice_note: Boolean(voiceNote),
       attachments: optimisticUploads.map(function (upload) {
-        return { id: upload.id, media_kind: upload.kind, original_name: upload.name, mime_type: upload.mimeType || "", size: upload.size || 0, duration_seconds: upload.duration || null, scan_status: "clean", can_preview_inline: ["image", "video", "audio"].indexOf(upload.kind) >= 0, download_url: upload.localUrl || upload.previewUrl || "", preview_url: upload.localUrl || upload.previewUrl || "", thumbnail_url: upload.previewUrl || upload.localUrl || "" };
+        return { id: upload.id, media_kind: upload.kind, original_name: upload.name, mime_type: upload.mimeType || "", size: upload.size || 0, duration_seconds: upload.duration || null, waveform: upload.waveform || [], scan_status: "clean", can_preview_inline: ["image", "video", "audio"].indexOf(upload.kind) >= 0, download_url: upload.localUrl || upload.previewUrl || "", preview_url: upload.localUrl || upload.previewUrl || "", thumbnail_url: upload.previewUrl || upload.localUrl || "" };
       })
     };
     state.messages.push(optimisticMessage);
@@ -561,6 +561,7 @@
         mimeType: upload.mime_type || draft.file.type,
         size: upload.size || draft.file.size,
         duration: upload.duration_seconds || draft.duration,
+        waveform: draft.waveform,
         localUrl: draft.url,
         status: "ready",
         progress: 100
@@ -1159,7 +1160,7 @@
       .cs-voice-message{width:min(310px,77vw);display:grid;grid-template-columns:42px minmax(0,1fr) 34px;align-items:center;gap:8px;padding:9px 10px;border:1px solid #d9d9dc;border-radius:18px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"};color:${state.config && state.config.theme === "dark" ? "#f5f5f5" : "#171717"}}
       .cs-voice-play,.cs-voice-speed{border:0;border-radius:50%;background:#111;color:#fff;cursor:pointer}.cs-voice-play{width:42px;height:42px;font-size:13px}.cs-voice-speed{width:34px;height:34px;font:800 9px inherit}
       .cs-voice-content{min-width:0;display:grid;gap:3px}.cs-waveform{height:32px;display:flex;align-items:center;gap:1.5px;padding:0;border:0;background:transparent;cursor:pointer}.cs-waveform span{width:2px;max-height:30px;flex:1;border-radius:999px;background:#c4c4c7}.cs-waveform span.is-active{background:#111}
-      .cs-voice-timing{display:flex;align-items:center;color:#85858a;font-size:9px}.cs-voice-timing .cs-meta{margin:0;color:inherit}.cs-voice-meta-separator{margin:0 3px}.cs-voice-audio{display:none}
+      .cs-voice-timing{display:flex;align-items:center;min-width:0;color:#85858a;font-size:9px}.cs-voice-duration{white-space:nowrap}.cs-voice-timing .cs-meta{margin:0 0 0 auto;color:inherit;text-align:right}.cs-voice-audio{display:none}
       .cs-viewer-backdrop{position:fixed;z-index:2147483646;inset:0;display:grid;place-items:center;padding:0;background:rgba(0,0,0,.92);animation:cs-viewer-in 150ms ease both}
       @keyframes cs-viewer-in{from{opacity:0}to{opacity:1}}
       .cs-viewer{position:relative;width:100%;height:100%;outline:0}.cs-viewer-stage{width:100%;height:100%;display:grid;place-items:center;overflow:hidden}.cs-viewer-stage img,.cs-viewer-stage video{display:block;max-width:100%;max-height:100%;object-fit:contain}.cs-viewer-stage iframe{width:100%;height:100%;border:0;background:#fff}.cs-viewer-loading{color:rgba(255,255,255,.75);font-size:13px}
@@ -1181,7 +1182,7 @@
       .cs-recorder{min-width:0;min-height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:5px 8px;border:1px solid #d8d8dc;border-radius:24px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"}}
       .cs-recorder-delete,.cs-recorder-play{width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:50%;background:rgba(127,127,127,.11);color:inherit;font:700 18px/1 inherit;cursor:pointer}.cs-recorder-play{background:#111;color:#fff;font-size:11px}
       .cs-recorder-dot{width:8px;height:8px;border-radius:50%;background:#d92d20;animation:cs-recorder-pulse 1.1s ease-in-out infinite}.cs-recorder-time{color:#777;font-size:10px;white-space:nowrap}
-      .cs-recorder-wave{min-width:0;height:27px;display:flex;align-items:center;gap:2px;overflow:hidden}.cs-recorder-wave span{width:2px;flex:1;max-width:3px;border-radius:999px;background:#bdbdc1}.cs-recorder-wave span.is-active{background:#111}.cs-recorder-wave.is-live span{animation:cs-recorder-bar .8s ease-in-out infinite alternate}
+      .cs-recorder-wave{min-width:0;height:27px;display:flex;align-items:center;gap:1px;overflow:hidden}.cs-recorder-wave span{width:2px;flex:1;max-width:3px;border-radius:999px;background:#bdbdc1}.cs-recorder-wave span.is-active{background:#111}.cs-recorder-wave.is-live span{animation:none}
       @keyframes cs-recorder-pulse{50%{opacity:.35}}@keyframes cs-recorder-bar{to{transform:scaleY(.42);opacity:.58}}
       .cs-tool[hidden],.cs-send[hidden],.cs-jump[hidden]{display:none!important}
       .cs-visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
@@ -1308,6 +1309,10 @@
     return attachment.thumbnail_url || attachment.preview_url || attachment.download_url || "";
   }
 
+  function attachmentPlaybackSource(attachment) {
+    return attachment.preview_url || attachment.download_url || attachment.thumbnail_url || "";
+  }
+
   function closeAttachmentViewer() {
     if (!shadow) return;
     var viewer = shadow.querySelector(".cs-viewer-backdrop");
@@ -1369,24 +1374,46 @@
   }
 
   function renderMediaAttachment(attachment) {
-    var item = node("button", "cs-media-item is-" + attachment.media_kind);
-    item.type = "button";
-    item.setAttribute("aria-label", "Open " + (attachment.original_name || attachment.media_kind));
-    item.onclick = function () { openAttachmentViewer(attachment); };
+    var isVideo = attachment.media_kind === "video";
+    var item = node(isVideo ? "div" : "button", "cs-media-item is-" + attachment.media_kind);
+    if (!isVideo) item.type = "button";
+    item.setAttribute("aria-label", (isVideo ? "Play " : "Open ") + (attachment.original_name || attachment.media_kind));
+    if (!isVideo) item.onclick = function () { openAttachmentViewer(attachment); };
     var loading = node("span", "cs-media-loading"); item.appendChild(loading);
     var source = attachmentSource(attachment, false);
+    function playInlineVideo(posterUrl) {
+      item.innerHTML = "";
+      item.appendChild(node("span", "cs-media-loading"));
+      loadAuthorizedObjectUrl(attachment, attachmentPlaybackSource(attachment)).then(function (playbackUrl) {
+        if (!item.isConnected) return;
+        item.innerHTML = "";
+        var video = node("video"); video.src = playbackUrl; video.controls = true; video.autoplay = true; video.playsInline = true; video.preload = "metadata";
+        if (posterUrl) video.poster = posterUrl;
+        video.onloadedmetadata = function () { if (state.followLatest) scrollMessages(); };
+        item.appendChild(video);
+        video.play().catch(function () {});
+      }).catch(function () {
+        if (!item.isConnected) return;
+        item.innerHTML = "";
+        item.appendChild(node("span", "cs-media-loading is-failed", "Video unavailable"));
+      });
+    }
     loadAuthorizedObjectUrl(attachment, source).then(function (objectUrl) {
       if (!item.isConnected) return;
       loading.remove();
-      if (attachment.media_kind === "image" || attachment.thumbnail_url) {
+      if (!isVideo || attachment.thumbnail_url) {
         var image = node("img"); image.src = objectUrl; image.alt = attachment.original_name || "Image"; image.loading = "lazy";
         image.onload = function () { if (state.followLatest) scrollMessages(); };
         item.appendChild(image);
+        if (isVideo) {
+          var play = node("button", "cs-media-play", "▶"); play.type = "button"; play.setAttribute("aria-label", "Play " + (attachment.original_name || "video"));
+          play.onclick = function () { playInlineVideo(objectUrl); };
+          item.appendChild(play);
+        }
       } else {
-        var video = node("video"); video.src = objectUrl; video.muted = true; video.preload = "metadata"; video.playsInline = true;
+        var video = node("video"); video.src = objectUrl; video.controls = true; video.preload = "metadata"; video.playsInline = true;
         video.onloadedmetadata = function () { if (state.followLatest) scrollMessages(); };
         item.appendChild(video);
-        var play = node("span", "cs-media-play", "▶"); play.setAttribute("aria-hidden", "true"); item.appendChild(play);
       }
     }).catch(function () {
       loading.className = "cs-media-loading is-failed";
@@ -1425,14 +1452,16 @@
     var waveform = node("button", "cs-waveform"); waveform.type = "button"; waveform.setAttribute("aria-label", "Seek voice message");
     var bars = messageWaveform(attachment);
     bars.forEach(function (height) { var bar = node("span"); bar.style.height = Math.round(7 + height * 23) + "px"; waveform.appendChild(bar); });
-    var timing = node("span", "cs-voice-timing", formatAudioTime(attachment.duration_seconds));
+    var timing = node("span", "cs-voice-timing");
+    var duration = node("span", "cs-voice-duration", formatAudioTime(attachment.duration_seconds));
+    timing.appendChild(duration);
     content.appendChild(waveform); content.appendChild(timing);
     var speed = node("button", "cs-voice-speed", speeds[saved.speedIndex] + "×"); speed.type = "button";
     var audio = node("audio", "cs-voice-audio"); audio.preload = "metadata"; audio.playsInline = true;
     function sync() {
       var duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Number(attachment.duration_seconds) || 0;
       saved.currentTime = audio.currentTime || 0;
-      timing.textContent = formatAudioTime(audio.paused ? duration : saved.currentTime);
+      duration.textContent = formatAudioTime(audio.paused ? duration : saved.currentTime);
       var progress = duration ? saved.currentTime / duration : 0;
       Array.prototype.forEach.call(waveform.children, function (bar, index) { bar.classList.toggle("is-active", index < Math.round(progress * bars.length)); });
     }
@@ -1447,7 +1476,7 @@
       play.disabled = true;
       loadAuthorizedObjectUrl(attachment, attachmentSource(attachment, true)).then(function (url) {
         audio.src = url; play.disabled = false; toggle();
-      }).catch(function () { play.disabled = false; player.classList.add("is-failed"); timing.textContent = "Unavailable"; });
+      }).catch(function () { play.disabled = false; player.classList.add("is-failed"); duration.textContent = "Unavailable"; });
     };
     waveform.onclick = function (event) {
       if (!audio.src || !audio.duration) return;
@@ -1518,7 +1547,6 @@
       if (bubble) bubble.appendChild(meta);
       else if (audioMedia.length && !visualMedia.length && !files.length && surface.querySelector(".cs-voice-timing")) {
         var voiceTiming = surface.querySelector(".cs-voice-timing");
-        voiceTiming.appendChild(node("span", "cs-voice-meta-separator", " · "));
         voiceTiming.appendChild(meta);
       }
       else {
@@ -1713,7 +1741,7 @@
         recorderPanel.appendChild(node("span", "cs-recorder-dot"));
         recorderPanel.appendChild(node("span", "cs-recorder-time", formatAudioTime((Date.now() - state.recordingStartedAt) / 1000)));
         var liveWave = node("span", "cs-recorder-wave is-live");
-        Array(24).fill(0.07).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; liveWave.appendChild(bar); });
+        Array(48).fill(0.07).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; liveWave.appendChild(bar); });
         recorderPanel.appendChild(liveWave);
       } else if (state.recordingStarting) {
         recorderPanel.appendChild(node("span", "cs-recorder-dot"));
@@ -1721,7 +1749,7 @@
       } else {
         var draftPlay = node("button", "cs-recorder-play", "▶"); draftPlay.type = "button"; draftPlay.setAttribute("aria-label", "Play recorded voice message");
         var draftWave = node("span", "cs-recorder-wave");
-        state.voiceDraft.waveform.slice(0, 24).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; draftWave.appendChild(bar); });
+        compressWaveform(state.voiceDraft.waveform, 48).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; draftWave.appendChild(bar); });
         var draftTime = node("span", "cs-recorder-time", formatAudioTime(state.voiceDraft.duration));
         var draftAudio = node("audio", "cs-voice-audio"); draftAudio.src = state.voiceDraft.url; draftAudio.preload = "metadata";
         draftPlay.onclick = function () { if (draftAudio.paused) draftAudio.play().catch(function () {}); else draftAudio.pause(); };
