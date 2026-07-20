@@ -135,3 +135,28 @@ def aggregate_recent_support_analytics(days=3):
 def build_support_analytics_export(export_id):
     from apps.support.analytics_aggregates import build_export
     return build_export(export_id)
+
+
+@shared_task(
+    name="apps.support.tasks.send_support_agent_invitation_email",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_jitter=True,
+    max_retries=5,
+)
+def send_support_agent_invitation_email(invitation_id: str, raw_token: str):
+    from apps.support.models import SupportAgentInvitation
+    from apps.support.services import send_agent_invitation_email
+
+    invitation = (
+        SupportAgentInvitation.objects.select_related("invited_by", "invited_by__profile")
+        .prefetch_related("website_assignments__website", "team_assignments__team")
+        .filter(pk=invitation_id, status=SupportAgentInvitation.Status.PENDING)
+        .first()
+    )
+    if not invitation:
+        return 0
+    sent = send_agent_invitation_email(invitation, raw_token)
+    if sent < 1:
+        raise RuntimeError("Support agent invitation email was not accepted by the configured email backend.")
+    return sent

@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.support.models import (
@@ -239,18 +239,28 @@ def create_agent_invitation(
 
         websites = _websites_for_account(locked_account, website_ids)
         teams = _teams_for_account(locked_account, team_ids)
-        invitation = SupportAgentInvitation.objects.create(
-            support_account=locked_account,
-            email=normalized_email,
-            token_hash=_token_hash(raw_token),
-            expires_at=timezone.now() + _invitation_ttl(),
-            max_active_conversations=max_active_conversations,
-            can_view_all_conversations=can_view_all_conversations,
-            can_assign_conversations=can_assign_conversations,
-            can_view_analytics=can_view_analytics,
-            can_manage_websites=can_manage_websites, can_manage_knowledge=can_manage_knowledge, can_manage_teams=can_manage_teams, can_manage_automations=can_manage_automations, can_export_data=can_export_data,
-            invited_by=actor,
-        )
+        try:
+            invitation = SupportAgentInvitation.objects.create(
+                support_account=locked_account,
+                email=normalized_email,
+                token_hash=_token_hash(raw_token),
+                expires_at=timezone.now() + _invitation_ttl(),
+                max_active_conversations=max_active_conversations,
+                can_view_all_conversations=can_view_all_conversations,
+                can_assign_conversations=can_assign_conversations,
+                can_view_analytics=can_view_analytics,
+                can_manage_websites=can_manage_websites,
+                can_manage_knowledge=can_manage_knowledge,
+                can_manage_teams=can_manage_teams,
+                can_manage_automations=can_manage_automations,
+                can_export_data=can_export_data,
+                invited_by=actor,
+            )
+        except IntegrityError as exc:
+            raise SupportServiceError(
+                "A pending invitation already exists for this email.",
+                code="already_invited",
+            ) from exc
         SupportAgentInvitationTeam.objects.bulk_create([SupportAgentInvitationTeam(invitation=invitation, team=team) for team in teams])
         SupportAgentInvitationWebsite.objects.bulk_create([
             SupportAgentInvitationWebsite(invitation=invitation, website=website)
@@ -258,7 +268,18 @@ def create_agent_invitation(
         ])
 
     invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=invitation.pk)
-    send_agent_invitation_email(invitation, raw_token)
+
+    def queue_delivery():
+        try:
+            from apps.support.tasks import send_support_agent_invitation_email
+            send_support_agent_invitation_email.delay(str(invitation.id), raw_token)
+        except Exception:
+            # Invitation creation must not fail because the broker or SMTP
+            # service is temporarily unavailable. A pending invitation can be
+            # resent from the owner UI after infrastructure recovers.
+            return None
+
+    transaction.on_commit(queue_delivery)
     return invitation
 
 
@@ -307,7 +328,15 @@ def resend_agent_invitation(*, actor, account: SupportAccount, invitation: Suppo
         ])
 
     locked_invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=locked_invitation.pk)
-    send_agent_invitation_email(locked_invitation, raw_token)
+
+    def queue_delivery():
+        try:
+            from apps.support.tasks import send_support_agent_invitation_email
+            send_support_agent_invitation_email.delay(str(locked_invitation.id), raw_token)
+        except Exception:
+            return None
+
+    transaction.on_commit(queue_delivery)
     return locked_invitation
 
 

@@ -254,3 +254,27 @@
 @media(max-width:1240px){.sc-website-settings-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.sc-setting-column--preview{grid-column:1/-1;border-top:1px solid var(--sc-border)}.sc-setting-column:nth-child(2){border-right:0}.sc-agent-invite-layout{grid-template-columns:1fr}.sc-agent-invite-summary__stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:1050px){.sc-agents-workspace{grid-template-columns:1fr}.sc-agent-table-wrap{border-right:0;border-bottom:1px solid var(--sc-border)}}
 @media(max-width:760px){.sc-website-settings-grid{grid-template-columns:1fr}.sc-setting-column{border-right:0;border-bottom:1px solid var(--sc-border)}.sc-setting-column:last-child{border-bottom:0}.sc-widget-demo__page{min-height:620px}.sc-widget-demo__dock{left:12px;right:12px;bottom:12px}.sc-widget-demo__panel{width:100%;height:min(620px,72dvh)}.sc-agent-invite-summary__stats{grid-template-columns:1fr}.sc-agent-actions{flex-direction:column-reverse}}
+
+
+/* Support Upgrade 13 — layout and invitation reliability polish */
+.sc-website-settings-grid{grid-template-columns:minmax(0,1.15fr) minmax(0,.9fr) minmax(320px,.78fr)}
+.sc-setting-column .sc-settings-row{grid-template-columns:minmax(120px,.55fr) minmax(0,1fr);gap:14px;padding:10px 0;border-bottom:1px solid var(--sc-border)}
+.sc-setting-column .sc-settings-row:last-child{border-bottom:0}
+.sc-setting-column .sc-settings-row>span{min-width:0}
+.sc-setting-column .sc-settings-row input{min-width:0}
+.sc-setting-column--preview{overflow:hidden}
+.sc-widget-demo__canvas{padding:12px;overflow:hidden}
+.sc-widget-demo__page{min-height:520px}
+.sc-widget-demo__dock{left:auto;right:14px;bottom:14px;width:274px;transform-origin:bottom right}
+.sc-widget-demo.is-left .sc-widget-demo__dock{left:14px;right:auto;transform-origin:bottom left}
+.sc-widget-demo__panel{width:380px;height:620px;transform:scale(.68);transform-origin:bottom right;margin-top:-198px;margin-left:-106px}
+.sc-widget-demo.is-left .sc-widget-demo__panel{transform-origin:bottom left;margin-left:0;margin-right:-106px}
+.sc-widget-demo__launcher{transform:scale(.88);transform-origin:bottom right}
+.sc-widget-demo.is-left .sc-widget-demo__launcher{transform-origin:bottom left}
+.sc-agent-invite-layout{grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr)}
+.sc-agent-invite-form fieldset{padding:12px}
+.sc-agent-invite-form .sc-agent-check{justify-content:flex-start}
+.sc-agent-invite-summary__card,.sc-agent-invite-summary__list{box-shadow:0 1px 0 rgba(17,19,21,.03)}
+.sc-modal--lg{width:min(64rem,100%)}
+@media(max-width:1180px){.sc-website-settings-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.sc-setting-column--preview{grid-column:1/-1}.sc-widget-demo__dock{position:relative;left:auto;right:auto;bottom:auto;width:274px;margin:0 auto}.sc-widget-demo.is-left .sc-widget-demo__dock{left:auto;right:auto}.sc-widget-demo__page{min-height:540px}}
+@media(max-width:760px){.sc-setting-column .sc-settings-row{grid-template-columns:1fr}.sc-agent-invite-layout{grid-template-columns:1fr}.sc-widget-demo__page{min-height:500px}.sc-widget-demo__panel{transform:scale(.62);margin-top:-236px;margin-left:-144px}.sc-widget-demo.is-left .sc-widget-demo__panel{margin-left:0;margin-right:-144px}}

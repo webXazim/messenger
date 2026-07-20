@@ -418,8 +418,12 @@ function InviteModal({ open, bootstrap, onClose }: { open: boolean; bootstrap: S
       resetForm();
       onClose();
       await queryClient.invalidateQueries({ queryKey: ["support-bootstrap"] });
+      await queryClient.invalidateQueries({ queryKey: ["support-agent-invitations"] });
     },
-    onError: (reason) => setError(parseApiError(reason, "Invitation could not be sent.").message),
+    onError: (reason) => {
+      const parsed = parseApiError(reason, "Invitation could not be created.");
+      setError(parsed.message);
+    },
   });
 
   return (
