@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], recordingStream: null, recordingTimer: 0, voiceDraft: null, objectUrls: [], mediaObjectUrls: {}, audioPlayback: {}, followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -75,6 +75,7 @@
     form.append("original_name", file.name || "upload");
     if (file.type) form.append("mime_type", file.type);
     if (metadata && typeof metadata.durationSeconds === "number") form.append("duration_seconds", metadata.durationSeconds.toFixed(2));
+    if (metadata && Array.isArray(metadata.waveform) && metadata.waveform.length) form.append("waveform", JSON.stringify(metadata.waveform));
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.open("POST", apiBase + path, true);
@@ -120,6 +121,7 @@
   function clearObjectUrls() {
     state.objectUrls.forEach(function (url) { try { URL.revokeObjectURL(url); } catch (_) {} });
     state.objectUrls = [];
+    state.mediaObjectUrls = {};
   }
 
   function clearPendingUploads() {
@@ -155,6 +157,9 @@
     state.hasUnread = false;
     state.pollInFlight = false;
     state.realtimeConversationReady = false;
+    discardVoiceDraft();
+    if (state.recording) stopVoiceRecording(true);
+    clearObjectUrls();
     clearPendingUploads();
     cleanupCall(true);
     try { localStorage.removeItem(storageKey); } catch (_) {}
@@ -354,8 +359,9 @@
       delivery_status: "pending",
       receipt_status: "pending",
       sender: { kind: "visitor", display_name: "You" },
+      voice_note: Boolean(voiceNote),
       attachments: optimisticUploads.map(function (upload) {
-        return { id: upload.id, media_kind: upload.kind, original_name: upload.name, mime_type: "", size: 0, scan_status: "clean", can_preview_inline: false, download_url: "" };
+        return { id: upload.id, media_kind: upload.kind, original_name: upload.name, mime_type: upload.mimeType || "", size: upload.size || 0, duration_seconds: upload.duration || null, scan_status: "clean", can_preview_inline: ["image", "video", "audio"].indexOf(upload.kind) >= 0, download_url: upload.localUrl || upload.previewUrl || "", preview_url: upload.localUrl || upload.previewUrl || "", thumbnail_url: upload.previewUrl || upload.localUrl || "" };
       })
     };
     state.messages.push(optimisticMessage);
@@ -412,6 +418,8 @@
         id: "",
         name: file.name || "Attachment",
         kind: kind,
+        mimeType: mime,
+        size: file.size || 0,
         progress: 0,
         status: "uploading",
         error: "",
@@ -461,36 +469,91 @@
     try { state.recorder.stop(); } catch (_) {}
   }
 
+  function discardVoiceDraft() {
+    if (!state.voiceDraft) return;
+    if (state.voiceDraft.url) {
+      try { URL.revokeObjectURL(state.voiceDraft.url); } catch (_) {}
+      state.objectUrls = state.objectUrls.filter(function (url) { return url !== state.voiceDraft.url; });
+    }
+    state.voiceDraft = null;
+  }
+
+  function sendVoiceDraft() {
+    var draft = state.voiceDraft;
+    if (!draft || state.uploading) return;
+    state.uploading = true;
+    state.error = "";
+    render();
+    uploadConversationFile(draft.file, { durationSeconds: draft.duration, waveform: draft.waveform }).then(function (upload) {
+      state.pendingUploads.push({
+        id: upload.id,
+        name: upload.original_name || draft.file.name,
+        kind: "audio",
+        mimeType: upload.mime_type || draft.file.type,
+        size: upload.size || draft.file.size,
+        duration: upload.duration_seconds || draft.duration,
+        localUrl: draft.url,
+        status: "ready",
+        progress: 100
+      });
+      draft.url = "";
+      discardVoiceDraft();
+      return sendMessage("", [upload.id], true);
+    }).catch(function (error) {
+      state.error = error.message || "The voice message could not be sent.";
+    }).then(function () {
+      state.uploading = false;
+      render();
+      scrollMessages();
+    });
+  }
+
+  function updateVoiceRecorderClock() {
+    if (!shadow || !state.recording) return;
+    var clock = shadow.querySelector(".cs-recorder-time");
+    if (clock) clock.textContent = formatAudioTime((Date.now() - state.recordingStartedAt) / 1000);
+  }
+
   function toggleVoiceRecording() {
-    if (state.recording) { stopVoiceRecording(true); return; }
+    if (state.voiceDraft) { sendVoiceDraft(); return; }
+    if (state.recording) { stopVoiceRecording(false); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
       state.error = "Voice recording is not supported in this browser."; render(); return;
     }
     state.error = "";
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-      var recorder = new MediaRecorder(stream);
+      var mimeTypes = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
+      var preferredMime = mimeTypes.find(function (mime) { return typeof MediaRecorder.isTypeSupported !== "function" || MediaRecorder.isTypeSupported(mime); }) || "";
+      var recorder = preferredMime ? new MediaRecorder(stream, { mimeType: preferredMime }) : new MediaRecorder(stream);
       state.recorder = recorder;
+      state.recordingStream = stream;
       state.recordingChunks = [];
       state.recordingStartedAt = Date.now();
       recorder.ondataavailable = function (event) { if (event.data && event.data.size) state.recordingChunks.push(event.data); };
       recorder.onstop = function () {
-        var shouldSend = Boolean(recorder.__sendAfterStop);
         var durationSeconds = Math.max(0.1, (Date.now() - state.recordingStartedAt) / 1000);
         stream.getTracks().forEach(function (track) { track.stop(); });
-        state.recording = false; state.recorder = null;
-        if (!shouldSend || !state.recordingChunks.length) { render(); return; }
+        state.recording = false; state.recorder = null; state.recordingStream = null;
+        if (state.recordingTimer) window.clearInterval(state.recordingTimer);
+        state.recordingTimer = 0;
+        if (recorder.__sendAfterStop || !state.recordingChunks.length) { render(); return; }
         var mime = recorder.mimeType || "audio/webm";
         var extension = mime.indexOf("ogg") >= 0 ? "ogg" : mime.indexOf("mp4") >= 0 ? "m4a" : "webm";
-        var file = new File([new Blob(state.recordingChunks, { type: mime })], "voice-" + Date.now() + "." + extension, { type: mime });
-        state.uploading = true; render();
-        uploadConversationFile(file, { durationSeconds: durationSeconds }).then(function (upload) {
-          return sendMessage("", [upload.id], true);
-        }).catch(function (error) {
-          state.error = error.message || "The voice message could not be sent.";
-        }).then(function () { state.uploading = false; render(); });
+        var blob = new Blob(state.recordingChunks, { type: mime });
+        var file = new File([blob], "voice-" + Date.now() + "." + extension, { type: mime });
+        var url = URL.createObjectURL(blob);
+        state.objectUrls.push(url);
+        state.voiceDraft = {
+          file: file,
+          url: url,
+          duration: durationSeconds,
+          waveform: defaultWaveform()
+        };
+        render();
       };
       recorder.start(250);
       state.recording = true;
+      state.recordingTimer = window.setInterval(function () { updateVoiceRecorderClock(); }, 250);
       render();
     }).catch(function () { state.error = "Microphone access is required to record a voice message."; render(); });
   }
@@ -992,6 +1055,38 @@
       .cs-meta{display:inline-block;margin:0 0 0 7px;color:#8a8a8f;vertical-align:baseline;text-align:right;white-space:nowrap;opacity:1}
       .cs-message.visitor .cs-meta{color:#77777c}
       .cs-receipt{font-weight:800;letter-spacing:-2px;color:#262626}.cs-receipt.is-pending{font-weight:500;letter-spacing:0;color:#8a8a8f}.cs-receipt.is-failed{font-weight:700;letter-spacing:0;color:#c62828}
+      .cs-message-surface{position:relative;display:grid;min-width:0;max-width:100%;gap:3px}
+      .cs-message-surface.is-media-only{width:min(286px,72vw)}
+      .cs-media-grid{display:grid;width:min(286px,72vw);max-width:100%;gap:2px;overflow:hidden;border-radius:17px}
+      .cs-media-grid.count-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .cs-media-grid.count-3,.cs-media-grid.count-4{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .cs-media-grid.count-3 .cs-media-item:first-child{grid-row:span 2}
+      .cs-media-item{position:relative;display:block;width:100%;min-width:0;min-height:120px;padding:0;overflow:hidden;border:0;background:rgba(127,127,127,.12);cursor:pointer}
+      .cs-media-grid.count-1 .cs-media-item{aspect-ratio:4/3;max-height:310px}
+      .cs-media-grid:not(.count-1) .cs-media-item{aspect-ratio:1}
+      .cs-media-item img,.cs-media-item video{width:100%;height:100%;display:block;object-fit:cover}
+      .cs-media-loading{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(110deg,rgba(127,127,127,.08) 20%,rgba(127,127,127,.18) 38%,rgba(127,127,127,.08) 56%);background-size:220% 100%;animation:cs-media-loading 1.2s linear infinite;color:#777;font-size:10px}
+      .cs-media-loading.is-failed{background:rgba(127,127,127,.12);animation:none}
+      @keyframes cs-media-loading{to{background-position:-220% 0}}
+      .cs-media-play{position:absolute;left:50%;top:50%;width:42px;height:42px;display:grid;place-items:center;padding-left:3px;border-radius:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.72);color:#fff;font-size:15px;box-shadow:0 3px 14px rgba(0,0,0,.3)}
+      .cs-media-more{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.48);color:#fff;font-size:26px;font-weight:800}
+      .cs-bubble.has-media-caption{margin-top:-3px;border-top-left-radius:4px!important;border-top-right-radius:4px!important}
+      .cs-media-meta{position:absolute;right:7px;bottom:6px;padding:2px 6px;border-radius:999px;background:rgba(0,0,0,.58);color:#fff;line-height:1}
+      .cs-media-meta .cs-meta,.cs-media-meta .cs-receipt{margin:0;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.4)}
+      .cs-standalone-meta{justify-self:end;padding:0 7px}.cs-standalone-meta .cs-meta{margin:0}
+      .cs-file-card{width:min(292px,74vw);display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 10px;border:1px solid #d9d9dc;border-radius:14px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"};color:${state.config && state.config.theme === "dark" ? "#f5f5f5" : "#171717"};box-shadow:0 1px 1px rgba(0,0,0,.025)}
+      .cs-file-badge{width:42px;height:42px;display:grid;place-items:center;border-radius:11px;background:rgba(127,127,127,.12);color:#555;font-size:9px;font-weight:900}
+      .cs-file-card.is-pdf .cs-file-badge{background:#fff0f0;color:#c62828}
+      .cs-file-details{min-width:0;display:grid;gap:3px}.cs-file-details strong,.cs-file-details small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-file-details strong{font-size:12px}.cs-file-details small{color:#7b7b80;font-size:9px}
+      .cs-file-actions{display:flex;align-items:center;gap:3px}.cs-file-actions button{min-width:30px;height:30px;padding:0 7px;border:0;border-radius:8px;background:rgba(127,127,127,.1);color:inherit;font:800 10px inherit;cursor:pointer}
+      .cs-voice-message{width:min(310px,77vw);display:grid;grid-template-columns:42px minmax(0,1fr) 34px;align-items:center;gap:8px;padding:9px 10px;border:1px solid #d9d9dc;border-radius:18px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"};color:${state.config && state.config.theme === "dark" ? "#f5f5f5" : "#171717"}}
+      .cs-voice-play,.cs-voice-speed{border:0;border-radius:50%;background:#111;color:#fff;cursor:pointer}.cs-voice-play{width:42px;height:42px;font-size:13px}.cs-voice-speed{width:34px;height:34px;font:800 9px inherit}
+      .cs-voice-content{min-width:0;display:grid;gap:3px}.cs-waveform{height:32px;display:flex;align-items:center;gap:1.5px;padding:0;border:0;background:transparent;cursor:pointer}.cs-waveform span{width:2px;max-height:30px;flex:1;border-radius:999px;background:#c4c4c7}.cs-waveform span.is-active{background:#111}
+      .cs-voice-timing{display:flex;align-items:center;color:#85858a;font-size:9px}.cs-voice-timing .cs-meta{margin:0;color:inherit}.cs-voice-meta-separator{margin:0 3px}.cs-voice-audio{display:none}
+      .cs-viewer-backdrop{position:fixed;z-index:2147483646;inset:0;display:grid;place-items:center;padding:0;background:rgba(0,0,0,.92);animation:cs-viewer-in 150ms ease both}
+      @keyframes cs-viewer-in{from{opacity:0}to{opacity:1}}
+      .cs-viewer{position:relative;width:100%;height:100%;outline:0}.cs-viewer-stage{width:100%;height:100%;display:grid;place-items:center;overflow:hidden}.cs-viewer-stage img,.cs-viewer-stage video{display:block;max-width:100%;max-height:100%;object-fit:contain}.cs-viewer-stage iframe{width:100%;height:100%;border:0;background:#fff}.cs-viewer-loading{color:rgba(255,255,255,.75);font-size:13px}
+      .cs-viewer-chrome{position:absolute;z-index:2;left:0;right:0;top:0;display:flex;align-items:center;gap:12px;padding:max(14px,env(safe-area-inset-top)) 14px 14px;background:linear-gradient(rgba(0,0,0,.72),transparent);color:#fff}.cs-viewer-identity{min-width:0;display:grid;flex:1}.cs-viewer-identity strong,.cs-viewer-identity small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cs-viewer-identity strong{font-size:13px}.cs-viewer-identity small{color:rgba(255,255,255,.7);font-size:10px}.cs-viewer-actions{display:flex;gap:6px}.cs-viewer-actions button{width:38px;height:38px;border:1px solid rgba(255,255,255,.22);border-radius:50%;background:rgba(0,0,0,.35);color:#fff;font:500 23px/1 inherit;cursor:pointer}
       .cs-composer{grid-template-columns:auto minmax(0,1fr) auto;align-items:end;padding:10px 12px;gap:8px}
       .cs-composer textarea{min-height:46px;max-height:108px;padding:12px 15px;border-radius:24px;line-height:20px;overflow-y:auto}
       .cs-upload-list{grid-column:1/-1;display:flex;width:100%;gap:9px;padding:2px 0 3px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:thin}
@@ -1005,6 +1100,12 @@
       .cs-upload-remove{position:absolute;top:4px;right:4px;width:23px;height:23px;display:grid;place-items:center;border:0;border-radius:50%;background:rgba(0,0,0,.68);color:#fff;font:700 15px/1 inherit;cursor:pointer}.cs-upload-remove:disabled{opacity:.45;cursor:default}
       .cs-tool,.cs-send{width:46px;height:46px;min-width:46px;padding:0;border-radius:50%}
       .cs-tool.is-voice,.cs-send{border-color:${state.config ? state.config.primary_color : "#111"};background:${state.config ? state.config.primary_color : "#111"};color:#fff}
+      .cs-composer.has-recorder{grid-template-columns:minmax(0,1fr) auto}
+      .cs-recorder{min-width:0;min-height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:5px 8px;border:1px solid #d8d8dc;border-radius:24px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"}}
+      .cs-recorder-delete,.cs-recorder-play{width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:50%;background:rgba(127,127,127,.11);color:inherit;font:700 18px/1 inherit;cursor:pointer}.cs-recorder-play{background:#111;color:#fff;font-size:11px}
+      .cs-recorder-dot{width:8px;height:8px;border-radius:50%;background:#d92d20;animation:cs-recorder-pulse 1.1s ease-in-out infinite}.cs-recorder-time{color:#777;font-size:10px;white-space:nowrap}
+      .cs-recorder-wave{min-width:0;height:27px;display:flex;align-items:center;gap:2px;overflow:hidden}.cs-recorder-wave span{width:2px;flex:1;max-width:3px;border-radius:999px;background:#bdbdc1}.cs-recorder-wave span.is-active{background:#111}.cs-recorder-wave.is-live span{animation:cs-recorder-bar .8s ease-in-out infinite alternate}
+      @keyframes cs-recorder-pulse{50%{opacity:.35}}@keyframes cs-recorder-bar{to{transform:scaleY(.42);opacity:.58}}
       .cs-tool[hidden],.cs-send[hidden],.cs-jump[hidden]{display:none!important}
       .cs-visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
       .cs-back svg,.cs-header-call svg,.cs-tool svg,.cs-send svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
@@ -1025,9 +1126,13 @@
         .cs-message.visitor .cs-bubble{border-bottom-right-radius:4px}
         .cs-message.visitor.is-grouped .cs-bubble{border-top-right-radius:4px}
         .cs-meta{margin-left:6px;font-size:9.2px}
+        .cs-message-surface.is-media-only,.cs-media-grid{width:min(286px,80vw)}
+        .cs-file-card{width:min(292px,82vw)}.cs-voice-message{width:min(310px,84vw)}
+        .cs-media-item{min-height:106px}.cs-media-grid.count-1 .cs-media-item{max-height:43dvh}
+        .cs-recorder{gap:6px}.cs-recorder-wave{gap:1.5px}
         .cs-composer{padding-bottom:max(10px,env(safe-area-inset-bottom))}
       }
-      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing,.cs-message.is-entering{animation:none}}
+      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing,.cs-message.is-entering,.cs-media-loading,.cs-viewer-backdrop,.cs-recorder-dot,.cs-recorder-wave.is-live span{animation:none}}
     `;
   }
 
@@ -1072,31 +1177,212 @@
     if (!state.hasUnread && badge) badge.remove();
   }
 
-  function renderAttachment(container, attachment) {
-    var media = node("div", "cs-media");
-    var previewUrl = attachment.preview_url;
-    if (previewUrl && attachment.can_preview_inline) {
-      var element = null;
-      if (attachment.media_kind === "image") { element = node("img"); element.alt = attachment.original_name || "Image"; }
-      else if (attachment.media_kind === "video") { element = node("video"); element.controls = true; element.playsInline = true; }
-      else if (attachment.media_kind === "audio") { element = node("audio"); element.controls = true; }
-      if (element) {
-        media.appendChild(element);
-        authorizedBlob(previewUrl).then(function (blob) {
-          var objectUrl = URL.createObjectURL(blob); state.objectUrls.push(objectUrl); element.src = objectUrl;
-        }).catch(function () {});
-      }
+  function formatFileSize(bytes) {
+    var size = Number(bytes) || 0;
+    if (size <= 0) return "";
+    if (size < 1024) return size + " B";
+    if (size < 1024 * 1024) return Math.round(size / 1024) + " KB";
+    return (size / (1024 * 1024)).toFixed(size < 10 * 1024 * 1024 ? 1 : 0) + " MB";
+  }
+
+  function formatAudioTime(seconds) {
+    var safe = Math.max(0, Math.floor(Number(seconds) || 0));
+    return Math.floor(safe / 60) + ":" + String(safe % 60).padStart(2, "0");
+  }
+
+  function defaultWaveform() {
+    return [.22,.31,.46,.37,.58,.42,.66,.53,.35,.48,.72,.61,.44,.29,.54,.78,.62,.39,.51,.69,.47,.33,.57,.81,.65,.43,.28,.49,.73,.55,.38,.62,.76,.52,.34,.46,.68,.59,.41,.27,.5,.71,.56,.36,.63,.45,.32,.23];
+  }
+
+  function mediaCacheKey(attachment, url) {
+    return String(attachment && attachment.id || "media") + ":" + String(url || "");
+  }
+
+  function loadAuthorizedObjectUrl(attachment, url) {
+    if (!url) return Promise.reject(new Error("Media is unavailable."));
+    if (String(url).indexOf("blob:") === 0) return Promise.resolve(url);
+    var key = mediaCacheKey(attachment, url);
+    if (state.mediaObjectUrls[key]) return Promise.resolve(state.mediaObjectUrls[key]);
+    return authorizedBlob(url).then(function (blob) {
+      if (state.mediaObjectUrls[key]) return state.mediaObjectUrls[key];
+      var objectUrl = URL.createObjectURL(blob);
+      state.mediaObjectUrls[key] = objectUrl;
+      state.objectUrls.push(objectUrl);
+      return objectUrl;
+    });
+  }
+
+  function downloadAttachment(attachment) {
+    return authorizedBlob(attachment.download_url).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = attachment.original_name || "download";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
+  }
+
+  function attachmentSource(attachment, full) {
+    if (full) return attachment.download_url || attachment.preview_url || attachment.thumbnail_url || "";
+    return attachment.thumbnail_url || attachment.preview_url || attachment.download_url || "";
+  }
+
+  function closeAttachmentViewer() {
+    if (!shadow) return;
+    var viewer = shadow.querySelector(".cs-viewer-backdrop");
+    if (viewer) {
+      if (viewer.__escapeHandler) document.removeEventListener("keydown", viewer.__escapeHandler);
+      viewer.remove();
     }
-    if (attachment.media_kind === "file" || !attachment.can_preview_inline) {
-      var card = node("div", "cs-file"); card.appendChild(node("strong", "", "↧")); card.appendChild(node("span", "", attachment.original_name || "File")); media.appendChild(card);
-    }
-    var download = node("button", "cs-download", "Download"); download.type = "button";
-    download.onclick = function () {
-      authorizedBlob(attachment.download_url).then(function (blob) {
-        var url = URL.createObjectURL(blob); var anchor = document.createElement("a"); anchor.href = url; anchor.download = attachment.original_name || "download"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-      }).catch(function () { state.error = "Download failed."; render(); });
+  }
+
+  function openAttachmentViewer(attachment) {
+    closeAttachmentViewer();
+    var backdrop = node("div", "cs-viewer-backdrop");
+    backdrop.setAttribute("role", "presentation");
+    var dialog = node("section", "cs-viewer");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", attachment.original_name || "Attachment preview");
+    dialog.tabIndex = -1;
+    var stage = node("div", "cs-viewer-stage");
+    stage.appendChild(node("div", "cs-viewer-loading", "Preparing preview…"));
+    var chrome = node("header", "cs-viewer-chrome");
+    var identity = node("span", "cs-viewer-identity");
+    identity.appendChild(node("strong", "", attachment.original_name || "Attachment"));
+    identity.appendChild(node("small", "", attachment.mime_type || attachment.media_kind || "File"));
+    chrome.appendChild(identity);
+    var actions = node("span", "cs-viewer-actions");
+    var download = node("button", "", "↓"); download.type = "button"; download.title = "Download"; download.setAttribute("aria-label", "Download " + (attachment.original_name || "attachment"));
+    download.onclick = function () { downloadAttachment(attachment).catch(function () { state.error = "Download failed."; closeAttachmentViewer(); render(); }); };
+    var close = node("button", "", "×"); close.type = "button"; close.title = "Close"; close.setAttribute("aria-label", "Close attachment viewer"); close.onclick = closeAttachmentViewer;
+    actions.appendChild(download); actions.appendChild(close); chrome.appendChild(actions);
+    dialog.appendChild(stage); dialog.appendChild(chrome); backdrop.appendChild(dialog); shadow.appendChild(backdrop);
+    backdrop.onmousedown = function (event) { if (event.target === backdrop) closeAttachmentViewer(); };
+    var escape = function (event) {
+      if (event.key !== "Escape") return;
+      closeAttachmentViewer();
     };
-    media.appendChild(download); container.appendChild(media);
+    backdrop.__escapeHandler = escape;
+    document.addEventListener("keydown", escape);
+    close.onclick = closeAttachmentViewer;
+    var source = attachmentSource(attachment, true);
+    loadAuthorizedObjectUrl(attachment, source).then(function (objectUrl) {
+      if (!stage.isConnected) return;
+      stage.innerHTML = "";
+      var mime = String(attachment.mime_type || "").toLowerCase();
+      var isPdf = mime === "application/pdf" || String(attachment.original_name || "").toLowerCase().endsWith(".pdf");
+      if (attachment.media_kind === "image") {
+        var image = node("img"); image.src = objectUrl; image.alt = attachment.original_name || "Image"; stage.appendChild(image);
+      } else if (attachment.media_kind === "video") {
+        var video = node("video"); video.src = objectUrl; video.controls = true; video.autoplay = true; video.playsInline = true; stage.appendChild(video);
+      } else if (isPdf) {
+        var frame = node("iframe"); frame.src = objectUrl; frame.title = attachment.original_name || "PDF preview"; stage.appendChild(frame);
+      } else {
+        stage.appendChild(node("div", "cs-viewer-loading", "Preview is not available for this file type."));
+      }
+    }).catch(function () {
+      if (stage.isConnected) stage.textContent = "This attachment could not be previewed.";
+    });
+    window.requestAnimationFrame(function () { dialog.focus(); });
+  }
+
+  function renderMediaAttachment(attachment) {
+    var item = node("button", "cs-media-item is-" + attachment.media_kind);
+    item.type = "button";
+    item.setAttribute("aria-label", "Open " + (attachment.original_name || attachment.media_kind));
+    item.onclick = function () { openAttachmentViewer(attachment); };
+    var loading = node("span", "cs-media-loading"); item.appendChild(loading);
+    var source = attachmentSource(attachment, false);
+    loadAuthorizedObjectUrl(attachment, source).then(function (objectUrl) {
+      if (!item.isConnected) return;
+      loading.remove();
+      if (attachment.media_kind === "image") {
+        var image = node("img"); image.src = objectUrl; image.alt = attachment.original_name || "Image"; image.loading = "lazy"; item.appendChild(image);
+      } else {
+        var video = node("video"); video.src = objectUrl; video.muted = true; video.preload = "metadata"; video.playsInline = true; item.appendChild(video);
+        var play = node("span", "cs-media-play", "▶"); play.setAttribute("aria-hidden", "true"); item.appendChild(play);
+      }
+    }).catch(function () {
+      loading.className = "cs-media-loading is-failed";
+      loading.textContent = "Preview unavailable";
+    });
+    return item;
+  }
+
+  function renderFileAttachment(attachment) {
+    var mime = String(attachment.mime_type || "").toLowerCase();
+    var isPdf = mime === "application/pdf" || String(attachment.original_name || "").toLowerCase().endsWith(".pdf");
+    var card = node("article", "cs-file-card" + (isPdf ? " is-pdf" : ""));
+    var badge = node("span", "cs-file-badge", isPdf ? "PDF" : String(attachment.original_name || "FILE").split(".").pop().slice(0, 4).toUpperCase());
+    var details = node("span", "cs-file-details");
+    details.appendChild(node("strong", "", attachment.original_name || "File"));
+    details.appendChild(node("small", "", [formatFileSize(attachment.size), attachment.mime_type || "File"].filter(Boolean).join(" · ")));
+    var actions = node("span", "cs-file-actions");
+    if (isPdf) {
+      var view = node("button", "", "View"); view.type = "button"; view.onclick = function () { openAttachmentViewer(attachment); }; actions.appendChild(view);
+    }
+    var download = node("button", "", "↓"); download.type = "button"; download.setAttribute("aria-label", "Download " + (attachment.original_name || "file"));
+    download.onclick = function () { downloadAttachment(attachment).catch(function () { state.error = "Download failed."; render(); }); };
+    actions.appendChild(download);
+    card.appendChild(badge); card.appendChild(details); card.appendChild(actions);
+    return card;
+  }
+
+  function renderVoiceAttachment(attachment) {
+    var key = String(attachment.id || attachment.download_url || "voice");
+    var saved = state.audioPlayback[key] || { speedIndex: 0, currentTime: 0 };
+    state.audioPlayback[key] = saved;
+    var speeds = [1, 1.25, 1.5, 2];
+    var player = node("div", "cs-voice-message");
+    var play = node("button", "cs-voice-play", "▶"); play.type = "button"; play.setAttribute("aria-label", "Play voice message");
+    var content = node("span", "cs-voice-content");
+    var waveform = node("button", "cs-waveform"); waveform.type = "button"; waveform.setAttribute("aria-label", "Seek voice message");
+    var bars = defaultWaveform();
+    bars.forEach(function (height) { var bar = node("span"); bar.style.height = Math.round(7 + height * 23) + "px"; waveform.appendChild(bar); });
+    var timing = node("span", "cs-voice-timing", formatAudioTime(attachment.duration_seconds));
+    content.appendChild(waveform); content.appendChild(timing);
+    var speed = node("button", "cs-voice-speed", speeds[saved.speedIndex] + "×"); speed.type = "button";
+    var audio = node("audio", "cs-voice-audio"); audio.preload = "metadata"; audio.playsInline = true;
+    function sync() {
+      var duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : Number(attachment.duration_seconds) || 0;
+      saved.currentTime = audio.currentTime || 0;
+      timing.textContent = formatAudioTime(audio.paused ? duration : saved.currentTime);
+      var progress = duration ? saved.currentTime / duration : 0;
+      Array.prototype.forEach.call(waveform.children, function (bar, index) { bar.classList.toggle("is-active", index < Math.round(progress * bars.length)); });
+    }
+    play.onclick = function () {
+      function toggle() {
+        if (saved.currentTime && !audio.currentTime) audio.currentTime = saved.currentTime;
+        audio.playbackRate = speeds[saved.speedIndex];
+        if (audio.paused) audio.play().catch(function () { player.classList.add("is-failed"); });
+        else audio.pause();
+      }
+      if (audio.src) { toggle(); return; }
+      play.disabled = true;
+      loadAuthorizedObjectUrl(attachment, attachmentSource(attachment, true)).then(function (url) {
+        audio.src = url; play.disabled = false; toggle();
+      }).catch(function () { play.disabled = false; player.classList.add("is-failed"); timing.textContent = "Unavailable"; });
+    };
+    waveform.onclick = function (event) {
+      if (!audio.src || !audio.duration) return;
+      var rect = waveform.getBoundingClientRect();
+      audio.currentTime = audio.duration * Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
+      sync();
+    };
+    speed.onclick = function () {
+      saved.speedIndex = (saved.speedIndex + 1) % speeds.length;
+      audio.playbackRate = speeds[saved.speedIndex];
+      speed.textContent = speeds[saved.speedIndex] + "×";
+    };
+    audio.onplay = function () { play.textContent = "Ⅱ"; play.setAttribute("aria-label", "Pause voice message"); };
+    audio.onpause = function () { play.textContent = "▶"; play.setAttribute("aria-label", "Play voice message"); sync(); };
+    audio.ontimeupdate = sync; audio.onloadedmetadata = sync; audio.onended = sync;
+    player.appendChild(play); player.appendChild(content); player.appendChild(speed); player.appendChild(audio);
+    return player;
   }
 
   function renderMessages(body) {
@@ -1118,16 +1404,47 @@
       var timeLabel = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
       var receiptStatus = visitor ? String(message.receipt_status || message.delivery_status || "sent").toLowerCase() : "";
       var receiptLabel = receiptStatus === "pending" ? "Sending" : receiptStatus === "failed" ? "Failed" : receiptStatus === "sent" ? "\u2713" : receiptStatus ? "\u2713\u2713" : "";
-      var bubble = node("div", "cs-bubble");
-      bubble.appendChild(node("div", "cs-bubble-text", message.text || ""));
-      (message.attachments || []).forEach(function (attachment) { renderAttachment(bubble, attachment); });
+      var attachments = message.attachments || [];
+      var visualMedia = attachments.filter(function (attachment) { return attachment.can_preview_inline && (attachment.media_kind === "image" || attachment.media_kind === "video"); });
+      var audioMedia = attachments.filter(function (attachment) { return attachment.media_kind === "audio"; });
+      var files = attachments.filter(function (attachment) { return visualMedia.indexOf(attachment) < 0 && audioMedia.indexOf(attachment) < 0; });
+      var hasText = Boolean(message.text);
+      var surface = node("div", "cs-message-surface" + (visualMedia.length && !hasText && !files.length && !audioMedia.length ? " is-media-only" : ""));
+      if (visualMedia.length) {
+        var mediaGrid = node("div", "cs-media-grid count-" + Math.min(4, visualMedia.length));
+        visualMedia.slice(0, 4).forEach(function (attachment, index) {
+          var mediaItem = renderMediaAttachment(attachment);
+          if (index === 3 && visualMedia.length > 4) mediaItem.appendChild(node("span", "cs-media-more", "+" + (visualMedia.length - 4)));
+          mediaGrid.appendChild(mediaItem);
+        });
+        surface.appendChild(mediaGrid);
+      }
+      if (message.voice_note && audioMedia.length) surface.appendChild(renderVoiceAttachment(audioMedia[0]));
+      else audioMedia.forEach(function (attachment) { surface.appendChild(renderVoiceAttachment(attachment)); });
+      files.forEach(function (attachment) { surface.appendChild(renderFileAttachment(attachment)); });
+      var bubble = null;
+      if (hasText || (!attachments.length)) {
+        bubble = node("div", "cs-bubble" + (visualMedia.length ? " has-media-caption" : ""));
+        bubble.appendChild(node("div", "cs-bubble-text", message.text || ""));
+        surface.appendChild(bubble);
+      }
       var meta = node("span", "cs-meta", timeLabel);
       if (visitor && receiptLabel) {
         meta.appendChild(document.createTextNode(" "));
         meta.appendChild(node("span", "cs-receipt is-" + receiptStatus, receiptLabel));
       }
-      bubble.appendChild(meta);
-      row.appendChild(bubble);
+      if (bubble) bubble.appendChild(meta);
+      else if (audioMedia.length && !visualMedia.length && !files.length && surface.querySelector(".cs-voice-timing")) {
+        var voiceTiming = surface.querySelector(".cs-voice-timing");
+        voiceTiming.appendChild(node("span", "cs-voice-meta-separator", " · "));
+        voiceTiming.appendChild(meta);
+      }
+      else {
+        var floatingMeta = node("span", visualMedia.length ? "cs-media-meta" : "cs-standalone-meta");
+        floatingMeta.appendChild(meta);
+        surface.appendChild(floatingMeta);
+      }
+      row.appendChild(surface);
       list.appendChild(row);
     });
     if (state.teamTyping) list.appendChild(node("div", "cs-typing", "Support team is typing…"));
@@ -1227,7 +1544,6 @@
     var previousBody = shadow.querySelector(".cs-body");
     var distanceFromBottom = previousBody ? Math.max(0, previousBody.scrollHeight - previousBody.scrollTop - previousBody.clientHeight) : 0;
     var followLatest = state.followLatest !== false;
-    clearObjectUrls();
     shadow.innerHTML = "";
     var style = node("style"); style.textContent = styles() + messengerStyles(); shadow.appendChild(style);
     var wrap = node("div", "cs-wrap");
@@ -1297,14 +1613,47 @@
     fileInput.onchange = function () { addPendingFiles(fileInput.files); };
     var attach = buttonIcon(node("button", "cs-tool"), "attach"); attach.type = "button"; attach.title = "Attach files"; attach.setAttribute("aria-label", "Attach files"); attach.disabled = state.loading || state.uploading || !state.config.allow_attachments; attach.onclick = function () { fileInput.click(); };
     var textarea = node("textarea"); textarea.placeholder = "Write a message…"; textarea.rows = 1; textarea.value = state.draft; textarea.disabled = state.loading;
-    var voice = buttonIcon(node("button", "cs-tool is-voice" + (state.recording ? " recording" : "")), state.recording ? "stop" : "mic"); voice.type = "button"; voice.title = state.recording ? "Send voice message" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
+    var voice = buttonIcon(node("button", "cs-tool is-voice" + (state.recording ? " recording" : "")), state.recording ? "stop" : state.voiceDraft ? "send" : "mic"); voice.type = "button"; voice.title = state.recording ? "Stop recording" : state.voiceDraft ? "Send voice message" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
     var send = buttonIcon(node("button", "cs-send"), "send"); send.type = "submit"; send.setAttribute("aria-label", "Send");
+    var recorderPanel = null;
+    var discardRecording = null;
+    if (state.recording || state.voiceDraft) {
+      recorderPanel = node("div", "cs-recorder" + (state.recording ? " is-recording" : " is-preview"));
+      discardRecording = node("button", "cs-recorder-delete", "×"); discardRecording.type = "button"; discardRecording.setAttribute("aria-label", state.recording ? "Cancel recording" : "Delete voice recording");
+      discardRecording.onclick = function () {
+        if (state.recording) stopVoiceRecording(true);
+        else { discardVoiceDraft(); render(); }
+      };
+      recorderPanel.appendChild(discardRecording);
+      if (state.recording) {
+        recorderPanel.appendChild(node("span", "cs-recorder-dot"));
+        recorderPanel.appendChild(node("span", "cs-recorder-time", formatAudioTime((Date.now() - state.recordingStartedAt) / 1000)));
+        var liveWave = node("span", "cs-recorder-wave is-live");
+        defaultWaveform().slice(0, 24).forEach(function (value, index) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; bar.style.animationDelay = (index * -37) + "ms"; liveWave.appendChild(bar); });
+        recorderPanel.appendChild(liveWave);
+      } else {
+        var draftPlay = node("button", "cs-recorder-play", "▶"); draftPlay.type = "button"; draftPlay.setAttribute("aria-label", "Play recorded voice message");
+        var draftWave = node("span", "cs-recorder-wave");
+        state.voiceDraft.waveform.slice(0, 24).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; draftWave.appendChild(bar); });
+        var draftTime = node("span", "cs-recorder-time", formatAudioTime(state.voiceDraft.duration));
+        var draftAudio = node("audio", "cs-voice-audio"); draftAudio.src = state.voiceDraft.url; draftAudio.preload = "metadata";
+        draftPlay.onclick = function () { if (draftAudio.paused) draftAudio.play().catch(function () {}); else draftAudio.pause(); };
+        draftAudio.onplay = function () { draftPlay.textContent = "Ⅱ"; };
+        draftAudio.onpause = function () { draftPlay.textContent = "▶"; };
+        draftAudio.ontimeupdate = function () {
+          draftTime.textContent = formatAudioTime(draftAudio.currentTime || state.voiceDraft.duration);
+          var progress = draftAudio.duration ? draftAudio.currentTime / draftAudio.duration : 0;
+          Array.prototype.forEach.call(draftWave.children, function (bar, index) { bar.classList.toggle("is-active", index < Math.round(progress * draftWave.children.length)); });
+        };
+        recorderPanel.appendChild(draftPlay); recorderPanel.appendChild(draftWave); recorderPanel.appendChild(draftTime); recorderPanel.appendChild(draftAudio);
+      }
+    }
     function updateComposerAction() {
       var readyUploads = state.pendingUploads.filter(function (upload) { return upload.status === "ready" && upload.id; });
       var hasActiveUploads = state.pendingUploads.some(function (upload) { return upload.status === "uploading"; });
       var hasMessage = Boolean(state.draft.trim() || readyUploads.length);
-      voice.hidden = hasMessage && !state.recording;
-      send.hidden = !hasMessage || state.recording;
+      voice.hidden = hasMessage && !state.recording && !state.voiceDraft;
+      send.hidden = !hasMessage || state.recording || Boolean(state.voiceDraft);
       send.disabled = state.loading || hasActiveUploads || !hasMessage;
     }
     updateComposerAction();
@@ -1322,7 +1671,15 @@
         if (!send.disabled) composer.requestSubmit();
       }
     };
-    composer.appendChild(fileInput); composer.appendChild(attach); composer.appendChild(textarea); composer.appendChild(voice); composer.appendChild(send);
+    composer.appendChild(fileInput);
+    if (recorderPanel) {
+      attach.hidden = true; textarea.hidden = true;
+      composer.classList.add("has-recorder");
+      composer.appendChild(recorderPanel);
+    } else {
+      composer.appendChild(attach); composer.appendChild(textarea);
+    }
+    composer.appendChild(voice); composer.appendChild(send);
     composer.addEventListener("submit", function (event) {
       event.preventDefault();
       var text = state.draft.trim(); var attachmentIds = state.pendingUploads.filter(function (upload) { return upload.status === "ready" && upload.id; }).map(function (upload) { return upload.id; }); if (!text && !attachmentIds.length) return;

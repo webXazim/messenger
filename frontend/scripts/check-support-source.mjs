@@ -99,6 +99,13 @@ assert.ok(widgetLoader.includes("setSelectionRange"), "Widget rerenders must pre
 assert.ok(widgetLoader.includes("flex:0 0 100%"), "Widget attachment previews must fill the composer width.");
 assert.ok(widgetLoader.includes("MediaRecorder"), "Widget visitor voice recording is missing.");
 assert.ok(widgetLoader.includes("authorizedBlob"), "Widget private media rendering is missing.");
+assert.ok(widgetLoader.includes("cs-media-grid"), "Widget image and video messages must use Messenger-style borderless media grids.");
+assert.ok(widgetLoader.includes("openAttachmentViewer"), "Widget authenticated fullscreen attachment viewing is missing.");
+assert.ok(widgetLoader.includes("cs-file-card"), "Widget typed file and PDF message cards are missing.");
+assert.ok(widgetLoader.includes("cs-voice-message"), "Widget custom waveform voice-note player is missing.");
+assert.ok(widgetLoader.includes("voiceDraft"), "Widget voice recordings must support preview, delete, and send states.");
+assert.ok(widgetLoader.includes("cs-recorder-wave"), "Widget voice-note recording and preview waveform is missing.");
+assert.ok(widgetLoader.includes("prefers-reduced-motion"), "Widget message and media motion must respect reduced-motion preferences.");
 assert.ok(css.includes(".ms-support-composer-row"), "Responsive Support media composer layout is missing.");
 
 assert.ok(supportInbox.includes("SupportConversationTools"), "Support-only conversation workflow tools are missing from the inbox.");
