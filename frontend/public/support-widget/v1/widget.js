@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -146,6 +146,9 @@
     state.session = null;
     state.token = "";
     state.messages = [];
+    state.messageHistoryLoaded = false;
+    state.messageListHydrated = false;
+    state.renderedMessageKeys = {};
     state.csat = null;
     state.csatRating = 0;
     state.csatComment = "";
@@ -192,11 +195,15 @@
       });
       var mergedMessages = nextMessages.concat(localMessages);
       var changed = JSON.stringify(mergedMessages) !== JSON.stringify(state.messages);
+      var firstHistoryLoad = !state.messageHistoryLoaded;
       state.messages = mergedMessages;
+      state.messageHistoryLoaded = true;
       acknowledgeLatestTeamMessage();
       if (changed && state.open) {
         render();
         if (state.followLatest) scrollMessages();
+      } else if (firstHistoryLoad && state.open) {
+        state.messageListHydrated = true;
       }
       return state.messages;
     });
@@ -957,6 +964,7 @@
   function messengerStyles() {
     return `
       @keyframes cs-panel-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.985)}}
+      @keyframes cs-message-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
       .cs-panel{position:relative;width:min(400px,calc(100vw - 24px));height:min(650px,calc(100dvh - 88px));transform-origin:bottom right}
       .cs-panel.is-closing{animation:cs-panel-out 150ms ease forwards;pointer-events:none}
       .cs-header{min-height:72px;padding:10px 12px;gap:10px}
@@ -973,6 +981,7 @@
       .cs-error span{min-width:0;flex:1}.cs-error button{width:26px;height:26px;border:0;border-radius:50%;background:rgba(141,27,27,.08);color:inherit;font:700 17px/1 inherit;cursor:pointer}
       .cs-messages{gap:3px;min-height:100%}
       .cs-message{max-width:86%;gap:2px;margin-top:9px}
+      .cs-message.is-entering{animation:cs-message-in 170ms cubic-bezier(.2,.75,.3,1) both}
       .cs-message.is-grouped{margin-top:0}
       .cs-bubble{padding:10px 12px 8px;border-color:#dadadd;border-radius:18px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"};color:${state.config && state.config.theme === "dark" ? "#f5f5f5" : "#141414"};font-size:15px;line-height:1.35;box-shadow:0 1px 1px rgba(0,0,0,.025)}
       .cs-message.team .cs-bubble{border-bottom-left-radius:5px}
@@ -1007,10 +1016,18 @@
         .cs-panel{position:fixed;inset:0;width:100vw;height:100dvh;border:0;border-radius:0;box-shadow:none;transform-origin:bottom center}
         .cs-wrap{left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom))}
         .cs-header{min-height:70px;padding-top:max(10px,env(safe-area-inset-top))}
-        .cs-body{padding-top:14px}
+        .cs-body{padding:14px 10px 10px}
+        .cs-message{max-width:84%;margin-top:12px}
+        .cs-message.is-grouped{margin-top:2px}
+        .cs-bubble{padding:6px 10px 6px;border-radius:12px;font-size:14px;line-height:1.3}
+        .cs-message.team .cs-bubble{border-bottom-left-radius:4px}
+        .cs-message.team.is-grouped .cs-bubble{border-top-left-radius:4px}
+        .cs-message.visitor .cs-bubble{border-bottom-right-radius:4px}
+        .cs-message.visitor.is-grouped .cs-bubble{border-top-right-radius:4px}
+        .cs-meta{margin-left:6px;font-size:9.2px}
         .cs-composer{padding-bottom:max(10px,env(safe-area-inset-bottom))}
       }
-      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing{animation:none}}
+      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing,.cs-message.is-entering{animation:none}}
     `;
   }
 
@@ -1089,7 +1106,13 @@
     state.messages.forEach(function (message) {
       var visitor = message.sender && message.sender.kind === "visitor";
       var sender = visitor ? "visitor" : "team";
-      var row = node("div", "cs-message " + sender + (previousSender === sender ? " is-grouped" : ""));
+      var renderKey = String(message.client_temp_id || message.id || "");
+      var shouldEnter = Boolean(state.messageListHydrated && renderKey && !state.renderedMessageKeys[renderKey]);
+      var row = node("div", "cs-message " + sender + (previousSender === sender ? " is-grouped" : "") + (shouldEnter ? " is-entering" : ""));
+      if (renderKey) {
+        row.setAttribute("data-message-key", renderKey);
+        state.renderedMessageKeys[renderKey] = true;
+      }
       previousSender = sender;
       var createdAt = message.created_at ? new Date(message.created_at) : null;
       var timeLabel = createdAt && !isNaN(createdAt.getTime()) ? createdAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
@@ -1108,6 +1131,7 @@
       list.appendChild(row);
     });
     if (state.teamTyping) list.appendChild(node("div", "cs-typing", "Support team is typing…"));
+    if (state.messageHistoryLoaded) state.messageListHydrated = true;
     body.appendChild(list);
   }
 

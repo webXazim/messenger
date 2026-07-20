@@ -39,7 +39,7 @@ export function MessageMeta({
 
   return (
     <div className="ms-message-meta">
-      <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+      <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
       {statusLabel ? <span className="ms-message-meta__pending" role="status">{statusLabel}</span> : null}
       {own && normalizedStatus ? <ReceiptIcon status={normalizedStatus} /> : null}
       {own && receiptSummary ? <span className="ms-message-meta__summary" title={receiptSummary}>{receiptSummary}</span> : null}

@@ -20,6 +20,9 @@ const supportCall = read("src/components/support/SupportGuestCall.tsx");
 const supportCallSettings = read("src/components/support/SupportCallSettings.tsx");
 const supportSocket = read("src/lib/supportSocket.ts");
 const supportRealtime = read("src/hooks/useSupportRealtime.ts");
+const messageEntrance = read("src/hooks/useMessageEntrance.ts");
+const messageMeta = read("src/components/messages/MessageMeta.tsx");
+const messageCss = read("src/styles/components/messages.css");
 const appShell = read("src/components/AppShell.tsx");
 const widgetLoader = read("public/support-widget/v1/widget.js");
 const frontendNginx = read("nginx.conf");
@@ -240,8 +243,15 @@ assert.ok(throttling.includes("class UnsafeScopedRateThrottle"), "Unsafe-only sc
 assert.ok(widgetLoader.includes("sendQueue: Promise.resolve()"), "Widget sends are not serialized.");
 assert.ok(widgetLoader.includes("visitorTyping: false"), "Widget typing presence is not edge-triggered.");
 assert.ok(widgetLoader.includes("state.messages.splice(replacementIndex, 1, payload.message)"), "Widget optimistic messages are not replaced in place.");
+assert.ok(widgetLoader.includes("state.renderedMessageKeys[renderKey]"), "Widget message confirmations can replay entrance motion.");
+assert.ok(widgetLoader.includes(".cs-message.is-entering"), "Widget messages have no smooth entrance treatment.");
+assert.ok(widgetLoader.includes(".cs-message.is-grouped{margin-top:2px}"), "Widget mobile message grouping does not match Messenger density.");
 assert.ok(supportInbox.includes("createSerializedTaskQueue"), "Support Inbox sends are not serialized.");
 assert.ok(supportInbox.includes("structuralSharing: mergeSupportMessages"), "Support Inbox refetches can discard optimistic messages.");
+assert.ok(supportInbox.includes("stableMessageRenderKey(message)"), "Support Inbox confirmation can remount and blink optimistic messages.");
+assert.ok(messageEntrance.includes("client_temp_id"), "Message rendering does not preserve optimistic identity.");
+assert.ok(messageMeta.includes('hour: "numeric"'), "Message timestamps still show a leading zero.");
+assert.ok(messageCss.includes(".ms-message-block.is-message-entering"), "Messenger and Support messages have no shared entrance motion.");
 assert.ok(conversationCss.includes(".ms-chat-composer-dock > .ms-typing-indicator"), "Hidden typing presence still reserves message timeline space.");
 
 

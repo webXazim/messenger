@@ -23,6 +23,7 @@ const serializers = read("../apps/chat/api/serializers.py");
 const views = read("../apps/chat/api/views.py");
 const devicePresence = read("src/lib/devicePresence.ts");
 const personPresentation = read("src/lib/personPresentation.ts");
+const messageEntrance = read("src/hooks/useMessageEntrance.ts");
 
 for (const required of [
   "event_id?: string",
@@ -54,6 +55,9 @@ for (const required of [
 ]) {
   assert.ok(`${appShell}\n${cache}`.includes(required), `Missing reconnect reconciliation: ${required}`);
 }
+
+assert.ok(conversation.includes("stableMessageRenderKey(message)"), "Messenger confirmation can remount and blink optimistic messages.");
+assert.ok(messageEntrance.includes("index > lastKnownIndex"), "Older history pages incorrectly replay new-message entrance motion.");
 
 for (const required of [
   "typingExpiryTimersRef",

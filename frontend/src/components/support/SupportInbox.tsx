@@ -30,6 +30,10 @@ import { TypingIndicator } from "../TypingIndicator";
 import { supportSocket } from "../../lib/supportSocket";
 import { createSerializedTaskQueue } from "../../lib/serializedTaskQueue";
 import { TYPING_MESSAGE_TRANSITION_MS, typingRemovalDelay } from "../../lib/typingPresence";
+import {
+  stableMessageRenderKey,
+  useMessageEntranceKeys,
+} from "../../hooks/useMessageEntrance";
 
 const QUEUES: Array<{
   value: NonNullable<SupportConversationFilters["queue"]>;
@@ -589,6 +593,12 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   });
   const selectedConversation =
     messagesQuery.data?.conversation || selectedFromList;
+  const supportMessages = messagesQuery.data?.messages || [];
+  const enteringMessageKeys = useMessageEntranceKeys(
+    selectedId,
+    supportMessages,
+    messagesQuery.isSuccess,
+  );
   const cannedRepliesQuery = useQuery({
     queryKey: ["support-canned-replies", selectedConversation?.website.id || ""],
     queryFn: ({ signal }) => supportApi.listCannedReplies(selectedConversation?.website.id, signal),
@@ -1240,7 +1250,8 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
               {messagesQuery.isLoading ? (
                 <div className="ms-chat-state">Loading messages…</div>
               ) : null}
-              {messagesQuery.data?.messages.map((message, index, messages) => {
+              {supportMessages.map((message, index, messages) => {
+                const renderKey = stableMessageRenderKey(message);
                 const previous = messages[index - 1];
                 const next = messages[index + 1];
                 const sameSender = (candidate?: SupportMessage) =>
@@ -1253,7 +1264,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                 const showDate = !previous ||
                   new Date(previous.created_at).toDateString() !== new Date(message.created_at).toDateString();
                 return (
-                  <div className={`ms-message-block is-group-${groupPosition}${groupedBefore ? " is-group-continuation" : ""}`} key={message.id}>
+                  <div className={`ms-message-block is-group-${groupPosition}${groupedBefore ? " is-group-continuation" : ""}${enteringMessageKeys.has(renderKey) ? " is-message-entering" : ""}`} key={renderKey}>
                     {showDate ? <div className="ms-timeline-chip">{new Date(message.created_at).toLocaleDateString()}</div> : null}
                     <SupportMessageBubble message={message} groupPosition={groupPosition} />
                   </div>

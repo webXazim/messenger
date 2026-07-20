@@ -50,6 +50,10 @@ import {
   TYPING_STOP_GRACE_MS,
   typingRemovalDelay,
 } from "../lib/typingPresence";
+import {
+  stableMessageRenderKey,
+  useMessageEntranceKeys,
+} from "../hooks/useMessageEntrance";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
@@ -1866,6 +1870,11 @@ export function ConversationPage() {
     }
     return notices;
   }, [callError, conversationError, conversationStateError, encryptionReadiness.status, encryptionReadinessMessage, messages.length, showRealtimeNotice, socketStatus]);
+  const enteringMessageKeys = useMessageEntranceKeys(
+    conversationId,
+    messages,
+    !isInitialChatLoading && !chatError,
+  );
 
   return (
     <div ref={conversationViewRef} className={`ms-conversation-view ${showDetails ? "ms-conversation-view--details-open" : ""}`} style={shellStyle}>
@@ -1974,6 +1983,7 @@ export function ConversationPage() {
           ) : null}
           {!isInitialChatLoading && !chatError && !messagesQuery.hasNextPage && messages.length ? <div className="ms-timeline-chip">Start of conversation</div> : null}
           {messages.map((message, index) => {
+            const renderKey = stableMessageRenderKey(message);
             const previous = messages[index - 1];
             const next = messages[index + 1];
             const showDate = !previous || !isSameDay(previous.created_at, message.created_at);
@@ -1985,9 +1995,9 @@ export function ConversationPage() {
               : isSameUserIdentity(message.sender, user);
             return (
               <div
-                key={message.id}
+                key={renderKey}
                 data-message-id={message.id}
-                className={`ms-message-block is-group-${groupPosition} ${groupedBefore ? "is-group-continuation" : ""} ${highlightedMessageId === message.id ? "message-search-active message-reference-active" : ""}`}
+                className={`ms-message-block is-group-${groupPosition} ${groupedBefore ? "is-group-continuation" : ""} ${enteringMessageKeys.has(renderKey) ? "is-message-entering" : ""} ${highlightedMessageId === message.id ? "message-search-active message-reference-active" : ""}`}
                 ref={(node) => registerMessageRef(message.id, node)}
               >
                 {showDate ? <div className="ms-timeline-chip">{new Date(message.created_at).toLocaleDateString()}</div> : null}
