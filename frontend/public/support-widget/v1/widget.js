@@ -13,7 +13,7 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], recordingStream: null, recordingTimer: 0, recordingAudioContext: null, recordingAnalyser: null, recordingAnimationFrame: 0, recordingWaveform: [], voiceDraft: null, objectUrls: [], mediaObjectUrls: {}, audioPlayback: {}, followLatest: true, scrollFrame: 0, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], messageHistoryLoaded: false, messageListHydrated: false, renderedMessageKeys: {}, csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStarting: false, recordingStartedAt: 0, recordingChunks: [], recordingStream: null, recordingTimer: 0, recordingAudioContext: null, recordingAnalyser: null, recordingAnimationFrame: 0, recordingWaveform: [], voiceDraft: null, objectUrls: [], mediaObjectUrls: {}, audioPlayback: {}, followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
@@ -208,7 +208,6 @@
       acknowledgeLatestTeamMessage();
       if (changed && state.open) {
         render();
-        if (state.followLatest) scrollMessages();
       } else if (firstHistoryLoad && state.open) {
         state.messageListHydrated = true;
       }
@@ -390,7 +389,6 @@
           connectRealtime();
         }
         render();
-        scrollMessages();
         return payload;
       }).catch(function (error) {
         state.messages = state.messages.map(function (message) {
@@ -575,7 +573,6 @@
     }).then(function () {
       state.uploading = false;
       render();
-      scrollMessages();
     });
   }
 
@@ -588,11 +585,17 @@
   function toggleVoiceRecording() {
     if (state.voiceDraft) { sendVoiceDraft(); return; }
     if (state.recording) { stopVoiceRecording(false); return; }
+    if (state.recordingStarting) return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === "undefined") {
       state.error = "Voice recording is not supported in this browser."; render(); return;
     }
-    state.error = "";
+    state.error = ""; state.recordingStarting = true; render();
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      if (!state.recordingStarting) {
+        stream.getTracks().forEach(function (track) { track.stop(); });
+        return;
+      }
+      state.recordingStarting = false;
       var mimeTypes = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"];
       var preferredMime = mimeTypes.find(function (mime) { return typeof MediaRecorder.isTypeSupported !== "function" || MediaRecorder.isTypeSupported(mime); }) || "";
       var recorder = preferredMime ? new MediaRecorder(stream, { mimeType: preferredMime }) : new MediaRecorder(stream);
@@ -629,7 +632,7 @@
       startVoiceAnalysis(stream);
       state.recordingTimer = window.setInterval(function () { updateVoiceRecorderClock(); }, 250);
       render();
-    }).catch(function () { state.error = "Microphone access is required to record a voice message."; render(); });
+    }).catch(function () { state.recordingStarting = false; state.error = "Microphone access is required to record a voice message."; render(); });
   }
 
 
@@ -1112,7 +1115,7 @@
       .cs-title strong{font-size:16px;line-height:1.3}.cs-title small{font-size:12px;line-height:1.35}
       .cs-header-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
       .cs-header-call:disabled{opacity:.35;cursor:default}
-      .cs-body{padding:18px 12px 12px;scroll-behavior:smooth;background-color:${state.config && state.config.theme === "dark" ? "#101010" : "#fafafa"};background-image:radial-gradient(rgba(0,0,0,.022) .7px,transparent .7px);background-size:14px 14px}
+      .cs-body{padding:18px 12px 12px;scroll-behavior:auto;overflow-anchor:none;background-color:${state.config && state.config.theme === "dark" ? "#101010" : "#fafafa"};background-image:radial-gradient(rgba(0,0,0,.022) .7px,transparent .7px);background-size:14px 14px}
       .cs-body{scrollbar-width:none}.cs-body::-webkit-scrollbar{width:0;height:0}
       .cs-error{position:sticky;z-index:3;top:0;display:flex;align-items:center;gap:10px;margin:0 2px 12px;padding:9px 10px;border-color:#efb2b2;border-radius:12px;box-shadow:0 6px 22px rgba(141,27,27,.08)}
       .cs-error span{min-width:0;flex:1}.cs-error button{width:26px;height:26px;border:0;border-radius:50%;background:rgba(141,27,27,.08);color:inherit;font:700 17px/1 inherit;cursor:pointer}
@@ -1232,23 +1235,13 @@
     return button;
   }
 
-  function scheduleMessageScroll(callback) {
-    if (state.scrollFrame) window.cancelAnimationFrame(state.scrollFrame);
-    state.scrollFrame = window.requestAnimationFrame(function () {
-      state.scrollFrame = 0;
-      callback();
-    });
-  }
-
   function scrollMessages() {
     if (!shadow) return;
     state.followLatest = true;
-    scheduleMessageScroll(function () {
-      var body = shadow && shadow.querySelector(".cs-body");
-      var jump = shadow && shadow.querySelector(".cs-jump");
-      if (jump) jump.hidden = true;
-      if (body) body.scrollTop = body.scrollHeight;
-    });
+    var body = shadow.querySelector(".cs-body");
+    var jump = shadow.querySelector(".cs-jump");
+    if (jump) jump.hidden = true;
+    if (body) body.scrollTop = body.scrollHeight;
   }
 
   function updateLauncherUnread(hasUnread) {
@@ -1632,7 +1625,8 @@
     state.composerFocusRequested = false;
     var previousBody = shadow.querySelector(".cs-body");
     var distanceFromBottom = previousBody ? Math.max(0, previousBody.scrollHeight - previousBody.scrollTop - previousBody.clientHeight) : 0;
-    var followLatest = state.followLatest !== false;
+    var followLatest = previousBody ? distanceFromBottom < 96 : state.followLatest !== false;
+    state.followLatest = followLatest;
     shadow.innerHTML = "";
     var style = node("style"); style.textContent = styles() + messengerStyles(); shadow.appendChild(style);
     var wrap = node("div", "cs-wrap");
@@ -1702,15 +1696,16 @@
     fileInput.onchange = function () { addPendingFiles(fileInput.files); };
     var attach = buttonIcon(node("button", "cs-tool"), "attach"); attach.type = "button"; attach.title = "Attach files"; attach.setAttribute("aria-label", "Attach files"); attach.disabled = state.loading || state.uploading || !state.config.allow_attachments; attach.onclick = function () { fileInput.click(); };
     var textarea = node("textarea"); textarea.placeholder = "Write a message…"; textarea.rows = 1; textarea.value = state.draft; textarea.disabled = state.loading;
-    var voice = buttonIcon(node("button", "cs-tool is-voice" + (state.recording ? " recording" : "")), state.recording ? "stop" : state.voiceDraft ? "send" : "mic"); voice.type = "button"; voice.title = state.recording ? "Stop recording" : state.voiceDraft ? "Send voice message" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
+    var voice = buttonIcon(node("button", "cs-tool is-voice" + (state.recording ? " recording" : "")), state.recording ? "stop" : state.voiceDraft ? "send" : "mic"); voice.type = "button"; voice.title = state.recording ? "Stop recording" : state.voiceDraft ? "Send voice message" : state.recordingStarting ? "Starting microphone…" : "Record voice message"; voice.setAttribute("aria-label", voice.title); voice.disabled = state.loading || state.uploading || state.recordingStarting || !state.config.allow_attachments; voice.onclick = toggleVoiceRecording;
     var send = buttonIcon(node("button", "cs-send"), "send"); send.type = "submit"; send.setAttribute("aria-label", "Send");
     var recorderPanel = null;
     var discardRecording = null;
-    if (state.recording || state.voiceDraft) {
-      recorderPanel = node("div", "cs-recorder" + (state.recording ? " is-recording" : " is-preview"));
-      discardRecording = node("button", "cs-recorder-delete", "×"); discardRecording.type = "button"; discardRecording.setAttribute("aria-label", state.recording ? "Cancel recording" : "Delete voice recording");
+    if (state.recording || state.voiceDraft || state.recordingStarting) {
+      recorderPanel = node("div", "cs-recorder" + (state.recording ? " is-recording" : state.recordingStarting ? " is-starting" : " is-preview"));
+      discardRecording = node("button", "cs-recorder-delete", "×"); discardRecording.type = "button"; discardRecording.setAttribute("aria-label", state.recording ? "Cancel recording" : state.recordingStarting ? "Cancel microphone request" : "Delete voice recording");
       discardRecording.onclick = function () {
-        if (state.recording) stopVoiceRecording(true);
+        if (state.recordingStarting) { state.recordingStarting = false; render(); }
+        else if (state.recording) stopVoiceRecording(true);
         else { discardVoiceDraft(); render(); }
       };
       recorderPanel.appendChild(discardRecording);
@@ -1720,6 +1715,9 @@
         var liveWave = node("span", "cs-recorder-wave is-live");
         Array(24).fill(0.07).forEach(function (value) { var bar = node("span"); bar.style.height = Math.round(5 + value * 16) + "px"; liveWave.appendChild(bar); });
         recorderPanel.appendChild(liveWave);
+      } else if (state.recordingStarting) {
+        recorderPanel.appendChild(node("span", "cs-recorder-dot"));
+        recorderPanel.appendChild(node("span", "cs-recorder-time", "Starting microphone…"));
       } else {
         var draftPlay = node("button", "cs-recorder-play", "▶"); draftPlay.type = "button"; draftPlay.setAttribute("aria-label", "Play recorded voice message");
         var draftWave = node("span", "cs-recorder-wave");
@@ -1741,7 +1739,7 @@
       var readyUploads = state.pendingUploads.filter(function (upload) { return upload.status === "ready" && upload.id; });
       var hasActiveUploads = state.pendingUploads.some(function (upload) { return upload.status === "uploading"; });
       var hasMessage = Boolean(state.draft.trim() || readyUploads.length);
-      voice.hidden = hasMessage && !state.recording && !state.voiceDraft;
+      voice.hidden = state.recordingStarting || (hasMessage && !state.recording && !state.voiceDraft);
       send.hidden = !hasMessage || state.recording || Boolean(state.voiceDraft);
       send.disabled = state.loading || hasActiveUploads || !hasMessage;
     }
@@ -1799,15 +1797,12 @@
     }
     shadow.appendChild(wrap);
     if (state.open && state.session && !(state.call && !callTerminal(state.call))) {
-      scheduleMessageScroll(function () {
-        var nextBody = shadow && shadow.querySelector(".cs-body");
-        var nextJump = shadow && shadow.querySelector(".cs-jump");
-        if (!nextBody) return;
-        nextBody.scrollTop = followLatest
-          ? nextBody.scrollHeight
-          : Math.max(0, nextBody.scrollHeight - nextBody.clientHeight - distanceFromBottom);
-        if (nextJump) nextJump.hidden = nextBody.scrollHeight - nextBody.scrollTop - nextBody.clientHeight < 96;
-      });
+      var nextBody = shadow.querySelector(".cs-body");
+      var nextJump = shadow.querySelector(".cs-jump");
+      nextBody.scrollTop = followLatest
+        ? nextBody.scrollHeight
+        : Math.max(0, nextBody.scrollHeight - nextBody.clientHeight - distanceFromBottom);
+      if (nextJump) nextJump.hidden = nextBody.scrollHeight - nextBody.scrollTop - nextBody.clientHeight < 96;
     }
     if (restoreComposerFocus && state.open && state.session && !(state.call && !callTerminal(state.call))) {
       window.requestAnimationFrame(function () {
