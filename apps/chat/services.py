@@ -32,6 +32,11 @@ from django.utils.text import slugify
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
 
+from apps.common.realtime import (
+    make_realtime_event as build_realtime_event,
+    make_realtime_safe as normalize_realtime_value,
+)
+
 from apps.common.realtime_presence import (
     read_many_user_last_seen,
     read_many_user_presence,
@@ -108,6 +113,11 @@ USER_STATUS_MAX_ACTIVE = max(1, int(getattr(settings, "USER_STATUS_MAX_ACTIVE", 
 USER_STATUS_TTL_SECONDS = max(300, int(getattr(settings, "USER_STATUS_TTL_SECONDS", 24 * 60 * 60) or 24 * 60 * 60))
 CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 MEDIA_METADATA_RESERVED_KEYS = {"encrypted_attachment", "encryption"}
+VOICE_MIME_PREFIXES = {
+    "application/ogg",
+    "application/x-ogg",
+}
+VOICE_EXTENSIONS = {"m4a", "aac", "3gp", "amr", "ogg", "opus", "webm"}
 
 
 class CallParticipantBusy(Exception):
