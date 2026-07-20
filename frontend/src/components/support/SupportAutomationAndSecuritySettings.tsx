@@ -155,7 +155,7 @@ function AutomationsCard() {
       <div className="ms-support-automation-list">
         {(rules.data ?? []).map((rule) => (
           <article key={rule.id}>
-            <div><strong>{rule.name}</strong><span>{rule.trigger.replaceAll("_", " ")}</span><small>{rule.actions.length} action{rule.actions.length === 1 ? "" : "s"} · priority {rule.priority}</small></div>
+            <div><strong>{rule.name}</strong><span>{rule.trigger.replace(/_/g, " ")}</span><small>{rule.actions.length} action{rule.actions.length === 1 ? "" : "s"} · priority {rule.priority}</small></div>
             <ToggleRow label={rule.is_active ? "Active" : "Paused"} description={rule.stop_processing ? "Stops later rules" : "Continues to later rules"} checked={rule.is_active} onChange={(value) => update.mutate({ id: rule.id, is_active: value })} />
             <button className="ms-button ms-button--secondary" type="button" onClick={() => remove.mutate(rule.id)} disabled={remove.isPending}>Remove</button>
           </article>
