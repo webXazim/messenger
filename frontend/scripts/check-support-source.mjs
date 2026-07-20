@@ -26,6 +26,7 @@ const frontendNginx = read("nginx.conf");
 const dockerCompose = read("../docker-compose.yml");
 const api = read("src/api/support.ts");
 const css = read("src/styles/pages/support.css");
+const conversationCss = read("src/styles/pages/conversation.css");
 const auth = read("src/pages/AuthRedirectPage.tsx");
 const returnPath = read("src/lib/returnPath.ts");
 const supportViews = read("../apps/support/api/views.py");
@@ -241,6 +242,7 @@ assert.ok(widgetLoader.includes("visitorTyping: false"), "Widget typing presence
 assert.ok(widgetLoader.includes("state.messages.splice(replacementIndex, 1, payload.message)"), "Widget optimistic messages are not replaced in place.");
 assert.ok(supportInbox.includes("createSerializedTaskQueue"), "Support Inbox sends are not serialized.");
 assert.ok(supportInbox.includes("structuralSharing: mergeSupportMessages"), "Support Inbox refetches can discard optimistic messages.");
+assert.ok(conversationCss.includes(".ms-chat-composer-dock > .ms-typing-indicator"), "Hidden typing presence still reserves message timeline space.");
 
 
 assert.ok(css.includes("@media (max-width: 760px)"), "Support responsive tablet/mobile layout is missing.");

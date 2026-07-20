@@ -325,6 +325,17 @@
   background: transparent;
 }
 
+.ms-chat-composer-dock > .ms-typing-indicator {
+  position: absolute;
+  right: clamp(var(--ms-space-3), 2vw, var(--ms-space-5));
+  bottom: calc(100% + var(--ms-space-1));
+  left: clamp(var(--ms-space-3), 2vw, var(--ms-space-5));
+  z-index: 2;
+  width: auto;
+  max-width: 64rem;
+  margin-inline: auto;
+}
+
 .ms-chat-jump-latest {
   position: absolute;
   right: clamp(var(--ms-space-4), 3vw, var(--ms-space-8));
