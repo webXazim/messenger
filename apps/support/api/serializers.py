@@ -342,7 +342,7 @@ class SupportAccountSerializer(serializers.ModelSerializer):
         )
 
     def get_owner(self, obj):
-        return user_summary(obj.owner)
+        return user_summary(obj.owner, include_email=True)
 
 
 def invitation_preview_payload(invitation: SupportAgentInvitation) -> dict:
