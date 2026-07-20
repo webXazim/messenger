@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supportApi } from "../../api/support";
 import { parseApiError } from "../../lib/apiErrors";
+import { SupportSlaPolicyManager } from "./SupportSlaPolicyManager";
 import type {
   SupportBusinessDay,
   SupportServiceSettings,
@@ -86,6 +87,11 @@ export function SupportServiceOperationsSettings() {
   const query = useQuery({
     queryKey: ["support-service-settings"],
     queryFn: ({ signal }) => supportApi.getServiceSettings(signal),
+    staleTime: 30_000,
+  });
+  const teamsQuery = useQuery({
+    queryKey: ["support-teams"],
+    queryFn: ({ signal }) => supportApi.listTeams(signal),
     staleTime: 30_000,
   });
 
@@ -217,6 +223,23 @@ export function SupportServiceOperationsSettings() {
               <small>minutes</small>
             </div>
           </label>
+          <label>
+            <span>Escalation team</span>
+            <select
+              value={draft.escalation_team ?? ""}
+              onChange={(event) =>
+                setDraft({
+                  ...draft,
+                  escalation_team: event.target.value || null,
+                })
+              }
+            >
+              <option value="">Owner only</option>
+              {(teamsQuery.data ?? []).filter((team) => team.is_active).map((team) => (
+                <option key={team.id} value={team.id}>{team.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <label className="ms-support-toggle-row ms-support-service-hours-toggle">
@@ -316,6 +339,36 @@ export function SupportServiceOperationsSettings() {
             />
             <span><strong>Alert assigned agent</strong><small>Notify the person responsible for the conversation.</small></span>
           </label>
+          <label className="ms-support-toggle-row">
+            <input
+              type="checkbox"
+              checked={draft.pause_while_waiting_customer}
+              onChange={(event) =>
+                setDraft({ ...draft, pause_while_waiting_customer: event.target.checked })
+              }
+            />
+            <span><strong>Pause while waiting for customer</strong><small>Response and resolution clocks stop until the visitor replies.</small></span>
+          </label>
+          <label className="ms-support-toggle-row">
+            <input
+              type="checkbox"
+              checked={draft.pause_resolution_while_snoozed}
+              onChange={(event) =>
+                setDraft({ ...draft, pause_resolution_while_snoozed: event.target.checked })
+              }
+            />
+            <span><strong>Pause while snoozed</strong><small>Snoozed conversations do not consume SLA time.</small></span>
+          </label>
+          <label className="ms-support-toggle-row">
+            <input
+              type="checkbox"
+              checked={draft.escalate_on_breach}
+              onChange={(event) =>
+                setDraft({ ...draft, escalate_on_breach: event.target.checked })
+              }
+            />
+            <span><strong>Escalate breaches</strong><small>Notify the owner and configured escalation team once per conversation.</small></span>
+          </label>
         </div>
 
         {error ? <div className="ms-page-error" role="alert">{error}</div> : null}
@@ -330,6 +383,7 @@ export function SupportServiceOperationsSettings() {
           </button>
         </div>
       </form>
+      <SupportSlaPolicyManager defaults={draft} />
     </section>
   );
 }

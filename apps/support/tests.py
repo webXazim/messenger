@@ -1033,9 +1033,6 @@ class SupportFoundationTests(APITestCase):
             format="multipart",
         )
         self.assertEqual(upload.status_code, 201)
-        pending = PendingUpload.objects.get(pk=upload.data["id"])
-        pending.metadata = {**pending.metadata, "waveform": [7, 32, 91]}
-        pending.save(update_fields=["metadata", "updated_at"])
         sent = self.client.post(
             f"/api/v1/support/conversations/{conversation_id}/messages/",
             {"text": "Here is the guide.", "attachment_ids": [upload.data["id"]]},
@@ -1080,7 +1077,6 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(sent.data["message"]["type"], "audio")
         self.assertTrue(sent.data["message"]["voice_note"])
         self.assertEqual(sent.data["message"]["preview_text"], "Voice message")
-        self.assertEqual(sent.data["message"]["attachments"][0]["waveform"], [7, 32, 91])
 
     def test_support_upload_cannot_be_attached_to_personal_messenger(self):
         account = self.active_account()

@@ -17,6 +17,10 @@ from apps.support.models import (
     SupportAgent,
     SupportAgentInvitation,
     SupportAgentInvitationWebsite,
+    SupportAgentInvitationTeam,
+    SupportConversation,
+    SupportTeam,
+    SupportTeamMembership,
     SupportWebsite,
     SupportWebsiteAgent,
 )
@@ -183,6 +187,14 @@ def _websites_for_account(account: SupportAccount, website_ids) -> list[SupportW
     return websites
 
 
+def _teams_for_account(account: SupportAccount, team_ids) -> list[SupportTeam]:
+    normalized_ids=list(dict.fromkeys(str(v) for v in (team_ids or []) if v))
+    if not normalized_ids: return []
+    teams=list(SupportTeam.objects.filter(support_account=account, is_active=True, id__in=normalized_ids).order_by("name"))
+    if len(teams)!=len(normalized_ids): raise SupportServiceError("One or more selected teams are unavailable.", code="invalid_teams")
+    return teams
+
+
 def _ensure_invitable_email(account: SupportAccount, email: str) -> None:
     if email == normalize_agent_email(account.owner.email):
         raise SupportServiceError("The Support Chat owner is already included and does not use an agent seat.", code="owner_email")
@@ -197,15 +209,12 @@ def _ensure_invitable_email(account: SupportAccount, email: str) -> None:
 
 
 def create_agent_invitation(
-    *,
-    actor,
-    account: SupportAccount,
-    email: str,
-    website_ids,
-    max_active_conversations: int = 5,
-    can_view_all_conversations: bool = False,
-    can_assign_conversations: bool = False,
-    can_view_analytics: bool = False,
+    *, actor, account: SupportAccount, email: str, website_ids, team_ids=None,
+    max_active_conversations: int = 5, can_view_all_conversations: bool = False,
+    can_assign_conversations: bool = False, can_view_analytics: bool = False,
+    can_manage_websites: bool = False, can_manage_knowledge: bool = False,
+    can_manage_teams: bool = False, can_manage_automations: bool = False,
+    can_export_data: bool = False,
 ) -> SupportAgentInvitation:
     normalized_email = normalize_agent_email(email)
     if not normalized_email or "@" not in normalized_email:
@@ -229,6 +238,7 @@ def create_agent_invitation(
             raise SupportServiceError("Your current Support Chat plan has reached its agent limit.", code="agent_limit")
 
         websites = _websites_for_account(locked_account, website_ids)
+        teams = _teams_for_account(locked_account, team_ids)
         invitation = SupportAgentInvitation.objects.create(
             support_account=locked_account,
             email=normalized_email,
@@ -238,14 +248,16 @@ def create_agent_invitation(
             can_view_all_conversations=can_view_all_conversations,
             can_assign_conversations=can_assign_conversations,
             can_view_analytics=can_view_analytics,
+            can_manage_websites=can_manage_websites, can_manage_knowledge=can_manage_knowledge, can_manage_teams=can_manage_teams, can_manage_automations=can_manage_automations, can_export_data=can_export_data,
             invited_by=actor,
         )
+        SupportAgentInvitationTeam.objects.bulk_create([SupportAgentInvitationTeam(invitation=invitation, team=team) for team in teams])
         SupportAgentInvitationWebsite.objects.bulk_create([
             SupportAgentInvitationWebsite(invitation=invitation, website=website)
             for website in websites
         ])
 
-    invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website").get(pk=invitation.pk)
+    invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=invitation.pk)
     send_agent_invitation_email(invitation, raw_token)
     return invitation
 
@@ -294,7 +306,7 @@ def resend_agent_invitation(*, actor, account: SupportAccount, invitation: Suppo
             "updated_at",
         ])
 
-    locked_invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website").get(pk=locked_invitation.pk)
+    locked_invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=locked_invitation.pk)
     send_agent_invitation_email(locked_invitation, raw_token)
     return locked_invitation
 
@@ -320,7 +332,7 @@ def invitation_from_token(raw_token: str) -> SupportAgentInvitation | None:
             "support_account__owner",
             "invited_by",
         )
-        .prefetch_related("website_assignments__website")
+        .prefetch_related("website_assignments__website", "team_assignments__team")
         .filter(token_hash=_token_hash(raw_token))
         .first()
     )
@@ -372,6 +384,11 @@ def accept_agent_invitation(*, user, raw_token: str) -> SupportAgent:
         agent.can_view_all_conversations = locked_invitation.can_view_all_conversations
         agent.can_assign_conversations = locked_invitation.can_assign_conversations
         agent.can_view_analytics = locked_invitation.can_view_analytics
+        agent.can_manage_websites = locked_invitation.can_manage_websites
+        agent.can_manage_knowledge = locked_invitation.can_manage_knowledge
+        agent.can_manage_teams = locked_invitation.can_manage_teams
+        agent.can_manage_automations = locked_invitation.can_manage_automations
+        agent.can_export_data = locked_invitation.can_export_data
         agent.is_active = True
         agent.invited_by = locked_invitation.invited_by
         agent.joined_at = timezone.now()
@@ -379,6 +396,7 @@ def accept_agent_invitation(*, user, raw_token: str) -> SupportAgent:
         agent.save()
 
         SupportWebsiteAgent.objects.filter(agent=agent).delete()
+        SupportTeamMembership.objects.filter(agent=agent).delete()
         website_ids = list(
             SupportAgentInvitationWebsite.objects.filter(
                 invitation=locked_invitation,
@@ -391,6 +409,9 @@ def accept_agent_invitation(*, user, raw_token: str) -> SupportAgent:
             for website_id in website_ids
         ])
 
+        team_ids=list(SupportAgentInvitationTeam.objects.filter(invitation=locked_invitation, team__is_active=True, team__support_account=account).values_list("team_id", flat=True))
+        SupportTeamMembership.objects.bulk_create([SupportTeamMembership(agent=agent, team_id=team_id) for team_id in team_ids])
+
         locked_invitation.status = SupportAgentInvitation.Status.ACCEPTED
         locked_invitation.accepted_at = timezone.now()
         locked_invitation.accepted_by = user
@@ -399,46 +420,18 @@ def accept_agent_invitation(*, user, raw_token: str) -> SupportAgent:
         return agent
 
 
-def update_agent(
-    *,
-    account: SupportAccount,
-    agent: SupportAgent,
-    website_ids,
-    max_active_conversations: int,
-    can_view_all_conversations: bool,
-    can_assign_conversations: bool,
-    can_view_analytics: bool,
-) -> SupportAgent:
+def update_agent(*, account: SupportAccount, agent: SupportAgent, website_ids, team_ids=None, max_active_conversations: int, **permissions) -> SupportAgent:
+    allowed = {"can_view_all_conversations", "can_assign_conversations", "can_view_analytics", "can_manage_websites", "can_manage_knowledge", "can_manage_teams", "can_manage_automations", "can_export_data"}
     with transaction.atomic():
-        locked = SupportAgent.objects.select_for_update().get(
-            pk=agent.pk,
-            support_account=account,
-            is_active=True,
-        )
-        websites = _websites_for_account(account, website_ids)
-        locked.max_active_conversations = max_active_conversations
-        locked.can_view_all_conversations = can_view_all_conversations
-        locked.can_assign_conversations = can_assign_conversations
-        locked.can_view_analytics = can_view_analytics
-        locked.full_clean()
-        locked.save(update_fields=[
-            "max_active_conversations",
-            "can_view_all_conversations",
-            "can_assign_conversations",
-            "can_view_analytics",
-            "updated_at",
-        ])
-        SupportWebsiteAgent.objects.filter(agent=locked).exclude(website__in=websites).delete()
-        existing_ids = set(
-            SupportWebsiteAgent.objects.filter(agent=locked, website__in=websites)
-            .values_list("website_id", flat=True)
-        )
-        SupportWebsiteAgent.objects.bulk_create([
-            SupportWebsiteAgent(agent=locked, website=website)
-            for website in websites
-            if website.id not in existing_ids
-        ])
-        _publish_agent_access_event(locked, reason="website_access_changed")
+        locked=SupportAgent.objects.select_for_update().get(pk=agent.pk, support_account=account, is_active=True)
+        websites=_websites_for_account(account, website_ids); teams=_teams_for_account(account, team_ids)
+        locked.max_active_conversations=max_active_conversations
+        for key in allowed:
+            if key in permissions: setattr(locked,key,bool(permissions[key]))
+        locked.full_clean(); locked.save(update_fields=["max_active_conversations", *sorted(allowed), "updated_at"])
+        SupportWebsiteAgent.objects.filter(agent=locked).delete(); SupportWebsiteAgent.objects.bulk_create([SupportWebsiteAgent(agent=locked, website=w) for w in websites])
+        SupportTeamMembership.objects.filter(agent=locked).delete(); SupportTeamMembership.objects.bulk_create([SupportTeamMembership(agent=locked, team=t) for t in teams])
+        _publish_agent_access_event(locked, reason="agent_access_changed")
         return locked
 
 
@@ -449,7 +442,9 @@ def deactivate_agent(*, account: SupportAccount, agent: SupportAgent) -> Support
             locked.is_active = False
             locked.availability = SupportAgent.Availability.OFFLINE
             locked.save(update_fields=["is_active", "availability", "updated_at"])
+            SupportConversation.objects.filter(assigned_agent=locked).exclude(status__in=[SupportConversation.Status.RESOLVED, SupportConversation.Status.CLOSED]).update(assigned_agent=None, updated_at=timezone.now())
             SupportWebsiteAgent.objects.filter(agent=locked).delete()
+            SupportTeamMembership.objects.filter(agent=locked).delete()
             _publish_agent_access_event(locked, reason="agent_deactivated")
         return locked
 

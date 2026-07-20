@@ -7,6 +7,10 @@ import type {
   SupportAgentUpdateInput,
   SupportAvailability,
   SupportBootstrap,
+  SupportTeam,
+  SupportTeamInput,
+  SupportRoutingPolicy,
+  SupportRoutingPolicyInput,
   SupportConversation,
   SupportConversationFilters,
   SupportConversationListResponse,
@@ -18,6 +22,7 @@ import type {
   SupportInvitationPreview,
   SupportWebsite,
   SupportWebsiteInput,
+  SupportWebsiteUsage,
   SupportWidgetSettings,
   SupportWidgetSettingsInput,
   SupportUnreadSummary,
@@ -29,13 +34,29 @@ import type {
   SupportServiceAlert,
   SupportServiceAlertList,
   SupportServiceSettings,
+  SupportSlaPolicy,
+  SupportSlaPolicyInput,
   SupportFeedbackSettings,
   SupportCSATSurvey,
   SupportAnalyticsOverview,
+  SupportAnalyticsExport,
+  SupportAutomationExecution,
+  SupportAutomationRule,
+  SupportAutomationRuleInput,
+  SupportNotificationSettings,
+  SupportSecuritySettings,
+  SupportAnalyticsV2AgentRow,
+  SupportAnalyticsV2Filters,
+  SupportAnalyticsV2HourRow,
+  SupportAnalyticsV2Overview,
+  SupportAnalyticsV2TagRow,
+  SupportAnalyticsV2Volume,
+  SupportAnalyticsV2WebsiteRow,
   SupportKnowledgeSettings,
   SupportKnowledgeCategory,
   SupportKnowledgeArticle,
   SupportKnowledgeArticleInput,
+  SupportKnowledgeRevision,
   SupportPrivacySettings,
   SupportWebhookEndpoint,
   SupportWebhookDelivery,
@@ -237,6 +258,21 @@ export const supportApi = {
     await http.delete(`/support/knowledge/articles/${articleId}/`);
   },
 
+  async restoreKnowledgeArticle(articleId: string) {
+    const response = await http.post(`/support/knowledge/articles/${articleId}/restore/`);
+    return unwrapData<SupportKnowledgeArticle>(response.data);
+  },
+
+  async listKnowledgeRevisions(articleId: string, signal?: AbortSignal) {
+    const response = await http.get(`/support/knowledge/articles/${articleId}/revisions/`, { signal });
+    return unwrapData<SupportKnowledgeRevision[]>(response.data);
+  },
+
+  async restoreKnowledgeRevision(articleId: string, revisionId: string) {
+    const response = await http.post(`/support/knowledge/articles/${articleId}/revisions/${revisionId}/restore/`);
+    return unwrapData<SupportKnowledgeArticle>(response.data);
+  },
+
   async getFeedbackSettings(signal?: AbortSignal) {
     const response = await http.get("/support/feedback-settings/", { signal });
     return unwrapData<SupportFeedbackSettings>(response.data);
@@ -253,6 +289,90 @@ export const supportApi = {
   ) {
     const response = await http.get("/support/analytics/overview/", { params: filters, signal });
     return unwrapData<SupportAnalyticsOverview>(response.data);
+  },
+
+  async getNotificationSettings(signal?: AbortSignal) {
+    const response = await http.get("/support/notification-settings/", { signal });
+    return unwrapData<SupportNotificationSettings>(response.data);
+  },
+
+  async updateNotificationSettings(payload: Partial<SupportNotificationSettings>) {
+    const response = await http.patch("/support/notification-settings/", payload);
+    return unwrapData<SupportNotificationSettings>(response.data);
+  },
+
+  async getSecuritySettings(signal?: AbortSignal) {
+    const response = await http.get("/support/security-settings/", { signal });
+    return unwrapData<SupportSecuritySettings>(response.data);
+  },
+
+  async updateSecuritySettings(payload: Partial<SupportSecuritySettings>) {
+    const response = await http.patch("/support/security-settings/", payload);
+    return unwrapData<SupportSecuritySettings>(response.data);
+  },
+
+  async listAutomationRules(signal?: AbortSignal) {
+    const response = await http.get("/support/automations/", { signal });
+    return unwrapData<SupportAutomationRule[]>(response.data);
+  },
+
+  async createAutomationRule(payload: SupportAutomationRuleInput) {
+    const response = await http.post("/support/automations/", payload);
+    return unwrapData<SupportAutomationRule>(response.data);
+  },
+
+  async updateAutomationRule(ruleId: string, payload: Partial<SupportAutomationRuleInput>) {
+    const response = await http.patch(`/support/automations/${ruleId}/`, payload);
+    return unwrapData<SupportAutomationRule>(response.data);
+  },
+
+  async deleteAutomationRule(ruleId: string) {
+    await http.delete(`/support/automations/${ruleId}/`);
+  },
+
+  async listAutomationExecutions(signal?: AbortSignal) {
+    const response = await http.get("/support/automation-executions/", { signal });
+    return unwrapData<SupportAutomationExecution[]>(response.data);
+  },
+
+  async getAnalyticsV2Overview(filters: SupportAnalyticsV2Filters = {}, signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/overview/", { params: filters, signal });
+    return unwrapData<SupportAnalyticsV2Overview>(response.data);
+  },
+
+  async getAnalyticsV2Volume(filters: SupportAnalyticsV2Filters = {}, signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/volume/", { params: filters, signal });
+    return unwrapData<SupportAnalyticsV2Volume>(response.data);
+  },
+
+  async getAnalyticsV2Websites(filters: SupportAnalyticsV2Filters = {}, signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/websites/", { params: filters, signal });
+    return unwrapData<{ results: SupportAnalyticsV2WebsiteRow[] }>(response.data);
+  },
+
+  async getAnalyticsV2Tags(filters: SupportAnalyticsV2Filters = {}, signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/tags/", { params: filters, signal });
+    return unwrapData<{ results: SupportAnalyticsV2TagRow[] }>(response.data);
+  },
+
+  async getAnalyticsV2Hours(filters: SupportAnalyticsV2Filters = {}, signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/hours/", { params: filters, signal });
+    return unwrapData<{ results: SupportAnalyticsV2HourRow[] }>(response.data);
+  },
+
+  async getAnalyticsV2Agents(filters: SupportAnalyticsV2Filters = {}, signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/agents/", { params: filters, signal });
+    return unwrapData<{ results: SupportAnalyticsV2AgentRow[] }>(response.data);
+  },
+
+  async createAnalyticsExport(filters: SupportAnalyticsV2Filters = {}, format = "csv") {
+    const response = await http.post("/support/analytics/v2/exports/", { format }, { params: filters });
+    return unwrapData<SupportAnalyticsExport>(response.data);
+  },
+
+  async listAnalyticsExports(signal?: AbortSignal) {
+    const response = await http.get("/support/analytics/v2/exports/", { signal });
+    return unwrapData<SupportAnalyticsExport[]>(response.data);
   },
 
   async getConversationCSAT(conversationId: string, signal?: AbortSignal) {
@@ -278,6 +398,35 @@ export const supportApi = {
   async updateServiceSettings(payload: Partial<SupportServiceSettings>) {
     const response = await http.patch("/support/service-settings/", payload);
     return unwrapData<SupportServiceSettings>(response.data);
+  },
+
+  async listSlaPolicies(signal?: AbortSignal) {
+    const response = await http.get("/support/sla-policies/", { signal });
+    return unwrapData<SupportSlaPolicy[]>(response.data);
+  },
+
+  async createSlaPolicy(payload: SupportSlaPolicyInput) {
+    const response = await http.post("/support/sla-policies/", payload);
+    return unwrapData<SupportSlaPolicy>(response.data);
+  },
+
+  async updateSlaPolicy(policyId: string, payload: Partial<SupportSlaPolicyInput>) {
+    const response = await http.patch(`/support/sla-policies/${policyId}/`, payload);
+    return unwrapData<SupportSlaPolicy>(response.data);
+  },
+
+  async deleteSlaPolicy(policyId: string) {
+    await http.delete(`/support/sla-policies/${policyId}/`);
+  },
+
+  async getConversationSla(conversationId: string, signal?: AbortSignal) {
+    const response = await http.get(`/support/conversations/${conversationId}/sla/`, { signal });
+    return unwrapData<Record<string, unknown>>(response.data);
+  },
+
+  async recalculateConversationSla(conversationId: string) {
+    const response = await http.post(`/support/conversations/${conversationId}/sla/`);
+    return unwrapData<Record<string, unknown>>(response.data);
   },
 
   async listServiceAlerts(status = "unread", signal?: AbortSignal) {
@@ -477,6 +626,11 @@ export const supportApi = {
     return unwrapData<SupportWebsite[]>(response.data);
   },
 
+  async getWebsiteUsage(websiteId: string, signal?: AbortSignal) {
+    const response = await http.get(`/support/websites/${websiteId}/usage/`, { signal });
+    return unwrapData<SupportWebsiteUsage>(response.data);
+  },
+
   async createWebsite(payload: SupportWebsiteInput) {
     const response = await http.post("/support/websites/", payload);
     return unwrapData<SupportWebsite>(response.data);
@@ -528,6 +682,35 @@ export const supportApi = {
       `/support/websites/${websiteId}/site-key/regenerate/`,
     );
     return unwrapData<SupportWebsite>(response.data);
+  },
+
+  async listTeams(signal?: AbortSignal) {
+    const response = await http.get("/support/teams/", { signal });
+    return unwrapData<SupportTeam[]>(response.data);
+  },
+
+  async createTeam(payload: SupportTeamInput) {
+    const response = await http.post("/support/teams/", payload);
+    return unwrapData<SupportTeam>(response.data);
+  },
+
+  async updateTeam(teamId: string, payload: SupportTeamInput) {
+    const response = await http.patch(`/support/teams/${teamId}/`, payload);
+    return unwrapData<SupportTeam>(response.data);
+  },
+
+  async deactivateTeam(teamId: string) {
+    await http.delete(`/support/teams/${teamId}/`);
+  },
+
+  async listRoutingPolicies(signal?: AbortSignal) {
+    const response = await http.get("/support/routing-policies/", { signal });
+    return unwrapData<SupportRoutingPolicy[]>(response.data);
+  },
+
+  async updateRoutingPolicy(websiteId: string, payload: SupportRoutingPolicyInput) {
+    const response = await http.patch(`/support/routing-policies/${websiteId}/`, payload);
+    return unwrapData<SupportRoutingPolicy>(response.data);
   },
 
   async inviteAgent(payload: SupportAgentInvitationInput) {

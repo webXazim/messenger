@@ -11,6 +11,15 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 app.conf.beat_schedule = {
+    "aggregate-recent-support-analytics-hourly": {
+        "task": "apps.support.tasks.aggregate_recent_support_analytics",
+        "schedule": 3600.0,
+        "args": [3],
+    },
+    "wake-snoozed-support-conversations-every-minute": {
+        "task": "apps.support.tasks.wake_snoozed_support_conversations",
+        "schedule": 60.0,
+    },
     "delete-old-realtime-outbox-daily": {
         "task": "apps.common.tasks.delete_old_realtime_outbox_events",
         "schedule": crontab(minute=10, hour=4),
@@ -49,6 +58,10 @@ app.conf.beat_schedule = {
     },
     "maintain-support-calls-every-minute": {
         "task": "apps.support.tasks.maintain_support_calls",
+        "schedule": crontab(minute="*"),
+    },
+    "reassign-offline-support-conversations-every-minute": {
+        "task": "apps.support.tasks.reassign_offline_support_conversations",
         "schedule": crontab(minute="*"),
     },
     "run-support-retention-daily": {

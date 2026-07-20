@@ -216,6 +216,7 @@ def support_conversations_for_context(context: SupportContext):
             "visitor",
             "assigned_agent",
             "assigned_agent__user",
+            "assigned_team",
             "assigned_agent__user__profile",
             "visitor_last_read_message",
             "visitor_last_delivered_message",
@@ -352,6 +353,8 @@ def get_or_create_visitor_conversation(session: SupportWidgetSession) -> tuple[S
         visitor=visitor,
         subject=f"Conversation with {visitor_label}"[:255],
     )
+    from apps.support.routing_services import assign_support_conversation
+    assign_support_conversation(conversation=support_conversation, trigger="conversation_created")
     queue_support_webhook_event(
         account=session.website.support_account,
         event_type="conversation.created",
@@ -823,9 +826,13 @@ def claim_conversation(*, context: SupportContext, support_conversation: Support
             status_code=409,
         )
     support_conversation.assigned_agent = context.agent
+    support_conversation.assigned_at = timezone.now()
+    support_conversation.assignment_trigger = "claimed"
+    membership = context.agent.team_memberships.filter(team__website_assignments__website=support_conversation.website, team__is_active=True).select_related("team").first()
+    support_conversation.assigned_team = membership.team if membership else None
     if support_conversation.status == SupportConversation.Status.NEW:
         support_conversation.status = SupportConversation.Status.OPEN
-    support_conversation.save(update_fields=["assigned_agent", "status", "updated_at"])
+    support_conversation.save(update_fields=["assigned_agent", "assigned_team", "assigned_at", "assignment_trigger", "status", "updated_at"])
     support_conversation = SupportConversation.objects.select_related("website", "visitor").get(pk=support_conversation.pk)
     record_audit_event(
         account=context.account,
@@ -874,6 +881,9 @@ def update_conversation_workflow(
             )
         if assigned_agent_id is None or str(assigned_agent_id) == "":
             support_conversation.assigned_agent = None
+            support_conversation.assigned_team = None
+            support_conversation.assigned_at = None
+            support_conversation.assignment_trigger = "manual_unassigned"
         else:
             assigned_agent = SupportAgent.objects.filter(
                 pk=assigned_agent_id,
@@ -887,9 +897,26 @@ def update_conversation_workflow(
                     code="invalid_agent",
                     status_code=400,
                 )
+            from apps.support.routing_services import active_conversation_count
+            if active_conversation_count(assigned_agent, exclude_id=support_conversation.id) >= assigned_agent.max_active_conversations:
+                raise SupportConversationError("The selected agent has reached capacity.", code="agent_capacity_reached", status_code=409)
             support_conversation.assigned_agent = assigned_agent
+            support_conversation.assigned_at = timezone.now()
+            support_conversation.assignment_trigger = "manual"
+            membership = assigned_agent.team_memberships.filter(team__website_assignments__website=support_conversation.website, team__is_active=True).select_related("team").first()
+            support_conversation.assigned_team = membership.team if membership else None
 
     if status is not None:
+        if status == SupportConversation.Status.SNOOZED:
+            raise SupportConversationError(
+                "Use the snooze endpoint so the wake time and previous status are recorded.",
+                code="snooze_endpoint_required", status_code=409
+            )
+        if support_conversation.status == SupportConversation.Status.CLOSED and status != SupportConversation.Status.CLOSED:
+            raise SupportConversationError(
+                "Use the lifecycle endpoint to reopen a protected closed conversation.",
+                code="lifecycle_endpoint_required", status_code=409
+            )
         if context.role != "owner" and not can_reply(context, support_conversation):
             raise SupportConversationError(
                 "You cannot change this conversation status.", code="status_denied", status_code=403
@@ -913,7 +940,7 @@ def update_conversation_workflow(
         support_conversation.priority = priority
 
     support_conversation.save(
-        update_fields=["assigned_agent", "status", "priority", "resolved_at", "closed_at", "updated_at"]
+        update_fields=["assigned_agent", "assigned_team", "assigned_at", "assignment_trigger", "status", "priority", "resolved_at", "closed_at", "updated_at"]
     )
     actor = context.account.owner if context.role == "owner" else context.agent.user
     if follow_up_at is not _ASSIGNMENT_UNSET:

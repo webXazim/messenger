@@ -6,12 +6,13 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DateTimeField, F, Q
+from django.db.models import Avg, Count, DateTimeField, DurationField, ExpressionWrapper, F, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models.functions import Coalesce
-from rest_framework import status
+from rest_framework import serializers, status
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.throttling import ScopedRateThrottle
@@ -27,7 +28,7 @@ from apps.chat.api.views import (
     _normalize_upload_media,
     _read_upload_initial_bytes,
 )
-from apps.chat.models import MessageAttachment, PendingUpload
+from apps.chat.models import Message, MessageAttachment, PendingUpload
 from apps.chat.services import dispatch_pending_upload_scan, scan_upload_file
 from apps.common.realtime_auth import RealtimeCredentialError, issue_widget_realtime_ticket
 from apps.common.realtime_presence import support_visitors_online
@@ -44,6 +45,10 @@ from apps.support.api.serializers import (
     SupportAgentInvitationSerializer,
     SupportAgentSerializer,
     SupportAgentUpdateSerializer,
+    SupportTeamSerializer,
+    SupportTeamWriteSerializer,
+    SupportRoutingPolicySerializer,
+    SupportRoutingPolicyWriteSerializer,
     SupportInvitationTokenSerializer,
     SupportConversationSerializer,
     SupportConversationUpdateSerializer,
@@ -66,9 +71,15 @@ from apps.support.api.serializers import (
     SupportSavedInboxViewSerializer,
     SupportSavedInboxViewWriteSerializer,
     SupportConversationTagsUpdateSerializer,
+    SupportLifecycleTransitionSerializer,
+    SupportSnoozeSerializer,
+    SupportFollowSerializer,
+    SupportTransferSerializer,
+    SupportViewerHeartbeatSerializer,
     SupportAuditEventSerializer,
     SupportServiceAlertSerializer,
     SupportServiceSettingsSerializer,
+    SupportSlaPolicySerializer,
     SupportFeedbackSettingsSerializer,
     SupportCSATSurveySerializer,
     SupportCSATSubmitSerializer,
@@ -77,6 +88,7 @@ from apps.support.api.serializers import (
     SupportKnowledgeCategoryReadSerializer,
     SupportKnowledgeArticleSerializer,
     SupportKnowledgeArticleWriteSerializer,
+    SupportKnowledgeRevisionSerializer,
     PublicKnowledgeCategorySerializer,
     PublicKnowledgeArticleSerializer,
     PublicKnowledgeFeedbackSerializer,
@@ -96,6 +108,10 @@ from apps.support.models import (
     SupportAccount,
     SupportAgent,
     SupportAgentInvitation,
+    SupportTeam,
+    SupportTeamMembership,
+    SupportRoutingPolicy,
+    SupportWebsiteTeam,
     SupportConversation,
     SupportPendingUpload,
     SupportTag,
@@ -106,6 +122,7 @@ from apps.support.models import (
     SupportAuditEvent,
     SupportServiceAlert,
     SupportServiceSettings,
+    SupportSlaPolicy,
     SupportFeedbackSettings,
     SupportCSATSurvey,
     SupportKnowledgeCategory,
@@ -177,6 +194,15 @@ from apps.support.workflow_services import (
     visible_canned_replies,
     visible_tags,
 )
+from apps.support.lifecycle_services import (
+    SupportLifecycleError,
+    transition_conversation,
+    snooze_conversation,
+    set_following,
+    transfer_conversation,
+    viewer_heartbeat,
+    current_viewers,
+)
 from apps.support.analytics import SupportAnalyticsError, analytics_overview, parse_analytics_period
 from apps.support.feedback_services import (
     SupportFeedbackError,
@@ -191,12 +217,18 @@ from apps.support.service_operations import (
     overdue_conversation_q,
     recalculate_account_targets,
     service_settings_for,
+    effective_sla_policy,
+    recalculate_active_targets,
+    service_snapshot,
 )
 from apps.support.knowledge_services import (
     SupportKnowledgeError,
     knowledge_settings_for,
     public_articles_for_website,
     public_search_articles,
+    create_article_revision,
+    replace_related_articles,
+    restore_article_revision,
     record_article_feedback,
     record_article_view,
     replace_article_websites,
@@ -335,6 +367,126 @@ class SupportServiceSettingsView(APIView):
         return Response(SupportServiceSettingsSerializer(settings_obj).data)
 
 
+class SupportSlaPolicyListCreateView(APIView):
+    def get(self, request):
+        context, error = require_support_access(request)
+        if error:
+            return error
+        queryset = (
+            SupportSlaPolicy.objects.filter(support_account=context.account)
+            .select_related("website", "team", "escalation_team")
+            .order_by("name", "id")
+        )
+        return Response(
+            SupportSlaPolicySerializer(
+                queryset, many=True, context={"support_account": context.account}
+            ).data
+        )
+
+    @transaction.atomic
+    def post(self, request):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        serializer = SupportSlaPolicySerializer(
+            data=request.data, context={"support_account": context.account}
+        )
+        serializer.is_valid(raise_exception=True)
+        policy = serializer.save(
+            support_account=context.account,
+            updated_by=request.user,
+        )
+        recalculate_account_targets(context.account)
+        record_audit_event(
+            account=context.account,
+            actor=request.user,
+            action="service.sla_policy_created",
+            target_type="support_sla_policy",
+            target_id=policy.id,
+            summary=f"{request.user.username} created an SLA policy.",
+            metadata={"name": policy.name},
+            ip_address=request_ip(request),
+        )
+        return Response(
+            SupportSlaPolicySerializer(
+                policy, context={"support_account": context.account}
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class SupportSlaPolicyDetailView(APIView):
+    def _get(self, context, policy_id):
+        return get_object_or_404(
+            SupportSlaPolicy.objects.select_related(
+                "website", "team", "escalation_team"
+            ),
+            pk=policy_id,
+            support_account=context.account,
+        )
+
+    @transaction.atomic
+    def patch(self, request, policy_id):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        policy = self._get(context, policy_id)
+        serializer = SupportSlaPolicySerializer(
+            policy,
+            data=request.data,
+            partial=True,
+            context={"support_account": context.account},
+        )
+        serializer.is_valid(raise_exception=True)
+        policy = serializer.save(updated_by=request.user)
+        recalculate_account_targets(context.account)
+        return Response(
+            SupportSlaPolicySerializer(
+                policy, context={"support_account": context.account}
+            ).data
+        )
+
+    @transaction.atomic
+    def delete(self, request, policy_id):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        policy = self._get(context, policy_id)
+        policy.delete()
+        recalculate_account_targets(context.account)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SupportConversationSlaView(APIView):
+    def get(self, request, conversation_id):
+        context, error = require_support_access(request)
+        if error:
+            return error
+        conversation = get_context_conversation(context, conversation_id)
+        snapshot = service_snapshot(conversation)
+        date_field = serializers.DateTimeField(allow_null=True)
+        for key in (
+            "active_due_at", "first_response_due_at", "next_response_due_at",
+            "resolution_due_at", "first_response_breached_at",
+            "next_response_breached_at", "resolution_breached_at",
+            "paused_at", "last_recalculated_at", "escalated_at",
+            "follow_up_at", "follow_up_completed_at",
+        ):
+            snapshot[key] = (
+                date_field.to_representation(snapshot.get(key))
+                if snapshot.get(key) else None
+            )
+        return Response(snapshot)
+
+    def post(self, request, conversation_id):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        conversation = get_context_conversation(context, conversation_id)
+        conversation = recalculate_active_targets(conversation)
+        return self.get(request, conversation_id)
+
+
 class SupportServiceAlertListView(APIView):
     def get(self, request):
         context, error = require_support_access(request)
@@ -413,6 +565,7 @@ class SupportBootstrapView(APIView):
                 "limits": None,
                 "websites": [],
                 "agents": [],
+                "teams": [],
                 "invitations": [],
             })
 
@@ -425,6 +578,7 @@ class SupportBootstrapView(APIView):
                 "limits": None,
                 "websites": [],
                 "agents": [],
+                "teams": [],
                 "invitations": [],
             })
 
@@ -433,9 +587,10 @@ class SupportBootstrapView(APIView):
         agents = (
             SupportAgent.objects.filter(support_account=account, is_active=True)
             .select_related("user", "user__profile")
-            .prefetch_related("website_assignments")
+            .prefetch_related("website_assignments", "team_memberships")
             .order_by("user__username")
         )
+        teams = SupportTeam.objects.filter(support_account=account, is_active=True).prefetch_related("memberships", "website_assignments").order_by("name")
         invitations = SupportAgentInvitation.objects.none()
         if context.role == "owner":
             invitations = (
@@ -447,11 +602,12 @@ class SupportBootstrapView(APIView):
                     ],
                 )
                 .select_related("invited_by", "invited_by__profile")
-                .prefetch_related("website_assignments__website")
+                .prefetch_related("website_assignments__website", "team_assignments__team")
                 .order_by("-created_at")[:50]
             )
         else:
             agents = agents.filter(pk=context.agent.id) if getattr(context.agent, "id", None) else agents.none()
+            teams = teams.filter(memberships__agent=context.agent).distinct() if getattr(context.agent, "id", None) else teams.none()
 
         website_count = SupportWebsite.objects.filter(support_account=account, is_active=True).count()
         active_agents = active_agent_count(account)
@@ -473,6 +629,7 @@ class SupportBootstrapView(APIView):
             },
             "websites": SupportWebsiteSerializer(websites, many=True).data,
             "agents": SupportAgentSerializer(agents, many=True).data,
+            "teams": SupportTeamSerializer(teams, many=True).data,
             "invitations": SupportAgentInvitationSerializer(invitations, many=True).data,
         })
 
@@ -588,6 +745,107 @@ class SupportWebsiteDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class SupportWebsiteUsageView(APIView):
+    """Small, account-scoped operational summary for the Websites page.
+
+    The query is bounded to one website and the current day. It intentionally
+    avoids analytics-scale historical aggregation; the dedicated analytics
+    upgrade will own longer reporting windows.
+    """
+
+    def get(self, request, website_id):
+        context, error = require_owner(request, self, require_access=False)
+        if error:
+            return error
+        website = get_object_or_404(
+            SupportWebsite,
+            pk=website_id,
+            support_account=context.account,
+            is_active=True,
+        )
+        day_start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+        conversations = SupportConversation.objects.filter(website=website)
+        today_conversations = conversations.filter(created_at__gte=day_start).count()
+        today_messages = Message.objects.filter(
+            conversation__support_conversation__website=website,
+            created_at__gte=day_start,
+            is_deleted=False,
+        ).count()
+        active_agents = website.agent_assignments.filter(agent__is_active=True).count()
+        resolved = conversations.filter(
+            resolved_at__isnull=False,
+            created_at__gte=day_start,
+        ).annotate(
+            resolution_duration=ExpressionWrapper(
+                F("resolved_at") - F("created_at"),
+                output_field=DurationField(),
+            )
+        ).aggregate(value=Avg("resolution_duration"))["value"]
+        return Response({
+            "website_id": str(website.id),
+            "conversations_today": today_conversations,
+            "messages_today": today_messages,
+            "active_agents": active_agents,
+            "average_resolution_seconds": int(resolved.total_seconds()) if resolved else None,
+            "generated_at": timezone.now(),
+        })
+
+
+class SupportTeamListCreateView(APIView):
+    def get(self, request):
+        context, error = require_owner(request, self, require_access=False)
+        if error: return error
+        teams = SupportTeam.objects.filter(support_account=context.account).prefetch_related("memberships", "website_assignments").order_by("name")
+        return Response(SupportTeamSerializer(teams, many=True).data)
+
+    @transaction.atomic
+    def post(self, request):
+        context, error = require_owner(request, self)
+        if error: return error
+        serializer = SupportTeamWriteSerializer(data=request.data); serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if SupportTeam.objects.filter(support_account=context.account, name__iexact=data["name"].strip()).exists():
+            raise DRFValidationError({"name": "A team with this name already exists."})
+        team = SupportTeam.objects.create(support_account=context.account, name=data["name"].strip(), description=data["description"], default_max_active_conversations=data["default_max_active_conversations"], is_active=data["is_active"], created_by=request.user)
+        _sync_team_assignments(context.account, team, data["agent_ids"], data["website_ids"])
+        return Response(SupportTeamSerializer(team).data, status=status.HTTP_201_CREATED)
+
+
+class SupportTeamDetailView(APIView):
+    @transaction.atomic
+    def patch(self, request, team_id):
+        context, error = require_owner(request, self)
+        if error: return error
+        team = get_object_or_404(SupportTeam.objects.select_for_update(), pk=team_id, support_account=context.account)
+        serializer = SupportTeamWriteSerializer(data=request.data); serializer.is_valid(raise_exception=True); data=serializer.validated_data
+        if SupportTeam.objects.filter(support_account=context.account, name__iexact=data["name"].strip()).exclude(pk=team.pk).exists():
+            raise DRFValidationError({"name": "A team with this name already exists."})
+        team.name=data["name"].strip(); team.description=data["description"]; team.default_max_active_conversations=data["default_max_active_conversations"]; team.is_active=data["is_active"]; team.full_clean(); team.save()
+        _sync_team_assignments(context.account, team, data["agent_ids"], data["website_ids"])
+        return Response(SupportTeamSerializer(team).data)
+
+    @transaction.atomic
+    def delete(self, request, team_id):
+        context, error = require_owner(request, self, require_access=False)
+        if error: return error
+        team=get_object_or_404(SupportTeam.objects.select_for_update(), pk=team_id, support_account=context.account)
+        team.is_active=False; team.save(update_fields=["is_active","updated_at"]); team.memberships.all().delete(); team.website_assignments.all().delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _sync_team_assignments(account, team, agent_ids, website_ids):
+    agents=list(SupportAgent.objects.filter(support_account=account, is_active=True, id__in=agent_ids))
+    websites=list(SupportWebsite.objects.filter(support_account=account, is_active=True, id__in=website_ids))
+    if len(agents)!=len(set(agent_ids)) or len(websites)!=len(set(website_ids)):
+        raise DRFValidationError("One or more team assignments are unavailable.")
+    SupportTeamMembership.objects.filter(team=team).delete(); SupportWebsiteTeam.objects.filter(team=team).delete()
+    SupportTeamMembership.objects.bulk_create([SupportTeamMembership(team=team, agent=a) for a in agents])
+    SupportWebsiteTeam.objects.bulk_create([SupportWebsiteTeam(team=team, website=w) for w in websites])
+    for website in websites:
+        if not SupportWebsiteTeam.objects.filter(website=website, is_default=True).exists():
+            SupportWebsiteTeam.objects.filter(website=website, team=team).update(is_default=True)
+
+
 class SupportAgentInvitationListCreateView(APIView):
     def get(self, request):
         context, error = require_owner(request, self, require_access=False)
@@ -597,7 +855,7 @@ class SupportAgentInvitationListCreateView(APIView):
         invitations = (
             SupportAgentInvitation.objects.filter(support_account=context.account)
             .select_related("invited_by", "invited_by__profile")
-            .prefetch_related("website_assignments__website")
+            .prefetch_related("website_assignments__website", "team_assignments__team")
             .order_by("-created_at")[:100]
         )
         return Response(SupportAgentInvitationSerializer(invitations, many=True).data)
@@ -626,6 +884,10 @@ class SupportAgentInvitationDetailView(APIView):
             return error
         invitation = get_object_or_404(
             SupportAgentInvitation,
+    SupportTeam,
+    SupportTeamMembership,
+    SupportRoutingPolicy,
+    SupportWebsiteTeam,
             pk=invitation_id,
             support_account=context.account,
         )
@@ -643,6 +905,10 @@ class SupportAgentInvitationResendView(APIView):
             return error
         invitation = get_object_or_404(
             SupportAgentInvitation,
+    SupportTeam,
+    SupportTeamMembership,
+    SupportRoutingPolicy,
+    SupportWebsiteTeam,
             pk=invitation_id,
             support_account=context.account,
         )
@@ -681,7 +947,7 @@ class SupportAgentInvitationAcceptView(APIView):
             return service_error_response(service_error)
         agent = (
             SupportAgent.objects.select_related("user", "user__profile")
-            .prefetch_related("website_assignments")
+            .prefetch_related("website_assignments", "team_memberships")
             .get(pk=agent.pk)
         )
         return Response(SupportAgentSerializer(agent).data)
@@ -706,7 +972,7 @@ class SupportAgentDetailView(APIView):
             return service_error_response(service_error)
         agent = (
             SupportAgent.objects.select_related("user", "user__profile")
-            .prefetch_related("website_assignments")
+            .prefetch_related("website_assignments", "team_memberships")
             .get(pk=agent.pk)
         )
         return Response(SupportAgentSerializer(agent).data)
@@ -735,7 +1001,7 @@ class SupportAgentAvailabilityView(APIView):
             return service_error_response(service_error)
         agent = (
             SupportAgent.objects.select_related("user", "user__profile")
-            .prefetch_related("website_assignments")
+            .prefetch_related("website_assignments", "team_memberships")
             .get(pk=agent.pk)
         )
         return Response(SupportAgentSerializer(agent).data)
@@ -1972,6 +2238,106 @@ class SupportSavedInboxViewDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class SupportConversationLifecycleView(APIView):
+    def post(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        serializer = SupportLifecycleTransitionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            conversation = transition_conversation(
+                context=context,
+                conversation=conversation,
+                target_status=serializer.validated_data["status"],
+                resolution_reason=serializer.validated_data.get("resolution_reason", ""),
+                closure_reason=serializer.validated_data.get("closure_reason", ""),
+                force=serializer.validated_data.get("force", False),
+            )
+        except SupportLifecycleError as exc:
+            return Response({"detail": str(exc), "code": exc.code}, status=exc.status_code)
+        return Response(SupportConversationSerializer(conversation, context={"request": request, "user": request.user}).data)
+
+
+class SupportConversationSnoozeView(APIView):
+    def post(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        serializer = SupportSnoozeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            conversation = snooze_conversation(context=context, conversation=conversation, until=serializer.validated_data["until"])
+        except SupportLifecycleError as exc:
+            return Response({"detail": str(exc), "code": exc.code}, status=exc.status_code)
+        return Response(SupportConversationSerializer(conversation, context={"request": request, "user": request.user}).data)
+
+    def delete(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        try:
+            conversation = transition_conversation(
+                context=context,
+                conversation=conversation,
+                target_status=conversation.previous_status or SupportConversation.Status.OPEN,
+            )
+        except SupportLifecycleError as exc:
+            return Response({"detail": str(exc), "code": exc.code}, status=exc.status_code)
+        return Response(SupportConversationSerializer(conversation, context={"request": request, "user": request.user}).data)
+
+
+class SupportConversationFollowView(APIView):
+    def put(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        serializer = SupportFollowSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            following = set_following(
+                context=context, conversation=conversation, user=request.user,
+                following=serializer.validated_data["following"],
+            )
+        except SupportLifecycleError as exc:
+            return Response({"detail": str(exc), "code": exc.code}, status=exc.status_code)
+        return Response({"following": following})
+
+
+class SupportConversationTransferView(APIView):
+    def post(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        serializer = SupportTransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        agent_id = serializer.validated_data.get("assigned_agent_id")
+        team_id = serializer.validated_data.get("assigned_team_id")
+        agent = SupportAgent.objects.filter(pk=agent_id, support_account=context.account).first() if agent_id else None
+        team = SupportTeam.objects.filter(pk=team_id, support_account=context.account).first() if team_id else None
+        try:
+            conversation = transfer_conversation(
+                context=context, conversation=conversation, to_agent=agent, to_team=team,
+                note=serializer.validated_data.get("note", ""),
+            )
+        except SupportLifecycleError as exc:
+            return Response({"detail": str(exc), "code": exc.code}, status=exc.status_code)
+        return Response(SupportConversationSerializer(conversation, context={"request": request, "user": request.user}).data)
+
+
+class SupportConversationViewersView(APIView):
+    def get(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        return Response({"viewers": current_viewers(conversation)})
+
+    def post(self, request, conversation_id):
+        context = get_support_context(request.user)
+        conversation = get_context_conversation(context, conversation_id)
+        serializer = SupportViewerHeartbeatSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        display_name = request.user.get_full_name() or request.user.username
+        viewers = viewer_heartbeat(
+            conversation=conversation, user_id=request.user.id, display_name=display_name
+        )
+        return Response({"viewers": viewers})
+
+
 class SupportConversationInternalNotesView(APIView):
     def get(self, request, conversation_id):
         context, error = require_support_access(request)
@@ -2426,6 +2792,8 @@ class SupportKnowledgeArticleListCreateView(APIView):
                     title=values["title"],
                     slug=unique_article_slug(context.account, values["title"]),
                     summary=values.get("summary", ""),
+                    seo_description=values.get("seo_description", ""),
+                    language=values.get("language", "en").lower(),
                     body=values["body"],
                     status=values["status"],
                     all_websites=values["all_websites"],
@@ -2434,7 +2802,9 @@ class SupportKnowledgeArticleListCreateView(APIView):
                     updated_by=request.user,
                 )
                 replace_article_websites(article, values.get("website_ids", []))
+                replace_related_articles(article, values.get("related_article_ids", []))
                 publish_state(article)
+                create_article_revision(article, actor=request.user, change_note=values.get("change_note", "Created"))
         except SupportKnowledgeError as knowledge_error:
             return knowledge_error_response(knowledge_error)
         article = SupportKnowledgeArticle.objects.select_related("category", "created_by", "updated_by").prefetch_related("website_assignments__website").get(pk=article.pk)
@@ -2483,7 +2853,7 @@ class SupportKnowledgeArticleDetailView(APIView):
                     is_active=True,
                 )
         previous_status = article.status
-        for field in ("title", "summary", "body", "status", "all_websites", "is_featured"):
+        for field in ("title", "summary", "seo_description", "language", "body", "status", "all_websites", "is_featured"):
             if field in values:
                 setattr(article, field, values[field])
         article.category = category
@@ -2494,7 +2864,10 @@ class SupportKnowledgeArticleDetailView(APIView):
                 article.save()
                 if "all_websites" in values or "website_ids" in values:
                     replace_article_websites(article, values.get("website_ids", [a.website_id for a in article.website_assignments.all()]))
+                if "related_article_ids" in values:
+                    replace_related_articles(article, values.get("related_article_ids", []))
                 publish_state(article, previous_status)
+                create_article_revision(article, actor=request.user, change_note=values.get("change_note", "Updated"))
         except SupportKnowledgeError as knowledge_error:
             return knowledge_error_response(knowledge_error)
         article = SupportKnowledgeArticle.objects.select_related("category", "created_by", "updated_by").prefetch_related("website_assignments__website").get(pk=article.pk)
@@ -2519,6 +2892,7 @@ class SupportKnowledgeArticleDetailView(APIView):
         article.published_at = None
         article.updated_by = request.user
         article.save(update_fields=["status", "published_at", "updated_by", "updated_at"])
+        create_article_revision(article, actor=request.user, change_note="Archived")
         record_audit_event(
             account=context.account,
             actor=request.user,
@@ -2529,6 +2903,44 @@ class SupportKnowledgeArticleDetailView(APIView):
             ip_address=request_ip(request),
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SupportKnowledgeArticleRevisionListView(APIView):
+    def get(self, request, article_id):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)
+        revisions = article.revisions.select_related("created_by").all()[:50]
+        return Response(SupportKnowledgeRevisionSerializer(revisions, many=True).data)
+
+
+class SupportKnowledgeArticleRevisionRestoreView(APIView):
+    def post(self, request, article_id, revision_id):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        with transaction.atomic():
+            article = get_object_or_404(SupportKnowledgeArticle.objects.select_for_update(), pk=article_id, support_account=context.account)
+            revision = get_object_or_404(article.revisions, pk=revision_id)
+            restore_article_revision(article, revision, actor=request.user)
+        record_audit_event(account=context.account, actor=request.user, action="knowledge.article_revision_restored", target_type="support_knowledge_article", target_id=article.id, summary=f"{request.user.username} restored {article.title} from version {revision.version}.", metadata={"revision_id": str(revision.id), "version": revision.version}, ip_address=request_ip(request))
+        article = SupportKnowledgeArticle.objects.select_related("category", "created_by", "updated_by").prefetch_related("website_assignments__website", "related_links__related_article").get(pk=article.pk)
+        return Response(SupportKnowledgeArticleSerializer(article).data)
+
+
+class SupportKnowledgeArticleRestoreView(APIView):
+    def post(self, request, article_id):
+        context, error = require_owner(request, self)
+        if error:
+            return error
+        article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)
+        article.status = SupportKnowledgeArticle.Status.DRAFT
+        article.updated_by = request.user
+        article.published_at = None
+        article.save(update_fields=["status", "updated_by", "published_at", "updated_at"])
+        create_article_revision(article, actor=request.user, change_note="Restored from archive")
+        return Response(SupportKnowledgeArticleSerializer(article).data)
 
 
 class SupportWidgetKnowledgeListView(APIView):
@@ -3426,3 +3838,28 @@ class SupportWidgetCallTurnCredentialsView(APIView):
         except SupportCallError as call_error:
             return support_call_error_response(call_error, public=True)
         return public_widget_response(payload)
+
+
+class SupportRoutingPolicyListView(APIView):
+    def get(self, request):
+        context, error = require_owner(request, self, require_access=False)
+        if error: return error
+        websites = SupportWebsite.objects.filter(support_account=context.account, is_active=True).order_by("name")
+        policies = []
+        for website in websites:
+            policy, _ = SupportRoutingPolicy.objects.get_or_create(website=website)
+            policies.append(policy)
+        return Response(SupportRoutingPolicySerializer(policies, many=True).data)
+
+
+class SupportRoutingPolicyDetailView(APIView):
+    @transaction.atomic
+    def patch(self, request, website_id):
+        context, error = require_owner(request, self)
+        if error: return error
+        website = get_object_or_404(SupportWebsite.objects.select_for_update(), pk=website_id, support_account=context.account, is_active=True)
+        policy, _ = SupportRoutingPolicy.objects.select_for_update().get_or_create(website=website)
+        serializer = SupportRoutingPolicyWriteSerializer(data=request.data); serializer.is_valid(raise_exception=True)
+        for key, value in serializer.validated_data.items(): setattr(policy, key, value)
+        policy.updated_by = request.user; policy.full_clean(); policy.save()
+        return Response(SupportRoutingPolicySerializer(policy).data)

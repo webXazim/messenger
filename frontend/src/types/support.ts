@@ -78,8 +78,15 @@ export type SupportAgent = {
   can_view_all_conversations: boolean;
   can_assign_conversations: boolean;
   can_view_analytics: boolean;
+  can_manage_websites: boolean;
+  can_manage_knowledge: boolean;
+  can_manage_teams: boolean;
+  can_manage_automations: boolean;
+  can_export_data: boolean;
   is_active: boolean;
   assigned_website_ids: string[];
+  team_ids: string[];
+  active_conversation_count: number;
   joined_at?: string;
 };
 
@@ -100,11 +107,45 @@ export type SupportAgentInvitation = {
   can_view_all_conversations: boolean;
   can_assign_conversations: boolean;
   can_view_analytics: boolean;
+  can_manage_websites: boolean;
+  can_manage_knowledge: boolean;
+  can_manage_teams: boolean;
+  can_manage_automations: boolean;
+  can_export_data: boolean;
   invited_by?: SupportOwner | null;
   assigned_website_ids: string[];
   assigned_websites: SupportInvitationWebsite[];
+  assigned_team_ids: string[];
   created_at?: string;
   updated_at?: string;
+};
+
+export type SupportTeam = {
+  id: string;
+  name: string;
+  description: string;
+  default_max_active_conversations: number;
+  is_active: boolean;
+  agent_ids: string[];
+  website_ids: string[];
+  agent_count: number;
+};
+
+
+export type SupportRoutingPolicy = {
+  website_id: string; website_name: string; mode: "manual" | "round_robin" | "least_busy";
+  least_busy_tiebreaker: boolean; overflow_behavior: "leave_unassigned" | "least_busy" | "notify_owner";
+  offline_reassignment_minutes: number; prefer_previous_agent: boolean; enabled: boolean; updated_at?: string;
+};
+export type SupportRoutingPolicyInput = Omit<SupportRoutingPolicy, "website_id" | "website_name" | "updated_at">;
+
+export type SupportTeamInput = {
+  name: string;
+  description?: string;
+  default_max_active_conversations: number;
+  agent_ids: string[];
+  website_ids: string[];
+  is_active?: boolean;
 };
 
 export type SupportBootstrap = {
@@ -118,7 +159,17 @@ export type SupportBootstrap = {
   } | null;
   websites: SupportWebsite[];
   agents: SupportAgent[];
+  teams: SupportTeam[];
   invitations: SupportAgentInvitation[];
+};
+
+export type SupportWebsiteUsage = {
+  website_id: string;
+  conversations_today: number;
+  messages_today: number;
+  active_agents: number;
+  average_resolution_seconds?: number | null;
+  generated_at: string;
 };
 
 export type SupportWebsiteInput = {
@@ -131,10 +182,16 @@ export type SupportWebsiteInput = {
 export type SupportAgentInvitationInput = {
   email: string;
   website_ids: string[];
+  team_ids?: string[];
   max_active_conversations: number;
   can_view_all_conversations: boolean;
   can_assign_conversations: boolean;
   can_view_analytics: boolean;
+  can_manage_websites?: boolean;
+  can_manage_knowledge?: boolean;
+  can_manage_teams?: boolean;
+  can_manage_automations?: boolean;
+  can_export_data?: boolean;
 };
 
 export type SupportAgentUpdateInput = Omit<
@@ -415,8 +472,40 @@ export type SupportServiceSettings = {
   default_follow_up_minutes: number;
   alert_owner: boolean;
   alert_assigned_agent: boolean;
+  pause_while_waiting_customer: boolean;
+  pause_resolution_while_snoozed: boolean;
+  escalate_on_breach: boolean;
+  escalation_team?: string | null;
   updated_at?: string;
 };
+
+export type SupportSlaPolicy = {
+  id: string;
+  name: string;
+  website: string | null;
+  website_name?: string | null;
+  team: string | null;
+  team_name?: string | null;
+  is_active: boolean;
+  first_response_targets: SupportServiceTargets;
+  next_response_targets: SupportServiceTargets;
+  resolution_targets: SupportServiceTargets;
+  due_soon_minutes: number | null;
+  pause_while_waiting_customer: boolean | null;
+  pause_resolution_while_snoozed: boolean | null;
+  alert_owner: boolean | null;
+  alert_assigned_agent: boolean | null;
+  escalate_on_breach: boolean | null;
+  escalation_team: string | null;
+  escalation_team_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type SupportSlaPolicyInput = Omit<
+  SupportSlaPolicy,
+  "id" | "website_name" | "team_name" | "escalation_team_name" | "created_at" | "updated_at"
+>;
 
 export type SupportServiceAlert = {
   id: string;
@@ -522,6 +611,148 @@ export type SupportAnalyticsOverview = {
 };
 
 
+export type SupportNotificationSettings = {
+  new_conversation: boolean;
+  assignment_changed: boolean;
+  sla_due_soon: boolean;
+  sla_breached: boolean;
+  internal_mention: boolean;
+  follow_up_due: boolean;
+  daily_summary: boolean;
+  daily_summary_hour: number;
+};
+
+export type SupportSecuritySettings = {
+  require_verified_identity_for_sensitive_actions: boolean;
+  block_unverified_attachments: boolean;
+  max_attachment_mb: number;
+  allowed_attachment_extensions: string[];
+  retain_audit_days: number;
+  webhook_failure_disable_threshold: number;
+  agent_session_timeout_minutes: number;
+};
+
+export type SupportAutomationRule = {
+  id: string;
+  name: string;
+  description: string;
+  trigger: string;
+  conditions: Array<Record<string, unknown>>;
+  actions: Array<Record<string, unknown>>;
+  is_active: boolean;
+  priority: number;
+  stop_processing: boolean;
+  execution_limit: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type SupportAutomationRuleInput = Omit<
+  SupportAutomationRule,
+  "id" | "created_at" | "updated_at"
+>;
+
+export type SupportAutomationExecution = {
+  id: string;
+  rule: { id: string; name: string };
+  conversation_id?: string | null;
+  trigger: string;
+  status: "started" | "succeeded" | "skipped" | "failed";
+  actions_executed: number;
+  duration_ms: number;
+  error?: string;
+  created_at: string;
+};
+
+export type SupportAnalyticsV2Filters = {
+  days?: number;
+  start?: string;
+  end?: string;
+  website?: string;
+  team?: string;
+  agent?: string;
+};
+
+export type SupportAnalyticsV2MetricSet = {
+  conversations: number;
+  resolved: number;
+  resolution_rate: number;
+  first_response_seconds?: number | null;
+  resolution_seconds?: number | null;
+  sla_compliance: number;
+  csat_average?: number | null;
+  unassigned_rate: number;
+  queue: {
+    open: number;
+    unassigned: number;
+    overdue: number;
+    at_risk: number;
+  };
+};
+
+export type SupportAnalyticsV2Overview = {
+  period: { start: string; end: string; days: number };
+  filters: Record<string, string | null>;
+  current: SupportAnalyticsV2MetricSet;
+  previous: SupportAnalyticsV2MetricSet;
+};
+
+export type SupportAnalyticsV2VolumePoint = {
+  date: string;
+  created: number;
+  resolved: number;
+  messages: number;
+};
+
+export type SupportAnalyticsV2Volume = {
+  period: { start: string; end: string; days: number };
+  current: SupportAnalyticsV2VolumePoint[];
+  previous: SupportAnalyticsV2VolumePoint[];
+};
+
+export type SupportAnalyticsV2WebsiteRow = {
+  website: SupportConversationWebsite;
+  conversations: number;
+  resolved: number;
+  first_response_seconds?: number | null;
+  resolution_seconds?: number | null;
+  sla_compliance: number;
+  csat_average?: number | null;
+};
+
+export type SupportAnalyticsV2AgentRow = {
+  agent: { id: string; display_name: string };
+  availability: SupportAvailability;
+  conversations: number;
+  resolved: number;
+  replies: number;
+  first_response_seconds?: number | null;
+  resolution_seconds?: number | null;
+  csat_average?: number | null;
+};
+
+export type SupportAnalyticsV2TagRow = {
+  tag: { id: string; name: string; color: string };
+  conversations: number;
+  share: number;
+};
+
+export type SupportAnalyticsV2HourRow = {
+  hour: number;
+  conversations: number;
+};
+
+export type SupportAnalyticsExport = {
+  id: string;
+  status: "queued" | "processing" | "ready" | "failed";
+  format: string;
+  filters?: Record<string, unknown>;
+  download_ready?: boolean;
+  created_at?: string;
+  completed_at?: string | null;
+  error_message?: string;
+};
+
 export type SupportKnowledgeSettings = {
   enabled: boolean;
   show_in_widget: boolean;
@@ -549,6 +780,8 @@ export type SupportKnowledgeArticle = {
   title: string;
   slug: string;
   summary: string;
+  seo_description: string;
+  language: string;
   body: string;
   status: "draft" | "published" | "archived";
   all_websites: boolean;
@@ -560,6 +793,8 @@ export type SupportKnowledgeArticle = {
   helpful_count: number;
   not_helpful_count: number;
   helpful_rate?: number | null;
+  related_articles: Array<{ id: string; title: string }>;
+  revision_count: number;
   created_by?: SupportOwner | null;
   updated_by?: SupportOwner | null;
   created_at: string;
@@ -570,11 +805,32 @@ export type SupportKnowledgeArticleInput = {
   category_id?: string | null;
   title: string;
   summary?: string;
+  seo_description?: string;
+  language?: string;
   body: string;
   status: SupportKnowledgeArticle["status"];
   all_websites: boolean;
   website_ids: string[];
   is_featured: boolean;
+  related_article_ids?: string[];
+  change_note?: string;
+};
+
+export type SupportKnowledgeRevision = {
+  id: string;
+  version: number;
+  title: string;
+  summary: string;
+  seo_description: string;
+  language: string;
+  status: SupportKnowledgeArticle["status"];
+  category_name: string;
+  all_websites: boolean;
+  website_ids: string[];
+  is_featured: boolean;
+  change_note: string;
+  created_by?: SupportOwner | null;
+  created_at: string;
 };
 
 export type SupportPrivacySettings = {

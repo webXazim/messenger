@@ -416,3 +416,23 @@ The release includes authenticated k6 WebSocket/API scenarios, VPS-side resource
 ## Upgrade 09: Django efficiency
 
 See `docs/UPGRADE_09_DJANGO_EFFICIENCY.md` for fixed-query inbox reads, batched presence, query budgets, runtime metrics, and deployment settings.
+
+
+## Support Upgrade 07
+See `docs/SUPPORT_UPGRADE_07_LIFECYCLE.md`. Run `./scripts/check-support-upgrade-07.sh` before deployment.
+
+
+## Support Upgrade 08
+See `docs/SUPPORT_UPGRADE_08_SLA.md`. Run `./scripts/check-support-upgrade-08.sh` before deployment.
+
+
+## Support Upgrade 09
+See `docs/SUPPORT_UPGRADE_09_ANALYTICS.md`. Run `./scripts/check-support-upgrade-09.sh` before deployment.
+
+
+## Support Upgrade 10
+See `docs/SUPPORT_UPGRADE_10_AUTOMATIONS_SECURITY.md`. Run `./scripts/check-support-upgrade-10.sh` before deployment.
+
+
+## Support Upgrade 11 — Final production handoff
+See `docs/SUPPORT_FINAL_PRODUCTION_HANDOFF.md` and run `./scripts/check-support-upgrade-11.sh`.

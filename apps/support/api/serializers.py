@@ -15,12 +15,17 @@ from apps.support.feedback_services import feedback_settings_for, survey_for_con
 from apps.support.service_operations import (
     SupportServiceConfigurationError,
     normalize_service_settings_payload,
+    normalize_targets,
+    service_settings_for,
     service_snapshot,
 )
 from apps.support.models import (
     SupportAccount,
     SupportAgent,
     SupportAgentInvitation,
+    SupportTeam,
+    SupportTeamMembership,
+    SupportRoutingPolicy,
     SupportConversation,
     SupportMessageAuthor,
     SupportPendingUpload,
@@ -32,11 +37,13 @@ from apps.support.models import (
     SupportAuditEvent,
     SupportServiceAlert,
     SupportServiceSettings,
+    SupportSlaPolicy,
     SupportFeedbackSettings,
     SupportCSATSurvey,
     SupportKnowledgeSettings,
     SupportKnowledgeCategory,
     SupportKnowledgeArticle,
+    SupportKnowledgeArticleRevision,
     SupportPrivacySettings,
     SupportWebhookEndpoint,
     SupportWebhookDelivery,
@@ -150,9 +157,39 @@ class SupportWebsiteSerializer(serializers.ModelSerializer):
         return normalize_origins(value)
 
 
+class SupportTeamSerializer(serializers.ModelSerializer):
+    agent_ids = serializers.SerializerMethodField()
+    website_ids = serializers.SerializerMethodField()
+    agent_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupportTeam
+        fields = ("id", "name", "description", "default_max_active_conversations", "is_active", "agent_ids", "website_ids", "agent_count", "created_at", "updated_at")
+
+    def get_agent_ids(self, obj):
+        return [str(value) for value in obj.memberships.values_list("agent_id", flat=True)]
+
+    def get_website_ids(self, obj):
+        return [str(value) for value in obj.website_assignments.values_list("website_id", flat=True)]
+
+    def get_agent_count(self, obj):
+        return obj.memberships.count()
+
+
+class SupportTeamWriteSerializer(serializers.Serializer):
+    name = serializers.CharField(min_length=1, max_length=120)
+    description = serializers.CharField(max_length=255, allow_blank=True, required=False, default="")
+    default_max_active_conversations = serializers.IntegerField(min_value=1, max_value=100, default=5)
+    agent_ids = serializers.ListField(child=serializers.UUIDField(), required=False, default=list)
+    website_ids = serializers.ListField(child=serializers.UUIDField(), required=False, default=list)
+    is_active = serializers.BooleanField(required=False, default=True)
+
+
 class SupportAgentSerializer(serializers.ModelSerializer):
     user = serializers.SerializerMethodField()
     assigned_website_ids = serializers.SerializerMethodField()
+    team_ids = serializers.SerializerMethodField()
+    active_conversation_count = serializers.SerializerMethodField()
 
     class Meta:
         model = SupportAgent
@@ -164,8 +201,15 @@ class SupportAgentSerializer(serializers.ModelSerializer):
             "can_view_all_conversations",
             "can_assign_conversations",
             "can_view_analytics",
+            "can_manage_websites",
+            "can_manage_knowledge",
+            "can_manage_teams",
+            "can_manage_automations",
+            "can_export_data",
             "is_active",
             "assigned_website_ids",
+            "team_ids",
+            "active_conversation_count",
             "joined_at",
         )
 
@@ -178,11 +222,18 @@ class SupportAgentSerializer(serializers.ModelSerializer):
             assignments = obj.website_assignments.all()
         return [str(assignment.website_id) for assignment in assignments]
 
+    def get_team_ids(self, obj):
+        return [str(value) for value in obj.team_memberships.values_list("team_id", flat=True)]
+
+    def get_active_conversation_count(self, obj):
+        return obj.assigned_conversations.exclude(status__in=["resolved", "closed"]).count()
+
 
 class SupportAgentInvitationSerializer(serializers.ModelSerializer):
     invited_by = serializers.SerializerMethodField()
     assigned_website_ids = serializers.SerializerMethodField()
     assigned_websites = serializers.SerializerMethodField()
+    assigned_team_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = SupportAgentInvitation
@@ -197,9 +248,15 @@ class SupportAgentInvitationSerializer(serializers.ModelSerializer):
             "can_view_all_conversations",
             "can_assign_conversations",
             "can_view_analytics",
+            "can_manage_websites",
+            "can_manage_knowledge",
+            "can_manage_teams",
+            "can_manage_automations",
+            "can_export_data",
             "invited_by",
             "assigned_website_ids",
             "assigned_websites",
+            "assigned_team_ids",
             "created_at",
             "updated_at",
         )
@@ -217,6 +274,9 @@ class SupportAgentInvitationSerializer(serializers.ModelSerializer):
     def get_assigned_website_ids(self, obj):
         return [str(assignment.website_id) for assignment in self._website_assignments(obj)]
 
+    def get_assigned_team_ids(self, obj):
+        return [str(value) for value in obj.team_assignments.values_list("team_id", flat=True)]
+
     def get_assigned_websites(self, obj):
         return [
             {"id": str(assignment.website_id), "name": assignment.website.name, "domain": assignment.website.domain}
@@ -226,19 +286,31 @@ class SupportAgentInvitationSerializer(serializers.ModelSerializer):
 
 class SupportAgentInvitationCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
+    team_ids = serializers.ListField(child=serializers.UUIDField(), required=False, default=list)
     website_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=False)
     max_active_conversations = serializers.IntegerField(min_value=1, max_value=100, default=5)
     can_view_all_conversations = serializers.BooleanField(default=False)
     can_assign_conversations = serializers.BooleanField(default=False)
     can_view_analytics = serializers.BooleanField(default=False)
+    can_manage_websites = serializers.BooleanField(default=False)
+    can_manage_knowledge = serializers.BooleanField(default=False)
+    can_manage_teams = serializers.BooleanField(default=False)
+    can_manage_automations = serializers.BooleanField(default=False)
+    can_export_data = serializers.BooleanField(default=False)
 
 
 class SupportAgentUpdateSerializer(serializers.Serializer):
+    team_ids = serializers.ListField(child=serializers.UUIDField(), required=False, default=list)
     website_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=True, required=False, default=list)
     max_active_conversations = serializers.IntegerField(min_value=1, max_value=100)
     can_view_all_conversations = serializers.BooleanField()
     can_assign_conversations = serializers.BooleanField()
     can_view_analytics = serializers.BooleanField()
+    can_manage_websites = serializers.BooleanField(default=False)
+    can_manage_knowledge = serializers.BooleanField(default=False)
+    can_manage_teams = serializers.BooleanField(default=False)
+    can_manage_automations = serializers.BooleanField(default=False)
+    can_export_data = serializers.BooleanField(default=False)
 
 
 class SupportAgentAvailabilitySerializer(serializers.Serializer):
@@ -442,6 +514,31 @@ class SupportConversationUpdateSerializer(serializers.Serializer):
     follow_up_note = serializers.CharField(required=False, allow_blank=True, max_length=255, default="")
 
 
+class SupportLifecycleTransitionSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=SupportConversation.Status.choices)
+    resolution_reason = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    closure_reason = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    force = serializers.BooleanField(required=False, default=False)
+
+
+class SupportSnoozeSerializer(serializers.Serializer):
+    until = serializers.DateTimeField()
+
+
+class SupportFollowSerializer(serializers.Serializer):
+    following = serializers.BooleanField()
+
+
+class SupportTransferSerializer(serializers.Serializer):
+    assigned_agent_id = serializers.UUIDField(required=False, allow_null=True)
+    assigned_team_id = serializers.UUIDField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
+class SupportViewerHeartbeatSerializer(serializers.Serializer):
+    active = serializers.BooleanField(required=False, default=True)
+
+
 class SupportPendingUploadSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     media_kind = serializers.CharField(read_only=True)
@@ -473,7 +570,6 @@ class SupportAttachmentSerializer(serializers.Serializer):
     download_url = serializers.SerializerMethodField()
     preview_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
-    waveform = serializers.SerializerMethodField()
 
     def _route(self, kind: str, obj: MessageAttachment) -> str:
         request = self.context.get("request")
@@ -507,20 +603,6 @@ class SupportAttachmentSerializer(serializers.Serializer):
 
     def get_thumbnail_url(self, obj):
         return self._route("thumbnail", obj) if obj.thumbnail else None
-
-    def get_waveform(self, obj):
-        waveform = (obj.metadata or {}).get("waveform") or []
-        if not isinstance(waveform, list):
-            return []
-        normalized = []
-        for value in waveform[:96]:
-            if not isinstance(value, (int, float)):
-                continue
-            try:
-                normalized.append(max(0, min(100, round(float(value)))))
-            except (TypeError, ValueError, OverflowError):
-                continue
-        return normalized
 
     def get_can_preview_inline(self, obj):
         mime = (obj.mime_type or "").lower()
@@ -685,14 +767,25 @@ class SupportConversationSerializer(serializers.Serializer):
     website = serializers.SerializerMethodField()
     visitor = serializers.SerializerMethodField()
     assigned_agent = serializers.SerializerMethodField()
+    assigned_team = serializers.SerializerMethodField()
+    assigned_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    assignment_trigger = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
     priority = serializers.CharField(read_only=True)
     subject = serializers.CharField(read_only=True)
     first_response_at = serializers.DateTimeField(read_only=True, allow_null=True)
     last_visitor_message_at = serializers.DateTimeField(read_only=True, allow_null=True)
     last_agent_message_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    previous_status = serializers.CharField(read_only=True)
+    snoozed_until = serializers.DateTimeField(read_only=True, allow_null=True)
+    resolution_reason = serializers.CharField(read_only=True)
+    closure_reason = serializers.CharField(read_only=True)
+    reopened_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    reopen_count = serializers.IntegerField(read_only=True)
+    revision_number = serializers.IntegerField(read_only=True)
     resolved_at = serializers.DateTimeField(read_only=True, allow_null=True)
     closed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    followers = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
     last_message = serializers.SerializerMethodField()
@@ -717,6 +810,11 @@ class SupportConversationSerializer(serializers.Serializer):
 
     def get_assigned_agent(self, obj):
         return SupportAgentSerializer(obj.assigned_agent, context=self.context).data if obj.assigned_agent else None
+
+    def get_assigned_team(self, obj):
+        if self.context.get("visitor") is not None or not obj.assigned_team_id:
+            return None
+        return {"id": str(obj.assigned_team_id), "name": obj.assigned_team.name}
 
     def get_last_message(self, obj):
         message = obj.conversation.last_message
@@ -748,6 +846,11 @@ class SupportConversationSerializer(serializers.Serializer):
             assignments = obj.tag_assignments.select_related("tag").filter(tag__is_active=True).order_by("tag__name")
         return SupportTagSerializer([item.tag for item in assignments], many=True).data
 
+    def get_followers(self, obj):
+        if self.context.get("visitor") is not None:
+            return []
+        return [user_summary(item.user) for item in obj.followers.select_related("user", "user__profile").all()]
+
     def get_csat(self, obj):
         survey = survey_for_conversation(obj)
         return SupportCSATSurveySerializer(survey).data if survey else None
@@ -763,6 +866,7 @@ class SupportConversationSerializer(serializers.Serializer):
             "active_due_at", "first_response_due_at", "next_response_due_at",
             "resolution_due_at", "first_response_breached_at",
             "next_response_breached_at", "resolution_breached_at",
+            "paused_at", "last_recalculated_at", "escalated_at",
             "follow_up_at", "follow_up_completed_at",
         ):
             snapshot[key] = date_field.to_representation(snapshot.get(key)) if snapshot.get(key) else None
@@ -974,7 +1078,9 @@ class SupportServiceSettingsSerializer(serializers.ModelSerializer):
             "first_response_targets", "next_response_targets",
             "resolution_targets", "due_soon_minutes",
             "default_follow_up_minutes", "alert_owner",
-            "alert_assigned_agent", "updated_at",
+            "alert_assigned_agent", "pause_while_waiting_customer",
+            "pause_resolution_while_snoozed", "escalate_on_breach",
+            "escalation_team", "updated_at",
         )
         read_only_fields = ("updated_at",)
 
@@ -991,12 +1097,83 @@ class SupportServiceSettingsSerializer(serializers.ModelSerializer):
             "default_follow_up_minutes": getattr(instance, "default_follow_up_minutes", 1440),
             "alert_owner": getattr(instance, "alert_owner", True),
             "alert_assigned_agent": getattr(instance, "alert_assigned_agent", True),
+            "pause_while_waiting_customer": getattr(instance, "pause_while_waiting_customer", True),
+            "pause_resolution_while_snoozed": getattr(instance, "pause_resolution_while_snoozed", True),
+            "escalate_on_breach": getattr(instance, "escalate_on_breach", True),
+            "escalation_team": getattr(instance, "escalation_team", None),
         }
         current.update(attrs)
+        escalation_team = current.get("escalation_team")
+        support_account = getattr(instance, "support_account", None)
+        if (
+            escalation_team is not None
+            and support_account is not None
+            and escalation_team.support_account_id != support_account.id
+        ):
+            raise serializers.ValidationError(
+                {"escalation_team": "Escalation team must belong to this Support account."}
+            )
         try:
             return normalize_service_settings_payload(current)
         except (SupportServiceConfigurationError, TypeError, ValueError) as exc:
             raise serializers.ValidationError(str(exc)) from exc
+
+
+class SupportSlaPolicySerializer(serializers.ModelSerializer):
+    website_name = serializers.CharField(source="website.name", read_only=True, allow_null=True)
+    team_name = serializers.CharField(source="team.name", read_only=True, allow_null=True)
+    escalation_team_name = serializers.CharField(
+        source="escalation_team.name", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = SupportSlaPolicy
+        fields = (
+            "id", "name", "website", "website_name", "team", "team_name",
+            "is_active", "first_response_targets", "next_response_targets",
+            "resolution_targets", "due_soon_minutes",
+            "pause_while_waiting_customer", "pause_resolution_while_snoozed",
+            "alert_owner", "alert_assigned_agent", "escalate_on_breach",
+            "escalation_team", "escalation_team_name", "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "id", "website_name", "team_name", "escalation_team_name",
+            "created_at", "updated_at",
+        )
+
+    def validate(self, attrs):
+        instance = self.instance
+        website = attrs.get("website", getattr(instance, "website", None))
+        team = attrs.get("team", getattr(instance, "team", None))
+        if bool(website) == bool(team):
+            raise serializers.ValidationError("Choose exactly one website or team scope.")
+        account = self.context["support_account"]
+        if website and website.support_account_id != account.id:
+            raise serializers.ValidationError("Website does not belong to this Support account.")
+        if team and team.support_account_id != account.id:
+            raise serializers.ValidationError("Team does not belong to this Support account.")
+        escalation_team = attrs.get(
+            "escalation_team", getattr(instance, "escalation_team", None)
+        )
+        if escalation_team and escalation_team.support_account_id != account.id:
+            raise serializers.ValidationError("Escalation team does not belong to this Support account.")
+        for field in (
+            "first_response_targets", "next_response_targets", "resolution_targets"
+        ):
+            if field in attrs:
+                attrs[field] = normalize_targets(
+                    attrs[field] or {},
+                    fallback=getattr(
+                        service_settings_for(account),
+                        field,
+                    ),
+                )
+        due_soon = attrs.get("due_soon_minutes")
+        if due_soon is not None and not 1 <= int(due_soon) <= 1440:
+            raise serializers.ValidationError(
+                {"due_soon_minutes": "Choose between 1 and 1440 minutes."}
+            )
+        return attrs
 
 
 class SupportServiceAlertSerializer(serializers.ModelSerializer):
@@ -1105,18 +1282,20 @@ class SupportKnowledgeArticleSerializer(serializers.ModelSerializer):
     created_by = serializers.SerializerMethodField()
     updated_by = serializers.SerializerMethodField()
     helpful_rate = serializers.SerializerMethodField()
+    related_articles = serializers.SerializerMethodField()
+    revision_count = serializers.IntegerField(source="revisions.count", read_only=True)
 
     class Meta:
         model = SupportKnowledgeArticle
         fields = (
-            "id", "category", "category_name", "title", "slug", "summary", "body",
+            "id", "category", "category_name", "title", "slug", "summary", "seo_description", "language", "body",
             "status", "all_websites", "is_featured", "website_ids", "website_names",
             "published_at", "view_count", "helpful_count", "not_helpful_count",
-            "helpful_rate", "created_by", "updated_by", "created_at", "updated_at",
+            "helpful_rate", "related_articles", "revision_count", "created_by", "updated_by", "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "slug", "website_ids", "website_names", "published_at",
-            "view_count", "helpful_count", "not_helpful_count", "helpful_rate",
+            "view_count", "helpful_count", "not_helpful_count", "helpful_rate", "related_articles", "revision_count",
             "created_by", "updated_by", "created_at", "updated_at",
         )
 
@@ -1143,16 +1322,25 @@ class SupportKnowledgeArticleSerializer(serializers.ModelSerializer):
         total = obj.helpful_count + obj.not_helpful_count
         return round((obj.helpful_count / total) * 100, 1) if total else None
 
+    def get_related_articles(self, obj):
+        links = getattr(obj, "_prefetched_objects_cache", {}).get("related_links")
+        links = links if links is not None else obj.related_links.select_related("related_article").all()
+        return [{"id": str(link.related_article_id), "title": link.related_article.title} for link in links]
+
 
 class SupportKnowledgeArticleWriteSerializer(serializers.Serializer):
     category_id = serializers.UUIDField(required=False, allow_null=True)
     title = serializers.CharField(max_length=180, trim_whitespace=True)
     summary = serializers.CharField(max_length=320, required=False, allow_blank=True, trim_whitespace=True)
+    seo_description = serializers.CharField(max_length=160, required=False, allow_blank=True, trim_whitespace=True)
+    language = serializers.RegexField(r"^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2})?$", required=False, default="en")
     body = serializers.CharField(max_length=30000, trim_whitespace=True)
     status = serializers.ChoiceField(choices=SupportKnowledgeArticle.Status.choices, default=SupportKnowledgeArticle.Status.DRAFT)
     all_websites = serializers.BooleanField(default=True)
     website_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=True, default=list)
     is_featured = serializers.BooleanField(default=False)
+    related_article_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=True, default=list)
+    change_note = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
 
     def validate_title(self, value):
         if not value.strip():
@@ -1163,6 +1351,18 @@ class SupportKnowledgeArticleWriteSerializer(serializers.Serializer):
         if not value.strip():
             raise serializers.ValidationError("Enter the article content.")
         return value.strip()
+
+
+class SupportKnowledgeRevisionSerializer(serializers.ModelSerializer):
+    created_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupportKnowledgeArticleRevision
+        fields = ("id", "version", "title", "summary", "seo_description", "language", "status", "category_name", "all_websites", "website_ids", "is_featured", "change_note", "created_by", "created_at")
+        read_only_fields = fields
+
+    def get_created_by(self, obj):
+        return user_summary(obj.created_by) if obj.created_by else None
 
 
 class PublicKnowledgeCategorySerializer(serializers.ModelSerializer):
@@ -1303,3 +1503,21 @@ class SupportCallMediaStateSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError("Provide audio_enabled or video_enabled.")
         return attrs
+
+
+class SupportRoutingPolicySerializer(serializers.ModelSerializer):
+    website_id = serializers.UUIDField(source="website.id", read_only=True)
+    website_name = serializers.CharField(source="website.name", read_only=True)
+
+    class Meta:
+        model = SupportRoutingPolicy
+        fields = ("website_id", "website_name", "mode", "least_busy_tiebreaker", "overflow_behavior", "offline_reassignment_minutes", "prefer_previous_agent", "enabled", "updated_at")
+
+
+class SupportRoutingPolicyWriteSerializer(serializers.Serializer):
+    mode = serializers.ChoiceField(choices=SupportRoutingPolicy.Mode.choices)
+    least_busy_tiebreaker = serializers.BooleanField(default=True)
+    overflow_behavior = serializers.ChoiceField(choices=SupportRoutingPolicy.Overflow.choices)
+    offline_reassignment_minutes = serializers.IntegerField(min_value=0, max_value=1440, default=15)
+    prefer_previous_agent = serializers.BooleanField(default=True)
+    enabled = serializers.BooleanField(default=True)

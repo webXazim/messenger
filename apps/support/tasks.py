@@ -106,3 +106,32 @@ def maintain_support_calls_task():
     from apps.support.call_services import maintain_support_calls
 
     return maintain_support_calls()
+
+
+@shared_task(name="apps.support.tasks.reassign_offline_support_conversations")
+def reassign_offline_support_conversations():
+    from apps.support.routing_services import reassign_offline_conversations
+    if not support_chat_enabled(): return 0
+    return reassign_offline_conversations()
+
+
+@shared_task(name="apps.support.tasks.wake_snoozed_support_conversations")
+def wake_snoozed_support_conversations():
+    from apps.support.lifecycle_services import wake_due_snoozed_conversations
+    if not support_chat_enabled():
+        return 0
+    return wake_due_snoozed_conversations()
+
+
+@shared_task(name="apps.support.tasks.aggregate_recent_support_analytics")
+def aggregate_recent_support_analytics(days=3):
+    from apps.support.analytics_aggregates import aggregate_recent_support_metrics
+    if not support_chat_enabled():
+        return 0
+    return aggregate_recent_support_metrics(days=days)
+
+
+@shared_task(name="apps.support.tasks.build_support_analytics_export")
+def build_support_analytics_export(export_id):
+    from apps.support.analytics_aggregates import build_export
+    return build_export(export_id)

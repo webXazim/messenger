@@ -6,6 +6,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { MessengerPageHeader, MessengerSectionHeader } from "../components/pages/MessengerPageHeader";
 import { UserAvatar } from "../components/UserAvatar";
 import { SupportWebsiteManager } from "../components/support/SupportWebsiteManager";
+import { SupportWebsitesPage } from "../components/support/SupportWebsitesPage";
+import { SupportAgentsPage } from "../components/support/SupportAgentsPage";
 import { SupportInbox } from "../components/support/SupportInbox";
 import { SupportWorkflowSettings } from "../components/support/SupportWorkflowSettings";
 import { SupportServiceOperationsSettings } from "../components/support/SupportServiceOperationsSettings";
@@ -13,6 +15,7 @@ import { SupportFeedbackSettings } from "../components/support/SupportFeedbackSe
 import { SupportAnalytics } from "../components/support/SupportAnalytics";
 import { SupportKnowledgeBase } from "../components/support/SupportKnowledgeBase";
 import { SupportDataGovernance } from "../components/support/SupportDataGovernance";
+import { SupportAutomationAndSecuritySettings } from "../components/support/SupportAutomationAndSecuritySettings";
 import { SupportCallSettings } from "../components/support/SupportCallSettings";
 import { parseApiError } from "../lib/apiErrors";
 import { SUPPORT_PLANS_URL } from "../lib/config";
@@ -537,6 +540,7 @@ function SettingsSection({ bootstrap }: { bootstrap: SupportBootstrap }) {
           <SupportServiceOperationsSettings />
           <SupportFeedbackSettings />
           <SupportWorkflowSettings bootstrap={bootstrap} />
+          <SupportAutomationAndSecuritySettings />
           <SupportDataGovernance />
         </>
       ) : (
@@ -588,8 +592,8 @@ export function SupportChatPage() {
           { label: "Agent seats", value: `${bootstrap.limits.agents.used}/${bootstrap.limits.agents.limit}` },
         ] : []}
       />
-      {section === "websites" ? <WebsitesSection bootstrap={bootstrap} /> : null}
-      {section === "agents" ? <AgentsSection bootstrap={bootstrap} /> : null}
+      {section === "websites" ? <SupportWebsitesPage bootstrap={bootstrap} /> : null}
+      {section === "agents" ? <SupportAgentsPage bootstrap={bootstrap} /> : null}
       {section === "analytics" ? <SupportAnalytics bootstrap={bootstrap} /> : null}
       {section === "knowledge" ? <SupportKnowledgeBase bootstrap={bootstrap} /> : null}
       {section === "settings" ? <SettingsSection bootstrap={bootstrap} /> : null}

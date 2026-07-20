@@ -13,6 +13,8 @@ from apps.support.models import (
     SupportKnowledgeArticle,
     SupportKnowledgeArticleWebsite,
     SupportKnowledgeFeedback,
+    SupportKnowledgeArticleRevision,
+    SupportKnowledgeRelatedArticle,
     SupportKnowledgeSettings,
     SupportWebsite,
 )
@@ -47,7 +49,7 @@ def public_articles_for_website(website: SupportWebsite) -> QuerySet[SupportKnow
         )
         .filter(_website_visibility_q(website))
         .select_related("category")
-        .prefetch_related("website_assignments__website")
+        .prefetch_related("website_assignments__website", "related_links__related_article")
         .distinct()
     )
 
@@ -63,7 +65,7 @@ def team_articles_for_context(
     queryset = (
         SupportKnowledgeArticle.objects.filter(support_account=context.account)
         .select_related("category", "created_by", "updated_by")
-        .prefetch_related("website_assignments__website")
+        .prefetch_related("website_assignments__website", "related_links__related_article")
     )
     if context.role != "owner":
         queryset = queryset.filter(status=SupportKnowledgeArticle.Status.PUBLISHED)
@@ -197,3 +199,56 @@ def record_article_feedback(*, article: SupportKnowledgeArticle, website: Suppor
         if updates:
             SupportKnowledgeArticle.objects.filter(pk=article.pk).update(**updates)
     return existing
+
+
+def create_article_revision(article: SupportKnowledgeArticle, *, actor=None, change_note: str = "") -> SupportKnowledgeArticleRevision:
+    """Create an immutable snapshot while holding the article row lock in the caller transaction."""
+    latest = article.revisions.order_by("-version").values_list("version", flat=True).first() or 0
+    return SupportKnowledgeArticleRevision.objects.create(
+        article=article,
+        version=latest + 1,
+        title=article.title,
+        summary=article.summary,
+        seo_description=article.seo_description,
+        language=article.language,
+        body=article.body,
+        status=article.status,
+        category_name=article.category.name if article.category_id else "",
+        all_websites=article.all_websites,
+        website_ids=[str(value) for value in article.website_assignments.values_list("website_id", flat=True)],
+        is_featured=article.is_featured,
+        change_note=(change_note or "").strip()[:255],
+        created_by=actor,
+    )
+
+
+def replace_related_articles(article: SupportKnowledgeArticle, related_ids: Iterable) -> None:
+    normalized = list(dict.fromkeys(str(value) for value in (related_ids or []) if value and str(value) != str(article.id)))[:12]
+    candidates = list(SupportKnowledgeArticle.objects.filter(support_account=article.support_account, id__in=normalized).exclude(status=SupportKnowledgeArticle.Status.ARCHIVED))
+    if len(candidates) != len(normalized):
+        raise SupportKnowledgeError("One or more related articles are unavailable.", code="invalid_related_articles")
+    article.related_links.all().delete()
+    SupportKnowledgeRelatedArticle.objects.bulk_create([
+        SupportKnowledgeRelatedArticle(article=article, related_article=item, sort_order=index)
+        for index, item in enumerate(candidates)
+    ])
+
+
+def restore_article_revision(article: SupportKnowledgeArticle, revision: SupportKnowledgeArticleRevision, *, actor=None) -> SupportKnowledgeArticle:
+    if revision.article_id != article.id:
+        raise SupportKnowledgeError("The selected revision does not belong to this article.", code="revision_unavailable", status_code=404)
+    article.title = revision.title
+    article.summary = revision.summary
+    article.seo_description = revision.seo_description
+    article.language = revision.language
+    article.body = revision.body
+    article.status = SupportKnowledgeArticle.Status.DRAFT
+    article.all_websites = revision.all_websites
+    article.is_featured = revision.is_featured
+    article.updated_by = actor
+    article.published_at = None
+    article.full_clean(exclude=["websites"])
+    article.save()
+    replace_article_websites(article, revision.website_ids)
+    create_article_revision(article, actor=actor, change_note=f"Restored from version {revision.version}")
+    return article

@@ -5,6 +5,12 @@ from apps.support.models import (
     SupportAgent,
     SupportAgentInvitation,
     SupportAgentInvitationWebsite,
+    SupportAgentInvitationTeam,
+    SupportTeam,
+    SupportTeamMembership,
+    SupportRoutingPolicy,
+    SupportRoutingCursor,
+    SupportWebsiteTeam,
     SupportConversation,
     SupportConversationReadState,
     SupportMessageAuthor,
@@ -12,17 +18,31 @@ from apps.support.models import (
     SupportTag,
     SupportConversationTag,
     SupportInternalNote,
+    SupportConversationFollower,
+    SupportInternalNoteMention,
+    SupportConversationTransfer,
     SupportCannedReply,
     SupportSavedInboxView,
     SupportAuditEvent,
     SupportServiceAlert,
     SupportServiceSettings,
+    SupportSlaPolicy,
+    SupportAnalyticsDailyMetric,
+    SupportAnalyticsHourlyMetric,
+    SupportAnalyticsTagMetric,
+    SupportAnalyticsExport,
+    SupportNotificationSettings,
+    SupportSecuritySettings,
+    SupportAutomationRule,
+    SupportAutomationExecution,
     SupportFeedbackSettings,
     SupportCSATSurvey,
     SupportKnowledgeSettings,
     SupportKnowledgeCategory,
     SupportKnowledgeArticle,
     SupportKnowledgeArticleWebsite,
+    SupportKnowledgeArticleRevision,
+    SupportKnowledgeRelatedArticle,
     SupportKnowledgeFeedback,
     SupportPrivacySettings,
     SupportWebhookEndpoint,
@@ -48,6 +68,28 @@ class SupportAccountAdmin(admin.ModelAdmin):
     search_fields = ("owner__username", "owner__email", "plan_code")
     autocomplete_fields = ("owner",)
 
+
+
+
+class SupportTeamMembershipInline(admin.TabularInline):
+    model = SupportTeamMembership
+    extra = 0
+    autocomplete_fields = ("agent",)
+
+
+class SupportWebsiteTeamInline(admin.TabularInline):
+    model = SupportWebsiteTeam
+    extra = 0
+    autocomplete_fields = ("website",)
+
+
+@admin.register(SupportTeam)
+class SupportTeamAdmin(admin.ModelAdmin):
+    list_display = ("name", "support_account", "is_active", "default_max_active_conversations")
+    list_filter = ("is_active",)
+    search_fields = ("name", "support_account__owner__email")
+    autocomplete_fields = ("support_account", "created_by")
+    inlines = (SupportTeamMembershipInline, SupportWebsiteTeamInline)
 
 @admin.register(SupportAgent)
 class SupportAgentAdmin(admin.ModelAdmin):
@@ -297,6 +339,26 @@ class SupportKnowledgeCategoryAdmin(admin.ModelAdmin):
     autocomplete_fields = ("support_account", "created_by", "updated_by")
 
 
+
+
+class SupportKnowledgeRelatedArticleInline(admin.TabularInline):
+    model = SupportKnowledgeRelatedArticle
+    fk_name = "article"
+    extra = 0
+    autocomplete_fields = ("related_article",)
+
+
+class SupportKnowledgeArticleRevisionInline(admin.TabularInline):
+    model = SupportKnowledgeArticleRevision
+    extra = 0
+    can_delete = False
+    readonly_fields = ("version", "title", "status", "change_note", "created_by", "created_at")
+    fields = readonly_fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 class SupportKnowledgeArticleWebsiteInline(admin.TabularInline):
     model = SupportKnowledgeArticleWebsite
     extra = 0
@@ -310,7 +372,7 @@ class SupportKnowledgeArticleAdmin(admin.ModelAdmin):
     search_fields = ("title", "summary", "body", "support_account__owner__email")
     autocomplete_fields = ("support_account", "category", "created_by", "updated_by")
     readonly_fields = ("slug", "published_at", "view_count", "helpful_count", "not_helpful_count")
-    inlines = (SupportKnowledgeArticleWebsiteInline,)
+    inlines = (SupportKnowledgeArticleWebsiteInline, SupportKnowledgeRelatedArticleInline, SupportKnowledgeArticleRevisionInline)
 
 
 @admin.register(SupportKnowledgeFeedback)
@@ -450,3 +512,122 @@ class SupportCallSignalAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(SupportRoutingPolicy)
+class SupportRoutingPolicyAdmin(admin.ModelAdmin):
+    list_display = ("website", "mode", "overflow_behavior", "enabled", "offline_reassignment_minutes")
+    list_filter = ("mode", "overflow_behavior", "enabled")
+    search_fields = ("website__name", "website__domain")
+
+@admin.register(SupportRoutingCursor)
+class SupportRoutingCursorAdmin(admin.ModelAdmin):
+    list_display = ("policy", "last_assigned_agent", "assignment_count", "updated_at")
+
+
+@admin.register(SupportKnowledgeArticleRevision)
+class SupportKnowledgeArticleRevisionAdmin(admin.ModelAdmin):
+    list_display = ("article", "version", "status", "created_by", "created_at")
+    list_filter = ("status", "language")
+    search_fields = ("article__title", "title", "change_note")
+    readonly_fields = ("article", "version", "title", "summary", "seo_description", "language", "body", "status", "category_name", "all_websites", "website_ids", "is_featured", "change_note", "created_by", "created_at", "updated_at")
+
+
+@admin.register(SupportKnowledgeRelatedArticle)
+class SupportKnowledgeRelatedArticleAdmin(admin.ModelAdmin):
+    list_display = ("article", "related_article", "sort_order")
+    search_fields = ("article__title", "related_article__title")
+    autocomplete_fields = ("article", "related_article")
+
+
+@admin.register(SupportConversationFollower)
+class SupportConversationFollowerAdmin(admin.ModelAdmin):
+    list_display = ("support_conversation", "user", "created_at")
+    search_fields = ("user__username", "support_conversation__subject")
+
+
+@admin.register(SupportConversationTransfer)
+class SupportConversationTransferAdmin(admin.ModelAdmin):
+    list_display = ("support_conversation", "from_agent", "to_agent", "from_team", "to_team", "created_at")
+    list_filter = ("from_team", "to_team")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(SupportInternalNoteMention)
+class SupportInternalNoteMentionAdmin(admin.ModelAdmin):
+    list_display = ("note", "user", "created_at")
+
+
+@admin.register(SupportSlaPolicy)
+class SupportSlaPolicyAdmin(admin.ModelAdmin):
+    list_display = ("name", "support_account", "website", "team", "is_active", "due_soon_minutes")
+    list_filter = ("is_active", "pause_while_waiting_customer", "escalate_on_breach")
+    search_fields = ("name", "support_account__owner__email", "website__name", "team__name")
+    autocomplete_fields = ("support_account", "website", "team", "escalation_team", "updated_by")
+
+
+@admin.register(SupportAnalyticsDailyMetric)
+class SupportAnalyticsDailyMetricAdmin(admin.ModelAdmin):
+    list_display = (
+        "metric_date", "support_account", "website", "team", "agent",
+        "conversations_created", "conversations_resolved", "sla_compliant_count",
+    )
+    list_filter = ("metric_date",)
+    search_fields = (
+        "support_account__owner__email", "website__name",
+        "team__name", "agent__user__email",
+    )
+    readonly_fields = tuple(field.name for field in SupportAnalyticsDailyMetric._meta.fields)
+
+
+@admin.register(SupportAnalyticsHourlyMetric)
+class SupportAnalyticsHourlyMetricAdmin(admin.ModelAdmin):
+    list_display = ("metric_date", "hour", "support_account", "website", "conversations_created")
+    list_filter = ("metric_date", "hour")
+    readonly_fields = tuple(field.name for field in SupportAnalyticsHourlyMetric._meta.fields)
+
+
+@admin.register(SupportAnalyticsTagMetric)
+class SupportAnalyticsTagMetricAdmin(admin.ModelAdmin):
+    list_display = ("metric_date", "support_account", "website", "tag", "conversation_count")
+    list_filter = ("metric_date",)
+    readonly_fields = tuple(field.name for field in SupportAnalyticsTagMetric._meta.fields)
+
+
+@admin.register(SupportAnalyticsExport)
+class SupportAnalyticsExportAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "support_account", "requested_by", "status", "format", "completed_at")
+    list_filter = ("status", "format")
+    search_fields = ("support_account__owner__email", "requested_by__email")
+    readonly_fields = ("created_at", "updated_at", "completed_at")
+
+
+@admin.register(SupportNotificationSettings)
+class SupportNotificationSettingsAdmin(admin.ModelAdmin):
+    list_display = ("support_account", "daily_summary", "daily_summary_hour", "updated_at")
+    search_fields = ("support_account__owner__email",)
+
+
+@admin.register(SupportSecuritySettings)
+class SupportSecuritySettingsAdmin(admin.ModelAdmin):
+    list_display = (
+        "support_account", "max_attachment_mb",
+        "retain_audit_days", "agent_session_timeout_minutes", "updated_at",
+    )
+    search_fields = ("support_account__owner__email",)
+
+
+@admin.register(SupportAutomationRule)
+class SupportAutomationRuleAdmin(admin.ModelAdmin):
+    list_display = ("name", "support_account", "trigger", "priority", "is_active", "updated_at")
+    list_filter = ("trigger", "is_active")
+    search_fields = ("name", "support_account__owner__email")
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(SupportAutomationExecution)
+class SupportAutomationExecutionAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "rule", "trigger", "status", "actions_executed", "duration_ms")
+    list_filter = ("status", "trigger")
+    search_fields = ("rule__name", "support_account__owner__email", "idempotency_key")
+    readonly_fields = tuple(field.name for field in SupportAutomationExecution._meta.fields)

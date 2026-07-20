@@ -94,6 +94,11 @@ class SupportAgent(BaseUUIDModel):
     can_view_all_conversations = models.BooleanField(default=False)
     can_assign_conversations = models.BooleanField(default=False)
     can_view_analytics = models.BooleanField(default=False)
+    can_manage_websites = models.BooleanField(default=False)
+    can_manage_knowledge = models.BooleanField(default=False)
+    can_manage_teams = models.BooleanField(default=False)
+    can_manage_automations = models.BooleanField(default=False)
+    can_export_data = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, db_index=True)
     invited_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -217,6 +222,11 @@ class SupportAgentInvitation(BaseUUIDModel):
     can_view_all_conversations = models.BooleanField(default=False)
     can_assign_conversations = models.BooleanField(default=False)
     can_view_analytics = models.BooleanField(default=False)
+    can_manage_websites = models.BooleanField(default=False)
+    can_manage_knowledge = models.BooleanField(default=False)
+    can_manage_teams = models.BooleanField(default=False)
+    can_manage_automations = models.BooleanField(default=False)
+    can_export_data = models.BooleanField(default=False)
     invited_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -256,6 +266,108 @@ class SupportAgentInvitation(BaseUUIDModel):
 
     def __str__(self):
         return f"SupportAgentInvitation<{self.support_account_id}:{self.email}:{self.status}>"
+
+
+class SupportTeam(BaseUUIDModel):
+    """Operational group used for website access, assignment, and reporting."""
+
+    support_account = models.ForeignKey(SupportAccount, on_delete=models.CASCADE, related_name="teams")
+    name = models.CharField(max_length=120)
+    description = models.CharField(max_length=255, blank=True)
+    default_max_active_conversations = models.PositiveSmallIntegerField(default=5)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="support_teams_created"
+    )
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [models.UniqueConstraint(Lower("name"), "support_account", name="uniq_support_team_name_ci")]
+        indexes = [models.Index(fields=["support_account", "is_active"], name="sup_team_acct_active_idx")]
+
+    def __str__(self):
+        return self.name
+
+
+class SupportTeamMembership(BaseUUIDModel):
+    team = models.ForeignKey(SupportTeam, on_delete=models.CASCADE, related_name="memberships")
+    agent = models.ForeignKey(SupportAgent, on_delete=models.CASCADE, related_name="team_memberships")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["team", "agent"], name="uniq_support_team_agent")]
+        indexes = [models.Index(fields=["team", "agent"], name="sup_team_agent_idx")]
+
+    def clean(self):
+        if self.team_id and self.agent_id and self.team.support_account_id != self.agent.support_account_id:
+            raise ValidationError("An agent can only join teams in the same Support Chat account.")
+
+
+class SupportWebsiteTeam(BaseUUIDModel):
+    website = models.ForeignKey(SupportWebsite, on_delete=models.CASCADE, related_name="team_assignments")
+    team = models.ForeignKey(SupportTeam, on_delete=models.CASCADE, related_name="website_assignments")
+    is_default = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["website", "team"], name="uniq_support_website_team"),
+            models.UniqueConstraint(fields=["website"], condition=Q(is_default=True), name="uniq_default_support_website_team"),
+        ]
+
+    def clean(self):
+        if self.website_id and self.team_id and self.website.support_account_id != self.team.support_account_id:
+            raise ValidationError("A team can only be assigned to websites in the same Support Chat account.")
+
+
+class SupportRoutingPolicy(BaseUUIDModel):
+    """Per-website automatic assignment policy for Support Chat."""
+
+    class Mode(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        ROUND_ROBIN = "round_robin", "Round robin"
+        LEAST_BUSY = "least_busy", "Least busy"
+
+    class Overflow(models.TextChoices):
+        LEAVE_UNASSIGNED = "leave_unassigned", "Leave unassigned"
+        LEAST_BUSY = "least_busy", "Assign to least-busy agent"
+        NOTIFY_OWNER = "notify_owner", "Notify owner"
+
+    website = models.OneToOneField(SupportWebsite, on_delete=models.CASCADE, related_name="routing_policy")
+    mode = models.CharField(max_length=24, choices=Mode.choices, default=Mode.MANUAL)
+    least_busy_tiebreaker = models.BooleanField(default=True)
+    overflow_behavior = models.CharField(max_length=24, choices=Overflow.choices, default=Overflow.LEAVE_UNASSIGNED)
+    offline_reassignment_minutes = models.PositiveSmallIntegerField(default=15)
+    prefer_previous_agent = models.BooleanField(default=True)
+    enabled = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="support_routing_policies_updated")
+
+    class Meta:
+        indexes = [models.Index(fields=["website", "enabled"], name="sup_route_site_enabled_idx")]
+
+    def __str__(self):
+        return f"SupportRoutingPolicy<{self.website_id}:{self.mode}>"
+
+
+class SupportRoutingCursor(BaseUUIDModel):
+    """Transactional cursor used by round-robin routing."""
+
+    policy = models.OneToOneField(SupportRoutingPolicy, on_delete=models.CASCADE, related_name="cursor")
+    last_assigned_agent = models.ForeignKey(SupportAgent, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    assignment_count = models.PositiveBigIntegerField(default=0)
+
+    def __str__(self):
+        return f"SupportRoutingCursor<{self.policy_id}:{self.assignment_count}>"
+
+
+class SupportAgentInvitationTeam(BaseUUIDModel):
+    invitation = models.ForeignKey(SupportAgentInvitation, on_delete=models.CASCADE, related_name="team_assignments")
+    team = models.ForeignKey(SupportTeam, on_delete=models.CASCADE, related_name="agent_invitation_assignments")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["invitation", "team"], name="uniq_support_invitation_team")]
+
+    def clean(self):
+        if self.invitation_id and self.team_id and self.invitation.support_account_id != self.team.support_account_id:
+            raise ValidationError("An invitation can only include teams from the same Support Chat account.")
 
 
 class SupportAgentInvitationWebsite(BaseUUIDModel):
@@ -351,6 +463,16 @@ class SupportServiceSettings(BaseUUIDModel):
     default_follow_up_minutes = models.PositiveIntegerField(default=1440)
     alert_owner = models.BooleanField(default=True)
     alert_assigned_agent = models.BooleanField(default=True)
+    pause_while_waiting_customer = models.BooleanField(default=True)
+    pause_resolution_while_snoozed = models.BooleanField(default=True)
+    escalate_on_breach = models.BooleanField(default=True)
+    escalation_team = models.ForeignKey(
+        "SupportTeam",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="service_escalation_settings",
+    )
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -364,6 +486,95 @@ class SupportServiceSettings(BaseUUIDModel):
 
     def __str__(self):
         return f"SupportServiceSettings<{self.support_account_id}>"
+
+
+class SupportSlaPolicy(BaseUUIDModel):
+    """Optional website/team SLA override. Account settings remain the fallback."""
+
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="sla_policies",
+    )
+    name = models.CharField(max_length=120)
+    website = models.ForeignKey(
+        SupportWebsite,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="sla_policies",
+    )
+    team = models.ForeignKey(
+        SupportTeam,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="sla_policies",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    first_response_targets = models.JSONField(default=dict, blank=True)
+    next_response_targets = models.JSONField(default=dict, blank=True)
+    resolution_targets = models.JSONField(default=dict, blank=True)
+    due_soon_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
+    pause_while_waiting_customer = models.BooleanField(null=True, blank=True)
+    pause_resolution_while_snoozed = models.BooleanField(null=True, blank=True)
+    alert_owner = models.BooleanField(null=True, blank=True)
+    alert_assigned_agent = models.BooleanField(null=True, blank=True)
+    escalate_on_breach = models.BooleanField(null=True, blank=True)
+    escalation_team = models.ForeignKey(
+        SupportTeam,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sla_policy_escalations",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_sla_policies_updated",
+    )
+
+    class Meta:
+        ordering = ["name", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(website__isnull=False, team__isnull=True)
+                    | models.Q(website__isnull=True, team__isnull=False)
+                ),
+                name="support_sla_policy_one_scope",
+            ),
+            models.UniqueConstraint(
+                fields=["support_account", "website"],
+                condition=models.Q(website__isnull=False),
+                name="uniq_support_sla_policy_website",
+            ),
+            models.UniqueConstraint(
+                fields=["support_account", "team"],
+                condition=models.Q(team__isnull=False),
+                name="uniq_support_sla_policy_team",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["support_account", "is_active"], name="sup_sla_policy_acct_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if bool(self.website_id) == bool(self.team_id):
+            raise ValidationError("Choose exactly one website or team scope.")
+        if self.website_id and self.website.support_account_id != self.support_account_id:
+            raise ValidationError("Website must belong to the same Support account.")
+        if self.team_id and self.team.support_account_id != self.support_account_id:
+            raise ValidationError("Team must belong to the same Support account.")
+        if self.escalation_team_id and self.escalation_team.support_account_id != self.support_account_id:
+            raise ValidationError("Escalation team must belong to the same Support account.")
+
+    def __str__(self):
+        scope = self.website or self.team
+        return f"SupportSlaPolicy<{self.name}:{scope}>"
 
 
 class SupportVisitor(BaseUUIDModel):
@@ -551,6 +762,7 @@ class SupportConversation(BaseUUIDModel):
         OPEN = "open", "Open"
         WAITING_CUSTOMER = "waiting_customer", "Waiting for customer"
         WAITING_TEAM = "waiting_team", "Waiting for team"
+        SNOOZED = "snoozed", "Snoozed"
         RESOLVED = "resolved", "Resolved"
         CLOSED = "closed", "Closed"
 
@@ -582,6 +794,15 @@ class SupportConversation(BaseUUIDModel):
         on_delete=models.SET_NULL,
         related_name="assigned_conversations",
     )
+    assigned_team = models.ForeignKey(
+        SupportTeam,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="assigned_conversations",
+    )
+    assigned_at = models.DateTimeField(null=True, blank=True)
+    assignment_trigger = models.CharField(max_length=40, blank=True)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.NEW, db_index=True)
     priority = models.CharField(max_length=16, choices=Priority.choices, default=Priority.NORMAL, db_index=True)
     subject = models.CharField(max_length=255, blank=True)
@@ -610,6 +831,11 @@ class SupportConversation(BaseUUIDModel):
     first_response_breached_at = models.DateTimeField(null=True, blank=True)
     next_response_breached_at = models.DateTimeField(null=True, blank=True)
     resolution_breached_at = models.DateTimeField(null=True, blank=True)
+    sla_paused_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    sla_pause_reason = models.CharField(max_length=40, blank=True)
+    sla_total_paused_seconds = models.PositiveBigIntegerField(default=0)
+    sla_last_recalculated_at = models.DateTimeField(null=True, blank=True)
+    sla_escalated_at = models.DateTimeField(null=True, blank=True)
     follow_up_at = models.DateTimeField(null=True, blank=True, db_index=True)
     follow_up_note = models.CharField(max_length=255, blank=True)
     follow_up_created_by = models.ForeignKey(
@@ -620,6 +846,27 @@ class SupportConversation(BaseUUIDModel):
         related_name="support_follow_ups_created",
     )
     follow_up_completed_at = models.DateTimeField(null=True, blank=True)
+    follow_up_assignee = models.ForeignKey(
+        SupportAgent,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="follow_up_conversations",
+    )
+    previous_status = models.CharField(max_length=24, choices=Status.choices, blank=True)
+    snoozed_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    snoozed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_conversations_snoozed",
+    )
+    resolution_reason = models.CharField(max_length=120, blank=True)
+    closure_reason = models.CharField(max_length=120, blank=True)
+    reopened_at = models.DateTimeField(null=True, blank=True)
+    reopen_count = models.PositiveIntegerField(default=0)
+    revision_number = models.PositiveBigIntegerField(default=1)
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
@@ -628,11 +875,15 @@ class SupportConversation(BaseUUIDModel):
         indexes = [
             models.Index(fields=["website", "status", "updated_at"], name="sup_conv_site_stat_upd_idx"),
             models.Index(fields=["assigned_agent", "status"], name="sup_conv_agent_status_idx"),
+            models.Index(fields=["assigned_team", "status"], name="sup_conv_team_status_idx"),
             models.Index(fields=["priority", "status"], name="sup_conv_prio_status_idx"),
             models.Index(fields=["status", "first_response_due_at"], name="sup_conv_first_due_idx"),
             models.Index(fields=["status", "next_response_due_at"], name="sup_conv_next_due_idx"),
             models.Index(fields=["status", "resolution_due_at"], name="sup_conv_res_due_idx"),
+            models.Index(fields=["status", "sla_paused_at"], name="sup_conv_sla_pause_idx"),
             models.Index(fields=["status", "follow_up_at"], name="sup_conv_follow_due_idx"),
+            models.Index(fields=["status", "snoozed_until"], name="sup_conv_snooze_due_idx"),
+            models.Index(fields=["follow_up_assignee", "follow_up_at"], name="sup_conv_follow_agent_idx"),
         ]
 
     def clean(self):
@@ -644,6 +895,8 @@ class SupportConversation(BaseUUIDModel):
             and self.assigned_agent.support_account_id != self.website.support_account_id
         ):
             raise ValidationError("The assigned agent must belong to the same Support Chat account.")
+        if self.assigned_team_id and self.website_id and self.assigned_team.support_account_id != self.website.support_account_id:
+            raise ValidationError("The assigned team must belong to the same Support Chat account.")
 
     def __str__(self):
         return f"SupportConversation<{self.website_id}:{self.visitor_id}:{self.status}>"
@@ -853,6 +1106,111 @@ class SupportInternalNote(BaseUUIDModel):
         return f"SupportInternalNote<{self.support_conversation_id}:{self.author_id}>"
 
 
+class SupportConversationFollower(BaseUUIDModel):
+    """Agent or owner following a conversation for private notifications."""
+
+    support_conversation = models.ForeignKey(
+        SupportConversation,
+        on_delete=models.CASCADE,
+        related_name="followers",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="followed_support_conversations",
+    )
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_followers_added",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["support_conversation", "user"],
+                name="uniq_support_conversation_follower",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="sup_follow_user_time_idx"),
+        ]
+
+
+class SupportInternalNoteMention(BaseUUIDModel):
+    """Explicit mention inside a private internal note."""
+
+    note = models.ForeignKey(
+        SupportInternalNote,
+        on_delete=models.CASCADE,
+        related_name="mentions",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="support_note_mentions",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["note", "user"], name="uniq_support_note_mention")
+        ]
+
+
+class SupportConversationTransfer(BaseUUIDModel):
+    """Immutable team/agent handover record."""
+
+    support_conversation = models.ForeignKey(
+        SupportConversation,
+        on_delete=models.CASCADE,
+        related_name="transfers",
+    )
+    from_agent = models.ForeignKey(
+        SupportAgent,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    to_agent = models.ForeignKey(
+        SupportAgent,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    from_team = models.ForeignKey(
+        SupportTeam,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    to_team = models.ForeignKey(
+        SupportTeam,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    transferred_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_transfers_created",
+    )
+    note = models.TextField(max_length=2000, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["support_conversation", "created_at"], name="sup_transfer_conv_time_idx"),
+        ]
+
+
 class SupportCannedReply(BaseUUIDModel):
     """Reusable reply available account-wide or restricted to one website."""
 
@@ -1051,6 +1409,8 @@ class SupportServiceAlert(BaseUUIDModel):
         RESOLUTION_DUE_SOON = "resolution_due_soon", "Resolution due soon"
         RESOLUTION_OVERDUE = "resolution_overdue", "Resolution overdue"
         FOLLOW_UP_DUE = "follow_up_due", "Follow-up due"
+        ROUTING_UNASSIGNED = "routing_unassigned", "Routing left conversation unassigned"
+        SLA_ESCALATED = "sla_escalated", "SLA breach escalated"
 
     class Status(models.TextChoices):
         UNREAD = "unread", "Unread"
@@ -1209,6 +1569,414 @@ class SupportCSATSurvey(BaseUUIDModel):
         return f"SupportCSATSurvey<{self.support_conversation_id}:{self.status}>"
 
 
+class SupportNotificationSettings(BaseUUIDModel):
+    support_account = models.OneToOneField(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="notification_settings",
+    )
+    new_conversation = models.BooleanField(default=True)
+    assignment_changed = models.BooleanField(default=True)
+    sla_due_soon = models.BooleanField(default=True)
+    sla_breached = models.BooleanField(default=True)
+    internal_mention = models.BooleanField(default=True)
+    follow_up_due = models.BooleanField(default=True)
+    daily_summary = models.BooleanField(default=False)
+    daily_summary_hour = models.PositiveSmallIntegerField(default=8)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_notification_settings_updated",
+    )
+
+    class Meta:
+        verbose_name_plural = "Support notification settings"
+
+    def clean(self):
+        if not 0 <= int(self.daily_summary_hour or 0) <= 23:
+            raise ValidationError({"daily_summary_hour": "Choose an hour between 0 and 23."})
+
+
+class SupportSecuritySettings(BaseUUIDModel):
+    support_account = models.OneToOneField(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="security_settings",
+    )
+    require_verified_identity_for_sensitive_actions = models.BooleanField(default=False)
+    block_unverified_attachments = models.BooleanField(default=False)
+    max_attachment_mb = models.PositiveSmallIntegerField(default=25)
+    allowed_attachment_extensions = models.JSONField(
+        default=list,
+        blank=True,
+    )
+    retain_audit_days = models.PositiveIntegerField(default=730)
+    webhook_failure_disable_threshold = models.PositiveSmallIntegerField(default=20)
+    agent_session_timeout_minutes = models.PositiveIntegerField(default=1440)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_security_settings_updated",
+    )
+
+    class Meta:
+        verbose_name_plural = "Support security settings"
+
+    def clean(self):
+        errors = {}
+        if not 1 <= int(self.max_attachment_mb or 0) <= 100:
+            errors["max_attachment_mb"] = "Choose between 1 and 100 MB."
+        if not 30 <= int(self.retain_audit_days or 0) <= 3650:
+            errors["retain_audit_days"] = "Choose between 30 and 3,650 days."
+        if not 3 <= int(self.webhook_failure_disable_threshold or 0) <= 100:
+            errors["webhook_failure_disable_threshold"] = "Choose between 3 and 100."
+        if not 15 <= int(self.agent_session_timeout_minutes or 0) <= 10080:
+            errors["agent_session_timeout_minutes"] = "Choose between 15 minutes and 7 days."
+        if not isinstance(self.allowed_attachment_extensions, list):
+            errors["allowed_attachment_extensions"] = "Use a list of file extensions."
+        if errors:
+            raise ValidationError(errors)
+
+
+class SupportAutomationRule(BaseUUIDModel):
+    class Trigger(models.TextChoices):
+        CONVERSATION_CREATED = "conversation_created", "Conversation created"
+        VISITOR_MESSAGE = "visitor_message", "Visitor message"
+        AGENT_MESSAGE = "agent_message", "Agent message"
+        STATUS_CHANGED = "status_changed", "Status changed"
+        ASSIGNMENT_CHANGED = "assignment_changed", "Assignment changed"
+        TAG_ADDED = "tag_added", "Tag added"
+        SLA_DUE_SOON = "sla_due_soon", "SLA due soon"
+        SLA_BREACHED = "sla_breached", "SLA breached"
+        FOLLOW_UP_DUE = "follow_up_due", "Follow-up due"
+
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="automation_rules",
+    )
+    name = models.CharField(max_length=140)
+    description = models.CharField(max_length=500, blank=True)
+    trigger = models.CharField(max_length=40, choices=Trigger.choices, db_index=True)
+    conditions = models.JSONField(default=list, blank=True)
+    actions = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    priority = models.PositiveSmallIntegerField(default=100, db_index=True)
+    stop_processing = models.BooleanField(default=False)
+    execution_limit = models.PositiveSmallIntegerField(default=10)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_automation_rules_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_automation_rules_updated",
+    )
+
+    class Meta:
+        ordering = ["priority", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["support_account", "name"],
+                name="uniq_support_automation_name",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["support_account", "trigger", "is_active", "priority"],
+                name="sup_auto_acct_trigger_idx",
+            )
+        ]
+
+    def clean(self):
+        errors = {}
+        if not isinstance(self.conditions, list):
+            errors["conditions"] = "Conditions must be a list."
+        if not isinstance(self.actions, list) or not self.actions:
+            errors["actions"] = "Add at least one action."
+        if not 1 <= int(self.execution_limit or 0) <= 25:
+            errors["execution_limit"] = "Choose between 1 and 25 actions."
+        allowed_condition_types = {
+            "website", "team", "priority", "status", "tag",
+            "business_hours", "verified_visitor", "assignment_state",
+        }
+        allowed_action_types = {
+            "route", "assign_team", "set_priority", "add_tag",
+            "send_response", "notify_owner", "notify_agent",
+            "set_follow_up", "trigger_webhook",
+        }
+        for item in self.conditions if isinstance(self.conditions, list) else []:
+            if not isinstance(item, dict) or item.get("type") not in allowed_condition_types:
+                errors["conditions"] = "One or more conditions are unsupported."
+                break
+        for item in self.actions if isinstance(self.actions, list) else []:
+            if not isinstance(item, dict) or item.get("type") not in allowed_action_types:
+                errors["actions"] = "One or more actions are unsupported."
+                break
+        if errors:
+            raise ValidationError(errors)
+
+
+class SupportAutomationExecution(BaseUUIDModel):
+    class Status(models.TextChoices):
+        STARTED = "started", "Started"
+        SUCCEEDED = "succeeded", "Succeeded"
+        SKIPPED = "skipped", "Skipped"
+        FAILED = "failed", "Failed"
+
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="automation_executions",
+    )
+    rule = models.ForeignKey(
+        SupportAutomationRule,
+        on_delete=models.CASCADE,
+        related_name="executions",
+    )
+    support_conversation = models.ForeignKey(
+        "SupportConversation",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="automation_executions",
+    )
+    trigger = models.CharField(max_length=40, db_index=True)
+    idempotency_key = models.CharField(max_length=160, unique=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.STARTED,
+        db_index=True,
+    )
+    actions_executed = models.PositiveSmallIntegerField(default=0)
+    duration_ms = models.PositiveIntegerField(default=0)
+    context = models.JSONField(default=dict, blank=True)
+    error = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["support_account", "status", "created_at"],
+                name="sup_auto_exec_acct_idx",
+            )
+        ]
+
+
+class SupportAnalyticsDailyMetric(BaseUUIDModel):
+    """Daily, account-scoped reporting aggregate.
+
+    Exactly one optional dimension may be populated: website, team, or agent.
+    With no dimension populated the row represents the whole Support account.
+    """
+
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="analytics_daily_metrics",
+    )
+    metric_date = models.DateField(db_index=True)
+    website = models.ForeignKey(
+        SupportWebsite,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="analytics_daily_metrics",
+    )
+    team = models.ForeignKey(
+        SupportTeam,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="analytics_daily_metrics",
+    )
+    agent = models.ForeignKey(
+        SupportAgent,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="analytics_daily_metrics",
+    )
+    conversations_created = models.PositiveIntegerField(default=0)
+    conversations_resolved = models.PositiveIntegerField(default=0)
+    conversations_reopened = models.PositiveIntegerField(default=0)
+    messages_total = models.PositiveIntegerField(default=0)
+    visitor_messages = models.PositiveIntegerField(default=0)
+    agent_messages = models.PositiveIntegerField(default=0)
+    first_response_seconds_total = models.PositiveBigIntegerField(default=0)
+    first_response_count = models.PositiveIntegerField(default=0)
+    resolution_seconds_total = models.PositiveBigIntegerField(default=0)
+    resolution_count = models.PositiveIntegerField(default=0)
+    sla_eligible_count = models.PositiveIntegerField(default=0)
+    sla_compliant_count = models.PositiveIntegerField(default=0)
+    csat_rating_total = models.PositiveIntegerField(default=0)
+    csat_response_count = models.PositiveIntegerField(default=0)
+    unassigned_seconds_total = models.PositiveBigIntegerField(default=0)
+    handled_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["support_account", "metric_date", "website", "team", "agent"],
+                name="uniq_support_daily_metric_scope",
+                nulls_distinct=False,
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(website__isnull=True, team__isnull=True, agent__isnull=True)
+                    | models.Q(website__isnull=False, team__isnull=True, agent__isnull=True)
+                    | models.Q(website__isnull=True, team__isnull=False, agent__isnull=True)
+                    | models.Q(website__isnull=True, team__isnull=True, agent__isnull=False)
+                ),
+                name="support_daily_metric_one_dimension",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["support_account", "metric_date"],
+                name="sup_metric_acct_date_idx",
+            ),
+            models.Index(
+                fields=["website", "metric_date"],
+                name="sup_metric_site_date_idx",
+            ),
+            models.Index(
+                fields=["team", "metric_date"],
+                name="sup_metric_team_date_idx",
+            ),
+            models.Index(
+                fields=["agent", "metric_date"],
+                name="sup_metric_agent_date_idx",
+            ),
+        ]
+
+
+class SupportAnalyticsHourlyMetric(BaseUUIDModel):
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="analytics_hourly_metrics",
+    )
+    metric_date = models.DateField(db_index=True)
+    hour = models.PositiveSmallIntegerField()
+    website = models.ForeignKey(
+        SupportWebsite,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="analytics_hourly_metrics",
+    )
+    conversations_created = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["support_account", "metric_date", "hour", "website"],
+                name="uniq_support_hourly_metric_scope",
+                nulls_distinct=False,
+            ),
+            models.CheckConstraint(
+                condition=models.Q(hour__gte=0, hour__lte=23),
+                name="support_hour_between_0_23",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["support_account", "metric_date", "hour"],
+                name="sup_hour_acct_date_idx",
+            ),
+        ]
+
+
+class SupportAnalyticsTagMetric(BaseUUIDModel):
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="analytics_tag_metrics",
+    )
+    metric_date = models.DateField(db_index=True)
+    tag = models.ForeignKey(
+        SupportTag,
+        on_delete=models.CASCADE,
+        related_name="analytics_metrics",
+    )
+    website = models.ForeignKey(
+        SupportWebsite,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="analytics_tag_metrics",
+    )
+    conversation_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["support_account", "metric_date", "tag", "website"],
+                name="uniq_support_tag_metric_scope",
+                nulls_distinct=False,
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["support_account", "metric_date"],
+                name="sup_tag_metric_date_idx",
+            ),
+        ]
+
+
+class SupportAnalyticsExport(BaseUUIDModel):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
+    support_account = models.ForeignKey(
+        SupportAccount,
+        on_delete=models.CASCADE,
+        related_name="analytics_exports",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_analytics_exports",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.QUEUED,
+        db_index=True,
+    )
+    format = models.CharField(max_length=12, default="csv")
+    filters = models.JSONField(default=dict, blank=True)
+    file_key = models.CharField(max_length=500, blank=True)
+    error_message = models.TextField(blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["support_account", "status", "created_at"],
+                name="sup_export_acct_status_idx",
+            )
+        ]
+
+
 class SupportKnowledgeSettings(BaseUUIDModel):
     """Account-level controls for visitor self-service and team knowledge tools."""
 
@@ -1315,6 +2083,8 @@ class SupportKnowledgeArticle(BaseUUIDModel):
     title = models.CharField(max_length=180)
     slug = models.SlugField(max_length=200)
     summary = models.CharField(max_length=320, blank=True)
+    seo_description = models.CharField(max_length=160, blank=True)
+    language = models.CharField(max_length=12, default="en", db_index=True)
     body = models.TextField(max_length=30000)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT, db_index=True)
     all_websites = models.BooleanField(default=True)
@@ -1358,6 +2128,8 @@ class SupportKnowledgeArticle(BaseUUIDModel):
     def clean(self):
         self.title = (self.title or "").strip()
         self.summary = (self.summary or "").strip()
+        self.seo_description = (self.seo_description or "").strip()
+        self.language = (self.language or "en").strip().lower()[:12]
         self.body = (self.body or "").strip()
         if not self.title:
             raise ValidationError({"title": "Enter an article title."})
@@ -1368,6 +2140,74 @@ class SupportKnowledgeArticle(BaseUUIDModel):
 
     def __str__(self):
         return self.title
+
+
+class SupportKnowledgeArticleRevision(BaseUUIDModel):
+    """Immutable article snapshot used for review, rollback, and audit history."""
+
+    article = models.ForeignKey(
+        SupportKnowledgeArticle,
+        on_delete=models.CASCADE,
+        related_name="revisions",
+    )
+    version = models.PositiveIntegerField()
+    title = models.CharField(max_length=180)
+    summary = models.CharField(max_length=320, blank=True)
+    seo_description = models.CharField(max_length=160, blank=True)
+    language = models.CharField(max_length=12, default="en")
+    body = models.TextField(max_length=30000)
+    status = models.CharField(max_length=16, choices=SupportKnowledgeArticle.Status.choices)
+    category_name = models.CharField(max_length=100, blank=True)
+    all_websites = models.BooleanField(default=True)
+    website_ids = models.JSONField(default=list, blank=True)
+    is_featured = models.BooleanField(default=False)
+    change_note = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_knowledge_revisions_created",
+    )
+
+    class Meta:
+        ordering = ["-version"]
+        constraints = [models.UniqueConstraint(fields=["article", "version"], name="uniq_support_kb_revision_version")]
+        indexes = [models.Index(fields=["article", "-version"], name="sup_kb_revision_article_idx")]
+
+    def __str__(self):
+        return f"{self.article_id}:v{self.version}"
+
+
+class SupportKnowledgeRelatedArticle(BaseUUIDModel):
+    """Directed related-article link, scoped to one Support account."""
+
+    article = models.ForeignKey(
+        SupportKnowledgeArticle,
+        on_delete=models.CASCADE,
+        related_name="related_links",
+    )
+    related_article = models.ForeignKey(
+        SupportKnowledgeArticle,
+        on_delete=models.CASCADE,
+        related_name="related_to_links",
+    )
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["article", "related_article"], name="uniq_support_kb_related_article"),
+            models.CheckConstraint(condition=~Q(article=F("related_article")), name="support_kb_related_not_self"),
+        ]
+
+    def clean(self):
+        if self.article_id and self.related_article_id:
+            if self.article.support_account_id != self.related_article.support_account_id:
+                raise ValidationError("Related articles must belong to the same Support account.")
+
+    def __str__(self):
+        return f"{self.article_id}->{self.related_article_id}"
 
 
 class SupportKnowledgeArticleWebsite(BaseUUIDModel):
