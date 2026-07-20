@@ -117,6 +117,8 @@ export function useSupportRealtime() {
         payload.event === "support.visitor.presence" ||
         payload.event === "support.typing.started" ||
         payload.event === "support.typing.stopped" ||
+        payload.event === "support.message.delivered" ||
+        payload.event === "support.message.read" ||
         payload.event === "support.call.signal"
       ) {
         return;

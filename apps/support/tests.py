@@ -606,6 +606,61 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(first.data["client_temp_id"], "team-once-1")
         self.assertEqual(Message.objects.filter(client_temp_id="team-once-1").count(), 1)
 
+    def test_team_message_polling_does_not_consume_send_limit(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        created = self._visitor_message(website, session, "Need help")
+        endpoint = f"/api/v1/support/conversations/{created.data['conversation']['id']}/messages/"
+        self.client.force_authenticate(self.owner)
+        cache.clear()
+        try:
+            with patch.object(UnsafeScopedRateThrottle, "get_rate", return_value="1/min"):
+                self.assertEqual(self.client.get(endpoint).status_code, 200)
+                self.assertEqual(
+                    self.client.post(
+                        endpoint,
+                        {"text": "Allowed after polling", "client_temp_id": "team-throttle-1"},
+                        format="json",
+                    ).status_code,
+                    201,
+                )
+                self.assertEqual(
+                    self.client.post(
+                        endpoint,
+                        {"text": "Actually rate limited", "client_temp_id": "team-throttle-2"},
+                        format="json",
+                    ).status_code,
+                    429,
+                )
+        finally:
+            cache.clear()
+
+    def test_repeated_team_message_reads_publish_one_receipt(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+        created = self._visitor_message(website, session, "Need help")
+        endpoint = f"/api/v1/support/conversations/{created.data['conversation']['id']}/messages/"
+        self.client.force_authenticate(self.owner)
+
+        with patch("apps.support.conversation_services._publish_receipt_event") as publish_receipt:
+            self.assertEqual(self.client.get(endpoint).status_code, 200)
+            self.assertEqual(self.client.get(endpoint).status_code, 200)
+
+        self.assertEqual(publish_receipt.call_count, 1)
+        self.assertEqual(publish_receipt.call_args.kwargs["event_name"], "support.message.read")
+
     def test_owner_inbox_reply_returns_to_widget_but_not_messenger_list(self):
         account = self.active_account()
         website = SupportWebsite.objects.create(

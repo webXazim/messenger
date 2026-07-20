@@ -1418,6 +1418,9 @@ class SupportWidgetAttachmentThumbnailView(SupportWidgetAttachmentAccessView):
 
 
 class SupportConversationMessagesView(APIView):
+    throttle_classes = [UnsafeScopedRateThrottle]
+    throttle_scope = "support_message_send"
+
     def get(self, request, conversation_id):
         context, error = require_support_access(request)
         if error:
@@ -1428,10 +1431,10 @@ class SupportConversationMessagesView(APIView):
             return support_conversation_error_response(conversation_error)
         messages = list(support_messages_qs(conversation))
         mark_team_read(
-                support_conversation=conversation,
-                user=request.user,
-                message_id=request.data.get("message_id") or None,
-            )
+            support_conversation=conversation,
+            user=request.user,
+            message_id=request.data.get("message_id") or None,
+        )
         return Response({
             "conversation": SupportConversationSerializer(conversation, context={"user": request.user, "request": request}).data,
             "messages": SupportMessageSerializer(

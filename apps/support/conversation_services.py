@@ -652,6 +652,21 @@ def mark_team_read(
         support_conversation=support_conversation,
         user=user,
     )
+    if not last_message:
+        return state
+    if state.last_read_message_id:
+        if state.last_read_message_id == last_message.id:
+            return state
+        if (
+            state.last_read_message.created_at,
+            state.last_read_message.id,
+        ) >= (
+            last_message.created_at,
+            last_message.id,
+        ):
+            return state
+
+    update_fields = ["last_read_message", "last_read_at", "updated_at"]
     if last_message and (
         not state.last_delivered_message_id
         or (
@@ -661,15 +676,10 @@ def mark_team_read(
     ):
         state.last_delivered_message = last_message
         state.last_delivered_at = timezone.now()
+        update_fields.extend(["last_delivered_message", "last_delivered_at"])
     state.last_read_message = last_message
     state.last_read_at = timezone.now()
-    state.save(update_fields=[
-        "last_delivered_message",
-        "last_delivered_at",
-        "last_read_message",
-        "last_read_at",
-        "updated_at",
-    ])
+    state.save(update_fields=update_fields)
     _publish_receipt_event(
         support_conversation=support_conversation,
         event_name="support.message.read",

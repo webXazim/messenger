@@ -230,6 +230,10 @@ assert.ok(supportInbox.includes("client_temp_id: clientTempId"), "Support agent 
 assert.ok(widgetLoader.includes("client_temp_id: clientTempId"), "Support visitor optimistic IDs are not persisted for idempotency.");
 assert.ok(widgetLoader.includes("payload.data.message_id || payload.data.id"), "Widget realtime delivery receipts do not resolve the authoritative message ID.");
 assert.ok(supportViews.includes("throttle_classes = [UnsafeScopedRateThrottle]"), "Support message polling still consumes the visitor send-rate bucket.");
+assert.ok(supportViews.includes('throttle_scope = "support_message_send"'), "Agent Support sends do not have an isolated throttle budget.");
+assert.ok(supportRealtime.includes('payload.event === "support.message.delivered"'), "Support delivery receipts still trigger message-history refetches.");
+assert.ok(supportRealtime.includes('payload.event === "support.message.read"'), "Support read receipts still trigger message-history refetches.");
+assert.ok(!supportInbox.includes("supportApi.markConversationDelivered(selectedId"), "Support Inbox refetches still emit redundant delivery receipts.");
 assert.ok(supportViews.includes('"conversation_id": str(conversation_id or "")'), "Widget tickets do not report whether their conversation audience is ready.");
 assert.ok(throttling.includes("class UnsafeScopedRateThrottle"), "Unsafe-only scoped throttling is missing.");
 assert.ok(widgetLoader.includes("sendQueue: Promise.resolve()"), "Widget sends are not serialized.");

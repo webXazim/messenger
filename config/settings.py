@@ -277,6 +277,7 @@ REST_FRAMEWORK = {
         "support_widget_session": env_str("SUPPORT_WIDGET_SESSION_RATE", "30/min"),
         "support_widget_resume": env_str("SUPPORT_WIDGET_RESUME_RATE", "120/min"),
         "support_widget_message": env_str("SUPPORT_WIDGET_MESSAGE_RATE", "60/min"),
+        "support_message_send": env_str("SUPPORT_MESSAGE_SEND_RATE", "120/min"),
         "support_upload_create": env_str("SUPPORT_UPLOAD_CREATE_RATE", "20/min"),
         "support_widget_upload": env_str("SUPPORT_WIDGET_UPLOAD_RATE", "12/min"),
         "support_call_action": env_str("SUPPORT_CALL_ACTION_RATE", "30/min"),

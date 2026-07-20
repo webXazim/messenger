@@ -769,18 +769,6 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     });
   }, [queryClient, selectedConversation?.visitor.id, selectedId]);
 
-  useEffect(() => {
-    const messages = messagesQuery.data?.messages || [];
-    const latestVisitorMessage = [...messages]
-      .reverse()
-      .find((message) => message.sender.kind === "visitor");
-    if (!selectedId || !latestVisitorMessage) return;
-    void supportApi.markConversationDelivered(selectedId, latestVisitorMessage.id);
-    if (document.visibilityState === "visible") {
-      void supportApi.markConversationRead(selectedId, latestVisitorMessage.id);
-    }
-  }, [messagesQuery.data?.messages, selectedId, socketStatus]);
-
   useEffect(() => () => {
     if (typingStopTimerRef.current) window.clearTimeout(typingStopTimerRef.current);
     if (typingVisitorTimerRef.current) window.clearTimeout(typingVisitorTimerRef.current);
