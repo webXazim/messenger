@@ -43,6 +43,8 @@ class SupportSocketClient {
   private grants = new Map<string, string>();
   private reconnectTimer: number | null = null;
   private heartbeatTimer: number | null = null;
+  private connectionTimer: number | null = null;
+  private lastPongAt = 0;
   private reconnectAttempts = 0;
   private manualClose = false;
   private listeners = new Set<EventListener>();
@@ -78,6 +80,7 @@ class SupportSocketClient {
     this.generation += 1;
     this.clearReconnect();
     this.stopHeartbeat();
+    this.clearConnectionTimer();
     const current = this.socket;
     this.socket = null;
     this.activeToken = "";
@@ -110,6 +113,7 @@ class SupportSocketClient {
     this.generation += 1;
     this.clearReconnect();
     this.stopHeartbeat();
+    this.clearConnectionTimer();
     const previous = this.socket;
     this.socket = null;
     this.activeToken = "";
@@ -135,6 +139,14 @@ class SupportSocketClient {
       this.socket = socket;
       this.activeToken = token;
       this.attachSocketHandlers(socket, generation);
+      this.connectionTimer = window.setTimeout(() => {
+        if (this.socket !== socket || socket.readyState === WebSocket.OPEN) return;
+        try { socket.close(); } catch { /* no-op */ }
+        this.socket = null;
+        this.activeToken = "";
+        this.emitStatus("closed");
+        this.scheduleReconnect();
+      }, 10000);
     } catch (error) {
       if (generation !== this.generation || this.manualClose) return;
       this.emitStatus("closed");
@@ -149,6 +161,8 @@ class SupportSocketClient {
   private attachSocketHandlers(socket: WebSocket, generation: number) {
     socket.onopen = () => {
       if (this.socket !== socket || generation !== this.generation) return;
+      this.clearConnectionTimer();
+      this.lastPongAt = Date.now();
       this.reconnectAttempts = 0;
       this.emitStatus("open");
       for (const websiteId of this.websiteIds) {
@@ -161,6 +175,7 @@ class SupportSocketClient {
     socket.onerror = () => { if (this.socket === socket) this.emitStatus("closed"); };
     socket.onclose = (event) => {
       if (this.socket !== socket) return;
+      this.clearConnectionTimer();
       this.stopHeartbeat();
       this.socket = null;
       this.activeToken = "";
@@ -178,6 +193,7 @@ class SupportSocketClient {
       try {
         const payload = JSON.parse(event.data) as SupportSocketEvent;
         if (!payload?.event || this.isDuplicate(payload)) return;
+        this.lastPongAt = Date.now();
         if (payload.event === "connection.ready") {
           const ready: SupportSocketEvent = {
             event: "support.ready",
@@ -194,6 +210,14 @@ class SupportSocketClient {
   }
 
   private sendPing() {
+    if (
+      this.socket?.readyState === WebSocket.OPEN
+      && this.lastPongAt
+      && Date.now() - this.lastPongAt > 55000
+    ) {
+      try { this.socket.close(); } catch { /* no-op */ }
+      return;
+    }
     this.send({ event: "support.ping", data: {} });
   }
 
@@ -206,6 +230,11 @@ class SupportSocketClient {
   private stopHeartbeat() {
     if (this.heartbeatTimer) window.clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
+  }
+
+  private clearConnectionTimer() {
+    if (this.connectionTimer) window.clearTimeout(this.connectionTimer);
+    this.connectionTimer = null;
   }
 
   private scheduleReconnect() {

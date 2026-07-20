@@ -953,6 +953,14 @@ class SupportWidgetRealtimeTicketView(APIView):
                 origin=origin,
             )
             issued = issue_widget_realtime_ticket(session=session, origin=origin)
+            conversation_id = (
+                SupportConversation.objects.filter(
+                    website=session.website,
+                    visitor=session.visitor,
+                )
+                .values_list("id", flat=True)
+                .first()
+            )
         except WidgetAccessError as error:
             return widget_error_response(error)
         except RealtimeCredentialError as error:
@@ -963,6 +971,7 @@ class SupportWidgetRealtimeTicketView(APIView):
                 "expires_in": issued.expires_in,
                 "expires_at": issued.expires_at,
                 "protocol_version": 1,
+                "conversation_id": str(conversation_id or ""),
             },
             status_code=status.HTTP_201_CREATED,
         )

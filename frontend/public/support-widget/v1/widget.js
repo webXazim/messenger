@@ -13,14 +13,19 @@
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
-  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, socket: null, socketState: "closed", reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
+  var state = { config: null, session: null, token: "", messages: [], csat: null, csatRating: 0, csatComment: "", csatSubmitting: false, deletionSubmitting: false, deletionRequested: false, knowledge: { enabled: false, categories: [], articles: [], allow_feedback: false }, knowledgeQuery: "", selectedArticle: null, knowledgeLoading: false, open: false, closing: false, closeTimer: 0, loading: false, uploading: false, error: "", timer: 0, pollInFlight: false, socket: null, socketState: "closed", socketConnectTimer: 0, reconnectTimer: 0, reconnectAttempts: 0, heartbeatTimer: 0, lastPongAt: 0, realtimeConversationReady: false, hasUnread: false, pendingUploads: [], draft: "", composerFocusRequested: false, visitorTyping: false, teamTyping: false, teamTypingShownAt: 0, teamTypingHideTimer: 0, typingStopTimer: 0, sendQueue: Promise.resolve(), lastActivityUrl: "", lastReceiptAckId: "", lastReceiptAckStatus: "", recorder: null, recording: false, recordingStartedAt: 0, recordingChunks: [], objectUrls: [], followLatest: true, call: null, callStarting: false, callPeer: null, callLocalStream: null, callRemoteStream: null, callSignalTimer: 0, callSeenSignals: {}, callDeferredSignals: [], callDeferredIce: [] };
   var host = null;
   var shadow = null;
 
   function request(path, options) {
-    var init = options || {};
+    var init = Object.assign({}, options || {});
+    var timeoutMs = Math.max(1000, Number(init.timeoutMs || 12000));
+    delete init.timeoutMs;
     var headers = Object.assign({ "Content-Type": "application/json" }, init.headers || {});
     if (state.token) headers.Authorization = "Bearer " + state.token;
+    var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timeout = controller ? window.setTimeout(function () { controller.abort(); }, timeoutMs) : 0;
+    if (controller) init.signal = controller.signal;
     return fetch(apiBase + path, Object.assign({}, init, { mode: "cors", credentials: "omit", cache: "no-store", headers: headers }))
       .then(function (response) {
         if (response.status === 204) return {};
@@ -33,7 +38,35 @@
           }
           return payload;
         });
+      })
+      .catch(function (error) {
+        if (error && error.name === "AbortError") {
+          var timeoutError = new Error("Support Chat timed out. Please try again.");
+          timeoutError.code = "request_timeout";
+          timeoutError.status = 0;
+          throw timeoutError;
+        }
+        throw error;
+      })
+      .finally(function () {
+        if (timeout) window.clearTimeout(timeout);
       });
+  }
+
+  function wait(milliseconds) {
+    return new Promise(function (resolve) { window.setTimeout(resolve, milliseconds); });
+  }
+
+  function sendMessageRequest(payload, attempt) {
+    return request(sessionPath("/conversation/messages/"), {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 10000
+    }).catch(function (error) {
+      var retryable = !Number(error && error.status);
+      if (!retryable || attempt >= 1) throw error;
+      return wait(350).then(function () { return sendMessageRequest(payload, attempt + 1); });
+    });
   }
 
   function uploadRequest(path, file, metadata, onProgress) {
@@ -117,6 +150,8 @@
     state.csatRating = 0;
     state.csatComment = "";
     state.hasUnread = false;
+    state.pollInFlight = false;
+    state.realtimeConversationReady = false;
     clearPendingUploads();
     cleanupCall(true);
     try { localStorage.removeItem(storageKey); } catch (_) {}
@@ -322,8 +357,9 @@
     state.error = "";
     render();
     scrollMessages();
+    var messagePayload = { client_temp_id: clientTempId, text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) };
     var task = state.sendQueue.catch(function () {}).then(function () {
-      return request(sessionPath("/conversation/messages/"), { method: "POST", body: JSON.stringify({ client_temp_id: clientTempId, text: body, attachment_ids: uploads, voice_note: Boolean(voiceNote) }) });
+      return sendMessageRequest(messagePayload, 0);
     });
     state.sendQueue = task.catch(function () {});
     return task
@@ -333,6 +369,11 @@
         });
         if (payload.message && replacementIndex >= 0) state.messages.splice(replacementIndex, 1, payload.message);
         else if (payload.message && !state.messages.some(function (message) { return message.id === payload.message.id; })) state.messages.push(payload.message);
+        if (!state.realtimeConversationReady && payload.conversation && payload.conversation.id) {
+          state.realtimeConversationReady = true;
+          closeRealtime(false);
+          connectRealtime();
+        }
         render();
         scrollMessages();
         return payload;
@@ -701,6 +742,8 @@
   function closeRealtime(manual) {
     if (state.reconnectTimer) window.clearTimeout(state.reconnectTimer);
     state.reconnectTimer = 0;
+    if (state.socketConnectTimer) window.clearTimeout(state.socketConnectTimer);
+    state.socketConnectTimer = 0;
     stopHeartbeat();
     var socket = state.socket;
     state.socket = null;
@@ -724,19 +767,37 @@
     state.socketState = "connecting";
     request(sessionPath("/realtime-ticket/"), { method: "POST", body: "{}" }).then(function (credential) {
       if (!state.session || !state.token || !credential || !credential.ticket) throw new Error("Realtime ticket unavailable.");
+      state.realtimeConversationReady = Boolean(credential.conversation_id);
       var socket;
       try {
         socket = new WebSocket(wsBase + "?ticket=" + encodeURIComponent(credential.ticket));
       } catch (_) { throw new Error("Realtime connection could not start."); }
       state.socket = socket;
+      state.socketConnectTimer = window.setTimeout(function () {
+        if (state.socket === socket && socket.readyState !== WebSocket.OPEN) {
+          try { socket.close(); } catch (_) {}
+          state.socket = null;
+          state.socketState = "closed";
+          startPolling();
+          scheduleRealtimeReconnect();
+        }
+      }, 10000);
       socket.onopen = function () {
       if (state.socket !== socket) return;
+      if (state.socketConnectTimer) window.clearTimeout(state.socketConnectTimer);
+      state.socketConnectTimer = 0;
       state.socketState = "open";
+      state.lastPongAt = Date.now();
       state.reconnectAttempts = 0;
       stopPolling();
       stopHeartbeat();
       state.heartbeatTimer = window.setInterval(function () {
-        if (state.socket === socket && socket.readyState === WebSocket.OPEN) sendRealtime("support.ping", {});
+        if (state.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - state.lastPongAt > 55000) {
+          try { socket.close(); } catch (_) {}
+          return;
+        }
+        sendRealtime("support.ping", {});
       }, 25000);
       reportVisitorActivity(true);
       if (state.open) render();
@@ -746,6 +807,7 @@
       if (state.socket !== socket) return;
       try {
         var payload = JSON.parse(event.data || "{}");
+        state.lastPongAt = Date.now();
         if (payload.event === "support.message.created") {
           var senderKind = payload.data && payload.data.sender ? payload.data.sender.kind : "";
           var incomingMessageId = payload.data ? (payload.data.message_id || payload.data.id || "") : "";
@@ -790,6 +852,8 @@
     socket.onerror = function () { if (state.socket === socket) state.socketState = "closed"; };
     socket.onclose = function () {
       if (state.socket !== socket) return;
+      if (state.socketConnectTimer) window.clearTimeout(state.socketConnectTimer);
+      state.socketConnectTimer = 0;
       state.socket = null; state.socketState = "closed"; stopHeartbeat(); startPolling(); scheduleRealtimeReconnect();
       if (state.open) render();
     };
@@ -809,7 +873,13 @@
     stopPolling();
     if (!state.open || !state.session || state.socketState === "open") return;
     state.timer = window.setInterval(function () {
-      if (state.open && document.visibilityState === "visible") { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); }
+      if (!state.open || document.visibilityState !== "visible" || state.pollInFlight) return;
+      state.pollInFlight = true;
+      Promise.all([
+        loadMessages().catch(function () {}),
+        loadCSAT().catch(function () {}),
+        loadActiveCall().catch(function () {})
+      ]).finally(function () { state.pollInFlight = false; });
     }, 5000);
   }
 

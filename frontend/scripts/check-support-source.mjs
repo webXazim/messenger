@@ -219,12 +219,18 @@ assert.ok(appShell.includes("supportRealtime.socketStatus"), "Support and Messen
 assert.ok(supportInbox.includes('socketStatus === "open" ? false'), "Support polling fallback does not stop while realtime is healthy.");
 assert.ok(widgetLoader.includes("connectRealtime"), "Public widget realtime delivery is missing.");
 assert.ok(widgetLoader.includes("scheduleRealtimeReconnect"), "Public widget reconnect recovery is missing.");
+assert.ok(widgetLoader.includes("socketConnectTimer"), "Public widget can remain stuck in WebSocket CONNECTING.");
+assert.ok(widgetLoader.includes("Date.now() - state.lastPongAt > 55000"), "Public widget does not recover half-open WebSockets.");
+assert.ok(widgetLoader.includes("state.pollInFlight"), "Public widget fallback polling can overlap and overload the API.");
+assert.ok(widgetLoader.includes("sendMessageRequest(messagePayload, 0)"), "Public widget message sends lack bounded idempotent recovery.");
 assert.ok(supportSocket.includes('payload.event === "connection.ready"'), "Support sockets do not translate Axum readiness into recovery refreshes.");
+assert.ok(supportSocket.includes("Date.now() - this.lastPongAt > 55000"), "Support agent sockets do not recover half-open connections.");
 assert.ok(supportRealtime.includes('payload.event === "support.ready"'), "Support reconnects do not invalidate durable state.");
 assert.ok(supportInbox.includes("client_temp_id: clientTempId"), "Support agent optimistic IDs are not persisted for idempotency.");
 assert.ok(widgetLoader.includes("client_temp_id: clientTempId"), "Support visitor optimistic IDs are not persisted for idempotency.");
 assert.ok(widgetLoader.includes("payload.data.message_id || payload.data.id"), "Widget realtime delivery receipts do not resolve the authoritative message ID.");
 assert.ok(supportViews.includes("throttle_classes = [UnsafeScopedRateThrottle]"), "Support message polling still consumes the visitor send-rate bucket.");
+assert.ok(supportViews.includes('"conversation_id": str(conversation_id or "")'), "Widget tickets do not report whether their conversation audience is ready.");
 assert.ok(throttling.includes("class UnsafeScopedRateThrottle"), "Unsafe-only scoped throttling is missing.");
 assert.ok(widgetLoader.includes("sendQueue: Promise.resolve()"), "Widget sends are not serialized.");
 assert.ok(widgetLoader.includes("visitorTyping: false"), "Widget typing presence is not edge-triggered.");
