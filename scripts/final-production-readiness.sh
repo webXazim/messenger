@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 report="${1:-loadtests/results/capacity-report.json}"
 compose=(docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml)
 
-./scripts/production-readiness.sh --probe
-./scripts/operational-health.sh
+bash ./scripts/production-readiness.sh --probe
+bash ./scripts/operational-health.sh
 "${compose[@]}" exec -T web python manage.py emit_realtime_canary --timeout 30
 "${compose[@]}" exec -T web python manage.py audit_postgres_performance
 

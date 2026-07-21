@@ -13,12 +13,33 @@ fi
 import json
 from pathlib import Path
 import yaml
+ignored_parts = {
+    '.git', '.deployment-state', 'SNM', 'backups', 'node_modules',
+    'dist', 'secrets',
+}
 for path in Path('.').rglob('*.json'):
-    if any(part in {'node_modules', 'dist'} for part in path.parts):
+    if any(part in ignored_parts for part in path.parts):
         continue
     json.loads(path.read_text())
 for path in [Path('docker-compose.yml'), Path('docker-compose.local.yml'), Path('docker-compose.production.yml')]:
     yaml.safe_load(path.read_text())
+expected_services = {
+    'postgres', 'pgbouncer', 'redis', 'nats', 'web',
+    'worker', 'beat', 'realtime', 'frontend', 'nginx',
+}
+compose_services = set(yaml.safe_load(Path('docker-compose.yml').read_text())['services'])
+missing = expected_services - compose_services
+if missing:
+    raise SystemExit(f'Compose is missing required production services: {sorted(missing)}')
+for path in [
+    Path('scripts/deploy-axum-cutover.sh'),
+    Path('scripts/production-readiness.sh'),
+    Path('scripts/rollback-release.sh'),
+]:
+    script = path.read_text()
+    missing = {service for service in expected_services if service not in script}
+    if missing:
+        raise SystemExit(f'{path} is missing production services: {sorted(missing)}')
 print('Python, JSON, and YAML validation passed.')
 PY
 

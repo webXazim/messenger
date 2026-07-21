@@ -8,8 +8,8 @@ bash ./scripts/update-cloudflare-ips.sh
 bash ./scripts/production-readiness.sh --preflight
 
 mkdir -p backups secrets/tls
-# The cutover script builds web, frontend, and Rust sequentially, validates the
-# schema and Django settings, and only then replaces the running containers.
+# The cutover script builds every application image sequentially, validates
+# infrastructure, schema, Django, NATS, and workers, and only then completes.
 bash ./scripts/deploy-axum-cutover.sh
 
 bash ./scripts/production-readiness.sh --probe

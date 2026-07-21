@@ -21,9 +21,10 @@ bash ./scripts/generate-realtime-lockfile.sh
 
 # Keep compile pressure predictable on the 2 GB VPS.
 "${compose[@]}" stop worker beat >/dev/null 2>&1 || true
-"${compose[@]}" build realtime
-"${compose[@]}" build web
-"${compose[@]}" build frontend
+for service in pgbouncer realtime web worker beat frontend; do
+  COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build "$service"
+done
+"${compose[@]}" up -d postgres redis nats pgbouncer
 
 # These tests cover ticket/grant isolation, active-call grants, and Support
 # message retry idempotency against the same Django code used in production.
@@ -41,13 +42,21 @@ bash ./scripts/generate-realtime-lockfile.sh
 "${compose[@]}" run --rm \
   -e RUN_MIGRATIONS=0 \
   -e RUN_COLLECTSTATIC=0 \
+  -e ENSURE_NATS_STREAM=0 \
+  -e DATABASE_RUNTIME_ENDPOINT=postgres \
   web python manage.py migrate --noinput
 "${compose[@]}" run --rm \
   -e RUN_MIGRATIONS=0 \
   -e RUN_COLLECTSTATIC=0 \
   web python manage.py check --deploy
 
-"${compose[@]}" up -d postgres redis web realtime frontend nginx worker beat
+"${compose[@]}" run --rm --no-deps \
+  -e RUN_MIGRATIONS=0 \
+  -e RUN_COLLECTSTATIC=0 \
+  -e ENSURE_NATS_STREAM=0 \
+  web python manage.py ensure_nats_stream
+
+"${compose[@]}" up -d postgres pgbouncer redis nats web realtime frontend nginx worker beat
 
 for _ in $(seq 1 30); do
   if "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null 2>&1; then

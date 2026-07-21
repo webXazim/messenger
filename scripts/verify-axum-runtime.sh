@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 compose=(docker compose)
+if [[ -f .env ]] && grep -Eiq '^MESSENGER_ENVIRONMENT=production([[:space:]]*)$' .env; then
+  compose=(docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml)
+fi
 
 [[ -f secrets/realtime-private.pem ]] || {
   echo "Missing secrets/realtime-private.pem; run ./scripts/generate-realtime-keys.sh" >&2
@@ -14,11 +17,15 @@ compose=(docker compose)
 }
 
 "${compose[@]}" config >/dev/null
-"${compose[@]}" build realtime web frontend
-"${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py migrate
-"${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py migrate --check
-"${compose[@]}" run --rm -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 web python manage.py check
-"${compose[@]}" up -d postgres redis realtime web frontend nginx
+for service in pgbouncer realtime web worker beat frontend; do
+  COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build "$service"
+done
+"${compose[@]}" up -d postgres redis nats pgbouncer
+"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate
+"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
+"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 web python manage.py check
+"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 web python manage.py ensure_nats_stream
+"${compose[@]}" up -d postgres pgbouncer redis nats realtime web worker beat frontend nginx
 
 for _ in $(seq 1 30); do
   if "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null 2>&1; then

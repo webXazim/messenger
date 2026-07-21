@@ -177,9 +177,18 @@ echo "Production preflight passed."
 [[ "$mode" == "preflight" ]] && exit 0
 
 running_services="$("${compose[@]}" ps --status running --services)"
-for service in postgres redis web worker beat realtime frontend nginx; do
+for service in postgres pgbouncer redis nats web worker beat realtime frontend nginx; do
   if ! grep -qx "$service" <<<"$running_services"; then
     echo "Required service is not running: $service" >&2
+    exit 1
+  fi
+done
+
+for service in postgres pgbouncer redis nats web realtime frontend nginx; do
+  cid="$("${compose[@]}" ps -q "$service")"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid")"
+  if [[ "$health" != "healthy" ]]; then
+    echo "Required service is not healthy: $service ($health)" >&2
     exit 1
   fi
 done
@@ -187,12 +196,13 @@ done
 "${compose[@]}" ps
 "${compose[@]}" exec -T nginx nginx -t
 "${compose[@]}" exec -T web python manage.py check --deploy
-"${compose[@]}" exec -T web python manage.py migrate --check
+"${compose[@]}" exec -T -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
 "${compose[@]}" exec -T web python manage.py check_chat_readiness
-"${compose[@]}" exec -T web python manage.py check_support_readiness
+"${compose[@]}" exec -T web python manage.py check_support_readiness --fail-on-warning
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats >/dev/null
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/metrics >/dev/null
+"${compose[@]}" exec -T nats wget -qO- 'http://127.0.0.1:8222/healthz?js-enabled-only=true' >/dev/null
 "${compose[@]}" exec -T web python manage.py check_realtime_pipeline
 "${compose[@]}" exec -T worker celery -A config inspect ping --timeout=10
 "${compose[@]}" exec -T web python manage.py check_object_storage
