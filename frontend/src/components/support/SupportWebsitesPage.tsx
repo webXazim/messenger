@@ -352,44 +352,77 @@ function WebsiteWorkspace({ website, tab, setTab, isOwner }: { website: SupportW
       <SupportTabs tabs={tabs} value={tab} onChange={setTab} ariaLabel="Website settings" />
       <div className="sc-website-workspace__body">
         {tab === "setup" ? (
-          <div className="sc-website-settings-grid">
-            <div className="sc-setting-column">
-              <h3>Installation</h3>
-              <label>
-                Site key
-                <div className="sc-copy-field">
-                  <input value={website.site_key} readOnly />
-                  <button onClick={() => void copy(website.site_key)}>Copy</button>
+          <div className="sc-website-setup-layout">
+            <div className="sc-website-setup-main">
+              <section className="sc-setting-card">
+                <header>
+                  <div>
+                    <span className="sc-page-eyebrow">Installation</span>
+                    <h3>Connect the widget</h3>
+                    <p>Install this script once before the closing body tag on your website.</p>
+                  </div>
+                </header>
+                <div className="sc-install-grid">
+                  <label className="sc-install-key">
+                    <span>Site key</span>
+                    <div className="sc-copy-field">
+                      <input value={website.site_key} readOnly />
+                      <button type="button" onClick={() => void copy(website.site_key)}>Copy</button>
+                    </div>
+                    <small>Keep this key private. Regenerating it disables the previous installation.</small>
+                  </label>
+                  <label className="sc-install-code">
+                    <span>Install script</span>
+                    <textarea value={website.install_code} readOnly rows={5} />
+                    <div className="sc-install-actions">
+                      <button type="button" className="sc-copy-code" onClick={() => void copy(website.install_code)}>
+                        {copied ? "Copied" : "Copy script"}
+                      </button>
+                      <button
+                        type="button"
+                        className="sc-danger-link"
+                        disabled={!isOwner || regenerate.isPending}
+                        onClick={() => {
+                          if (window.confirm("Regenerate this key? Existing widget sessions will stop working.")) regenerate.mutate();
+                        }}
+                      >
+                        Regenerate site key
+                      </button>
+                    </div>
+                  </label>
                 </div>
-              </label>
-              <label>
-                Install script
-                <textarea value={website.install_code} readOnly rows={7} />
-                <button className="sc-copy-code" onClick={() => void copy(website.install_code)}>
-                  {copied ? "Copied" : "Copy script"}
-                </button>
-              </label>
-              <button
-                className="sc-danger-link"
-                disabled={!isOwner || regenerate.isPending}
-                onClick={() => {
-                  if (window.confirm("Regenerate this key? Existing widget sessions will stop working.")) regenerate.mutate();
-                }}
-              >
-                Regenerate site key
-              </button>
+              </section>
+
+              <section className="sc-setting-card">
+                <header>
+                  <div>
+                    <span className="sc-page-eyebrow">Widget essentials</span>
+                    <h3>Visitor-facing content</h3>
+                    <p>These values update the preview immediately and are saved together.</p>
+                  </div>
+                  <div className="sc-widget-status-control">
+                    <span>Widget status</span>
+                    <SupportToggle label="Enable widget" checked={enabled} onChange={setEnabled} />
+                  </div>
+                </header>
+                <div className="sc-essential-fields">
+                  <SettingText label="Brand name" value={settings.brand_name} onChange={(v) => update("brand_name", v)} />
+                  <SettingText label="Welcome message" value={settings.welcome_text} onChange={(v) => update("welcome_text", v)} />
+                  <SettingText label="Offline message" value={settings.offline_text} onChange={(v) => update("offline_text", v)} />
+                </div>
+              </section>
             </div>
-            <div className="sc-setting-column">
-              <h3>Widget essentials</h3>
-              <SettingText label="Brand name" value={settings.brand_name} onChange={(v) => update("brand_name", v)} />
-              <SettingText label="Welcome message" value={settings.welcome_text} onChange={(v) => update("welcome_text", v)} />
-              <SettingText label="Offline message" value={settings.offline_text} onChange={(v) => update("offline_text", v)} />
-              <SettingToggle label="Enable widget" description="Allow visitors to start support sessions." checked={enabled} onChange={setEnabled} />
-            </div>
-            <div className="sc-setting-column sc-setting-column--preview">
-              <h3>Widget preview</h3>
+
+            <aside className="sc-website-preview-panel">
+              <header>
+                <div>
+                  <span className="sc-page-eyebrow">Widget preview</span>
+                  <h3>Exact visitor panel</h3>
+                </div>
+                <SupportBadge tone={enabled ? "success" : "neutral"}>{enabled ? "Live" : "Disabled"}</SupportBadge>
+              </header>
               <WidgetPreview website={website} settings={settings} enabled={enabled} />
-            </div>
+            </aside>
           </div>
         ) : null}
 

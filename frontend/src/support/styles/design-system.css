@@ -278,3 +278,37 @@
 .sc-modal--lg{width:min(64rem,100%)}
 @media(max-width:1180px){.sc-website-settings-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.sc-setting-column--preview{grid-column:1/-1}.sc-widget-demo__dock{position:relative;left:auto;right:auto;bottom:auto;width:274px;margin:0 auto}.sc-widget-demo.is-left .sc-widget-demo__dock{left:auto;right:auto}.sc-widget-demo__page{min-height:540px}}
 @media(max-width:760px){.sc-setting-column .sc-settings-row{grid-template-columns:1fr}.sc-agent-invite-layout{grid-template-columns:1fr}.sc-widget-demo__page{min-height:500px}.sc-widget-demo__panel{transform:scale(.62);margin-top:-236px;margin-left:-144px}.sc-widget-demo.is-left .sc-widget-demo__panel{margin-left:0;margin-right:-144px}}
+
+/* Support Upgrade 14 — balanced Websites setup layout */
+.sc-website-workspace__body{padding:22px}
+.sc-website-setup-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(390px,.78fr);gap:18px;align-items:start}
+.sc-website-setup-main{min-width:0;display:grid;gap:18px}
+.sc-setting-card,.sc-website-preview-panel{min-width:0;border:1px solid var(--sc-border);border-radius:14px;background:#fff;overflow:hidden}
+.sc-setting-card>header,.sc-website-preview-panel>header{min-height:76px;padding:16px 18px;border-bottom:1px solid var(--sc-border);display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.sc-setting-card>header h3,.sc-website-preview-panel>header h3{margin:4px 0 0;font-size:18px;letter-spacing:-.03em}
+.sc-setting-card>header p{margin:5px 0 0;color:var(--sc-text-muted);font-size:12px;line-height:1.5}
+.sc-install-grid{display:grid;grid-template-columns:minmax(240px,.78fr) minmax(0,1.22fr);gap:18px;padding:18px}
+.sc-install-grid label{min-width:0;display:grid;align-content:start;gap:8px;font-size:11px;font-weight:800}
+.sc-install-grid label>span{font-size:11px}
+.sc-install-grid small{color:var(--sc-text-muted);font-weight:600;line-height:1.45}
+.sc-install-code textarea{min-height:132px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;line-height:1.45}
+.sc-install-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sc-install-actions .sc-copy-code,.sc-install-actions .sc-danger-link{font-size:11px}
+.sc-widget-status-control{display:grid;justify-items:end;gap:7px;color:var(--sc-text-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+.sc-essential-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:4px 18px 18px}
+.sc-essential-fields .sc-settings-row{grid-template-columns:minmax(120px,.5fr) minmax(0,1fr);min-height:68px;padding:12px 0;border-bottom:1px solid var(--sc-border)}
+.sc-essential-fields .sc-settings-row:nth-child(odd){padding-right:18px;border-right:1px solid var(--sc-border)}
+.sc-essential-fields .sc-settings-row:nth-child(even){padding-left:18px}
+.sc-essential-fields .sc-settings-row:last-child{grid-column:1/-1;border-right:0;padding-right:0}
+.sc-website-preview-panel{position:sticky;top:18px;background:linear-gradient(180deg,#fbfcfd 0%,#f4f6f7 100%)}
+.sc-website-preview-panel>header{background:rgba(255,255,255,.82);backdrop-filter:blur(10px)}
+.sc-website-preview-panel .sc-widget-demo{padding:16px}
+.sc-website-preview-panel .sc-widget-demo__canvas{padding:0;border:0;background:transparent}
+.sc-website-preview-panel .sc-widget-demo__page{min-height:548px;border-radius:16px}
+.sc-website-preview-panel .sc-widget-demo__dock{right:14px;bottom:14px;width:292px}
+.sc-website-preview-panel .sc-widget-demo__panel{transform:scale(.72);margin-top:-174px;margin-left:-92px}
+.sc-website-preview-panel .sc-widget-demo__launcher{transform:scale(.9)}
+.sc-website-preview-panel .sc-widget-demo__meta{padding:0 2px 2px}
+@media(max-width:1280px){.sc-website-setup-layout{grid-template-columns:minmax(0,1fr) minmax(350px,.72fr)}.sc-install-grid{grid-template-columns:1fr}.sc-essential-fields{grid-template-columns:1fr}.sc-essential-fields .sc-settings-row,.sc-essential-fields .sc-settings-row:nth-child(odd),.sc-essential-fields .sc-settings-row:nth-child(even),.sc-essential-fields .sc-settings-row:last-child{grid-column:auto;padding-left:0;padding-right:0;border-right:0}}
+@media(max-width:1040px){.sc-website-setup-layout{grid-template-columns:1fr}.sc-website-preview-panel{position:static}.sc-website-preview-panel .sc-widget-demo__page{min-height:560px}.sc-website-preview-panel .sc-widget-demo__dock{position:absolute;right:18px;bottom:18px;margin:0}}
+@media(max-width:760px){.sc-website-workspace__body{padding:12px}.sc-setting-card>header,.sc-website-preview-panel>header{padding:14px;flex-direction:column}.sc-install-grid{padding:14px}.sc-essential-fields{padding:4px 14px 14px}.sc-essential-fields .sc-settings-row{grid-template-columns:1fr;gap:8px}.sc-widget-status-control{justify-items:start}.sc-website-preview-panel .sc-widget-demo{padding:10px}.sc-website-preview-panel .sc-widget-demo__page{min-height:500px}.sc-website-preview-panel .sc-widget-demo__dock{left:10px;right:10px;bottom:10px;width:auto}.sc-website-preview-panel .sc-widget-demo__panel{transform:scale(.62);margin-top:-236px;margin-left:-144px}.sc-install-actions{align-items:flex-start;flex-direction:column}}
