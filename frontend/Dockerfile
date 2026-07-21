@@ -1,11 +1,11 @@
-FROM node:20-bookworm-slim AS build
+FROM node:22.14.0-bookworm-slim AS build
 
 WORKDIR /app
 
 # Keep installs reliable on small VPS hosts. The Debian-based Node image avoids
 # the npm/Alpine crash seen as "Exit handler never called" during npm ci.
 ENV NODE_ENV=development \
-    NODE_OPTIONS=--max-old-space-size=1024 \
+    NODE_OPTIONS=--max-old-space-size=1536 \
     npm_config_audit=false \
     npm_config_fund=false \
     npm_config_fetch_retries=5 \
