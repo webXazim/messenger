@@ -53,6 +53,9 @@ compose_text = Path('docker-compose.yml').read_text()
 for required in ('/etc/nats/render-config.sh', '/etc/nats/nats.conf.template'):
     if required not in compose_text:
         raise SystemExit(f'Compose is missing the safe NATS renderer mount: {required}')
+nats_renderer = Path('deploy/nats/render-config.sh').read_text()
+if 'command -v nats-server' not in nats_renderer or 'exec /nats-server' in nats_renderer:
+    raise SystemExit('NATS renderer must resolve nats-server from the image PATH')
 print('Python, JSON, and YAML validation passed.')
 PY
 

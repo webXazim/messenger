@@ -51,8 +51,11 @@ if [ "${NATS_CONFIG_RENDER_ONLY:-0}" = "1" ]; then
   exit 0
 fi
 
+server_bin=$(command -v nats-server || true)
+[ -n "$server_bin" ] || fail "nats-server executable was not found in PATH"
+
 if [ "${NATS_CONFIG_TEST_ONLY:-0}" = "1" ]; then
-  exec /nats-server --config "$output" -t
+  exec "$server_bin" --config "$output" -t
 fi
 
-exec /nats-server --config "$output"
+exec "$server_bin" --config "$output"
