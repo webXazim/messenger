@@ -31,7 +31,9 @@
         if (response.status === 204) return {};
         return response.json().catch(function () { return {}; }).then(function (payload) {
           if (!response.ok) {
-            var error = new Error(payload.detail || "Support Chat request failed (HTTP " + response.status + ").");
+            var errorDetail = payload.detail || payload.message || (payload.errors && payload.errors.detail) || "Support Chat request failed (HTTP " + response.status + ").";
+            if (payload.request_id) errorDetail += " Reference: " + payload.request_id + ".";
+            var error = new Error(errorDetail);
             error.code = payload.code || "request_failed";
             error.status = response.status;
             throw error;
@@ -1027,7 +1029,6 @@
   function messengerStyles() {
     return `
       @keyframes cs-panel-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.985)}}
-      @keyframes cs-message-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
       .cs-panel{position:relative;width:min(400px,calc(100vw - 24px));height:min(650px,calc(100dvh - 88px));transform-origin:bottom right}
       .cs-panel.is-closing{animation:cs-panel-out 150ms ease forwards;pointer-events:none}
       .cs-header{min-height:72px;padding:10px 12px;gap:10px}
@@ -1038,13 +1039,12 @@
       .cs-title strong{font-size:16px;line-height:1.3}.cs-title small{font-size:12px;line-height:1.35}
       .cs-header-actions{display:flex;align-items:center;gap:2px;margin-left:auto}
       .cs-header-call:disabled{opacity:.35;cursor:default}
-      .cs-body{padding:18px 12px 12px;scroll-behavior:smooth;background-color:${state.config && state.config.theme === "dark" ? "#101010" : "#fafafa"};background-image:radial-gradient(rgba(0,0,0,.022) .7px,transparent .7px);background-size:14px 14px}
+      .cs-body{padding:18px 12px 12px;scroll-behavior:auto;background-color:${state.config && state.config.theme === "dark" ? "#101010" : "#fafafa"};background-image:radial-gradient(rgba(0,0,0,.022) .7px,transparent .7px);background-size:14px 14px}
       .cs-body{scrollbar-width:none}.cs-body::-webkit-scrollbar{width:0;height:0}
       .cs-error{position:sticky;z-index:3;top:0;display:flex;align-items:center;gap:10px;margin:0 2px 12px;padding:9px 10px;border-color:#efb2b2;border-radius:12px;box-shadow:0 6px 22px rgba(141,27,27,.08)}
       .cs-error span{min-width:0;flex:1}.cs-error button{width:26px;height:26px;border:0;border-radius:50%;background:rgba(141,27,27,.08);color:inherit;font:700 17px/1 inherit;cursor:pointer}
       .cs-messages{gap:3px;min-height:100%}
       .cs-message{max-width:86%;gap:2px;margin-top:9px}
-      .cs-message.is-entering{animation:cs-message-in 170ms cubic-bezier(.2,.75,.3,1) both}
       .cs-message.is-grouped{margin-top:0}
       .cs-bubble{padding:10px 12px 8px;border-color:#dadadd;border-radius:18px;background:${state.config && state.config.theme === "dark" ? "#202020" : "#fff"};color:${state.config && state.config.theme === "dark" ? "#f5f5f5" : "#141414"};font-size:15px;line-height:1.35;box-shadow:0 1px 1px rgba(0,0,0,.025)}
       .cs-message.team .cs-bubble{border-bottom-left-radius:5px}
@@ -1132,7 +1132,7 @@
         .cs-recorder{gap:6px}.cs-recorder-wave{gap:1.5px}
         .cs-composer{padding-bottom:max(10px,env(safe-area-inset-bottom))}
       }
-      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing,.cs-message.is-entering,.cs-media-loading,.cs-viewer-backdrop,.cs-recorder-dot,.cs-recorder-wave.is-live span{animation:none}}
+      @media(prefers-reduced-motion:reduce){.cs-panel.is-closing,.cs-media-loading,.cs-viewer-backdrop,.cs-recorder-dot,.cs-recorder-wave.is-live span{animation:none}}
     `;
   }
 
@@ -1395,8 +1395,7 @@
       var visitor = message.sender && message.sender.kind === "visitor";
       var sender = visitor ? "visitor" : "team";
       var renderKey = String(message.client_temp_id || message.id || "");
-      var shouldEnter = Boolean(state.messageListHydrated && renderKey && !state.renderedMessageKeys[renderKey]);
-      var row = node("div", "cs-message " + sender + (previousSender === sender ? " is-grouped" : "") + (shouldEnter ? " is-entering" : ""));
+      var row = node("div", "cs-message " + sender + (previousSender === sender ? " is-grouped" : ""));
       if (renderKey) {
         row.setAttribute("data-message-key", renderKey);
         state.renderedMessageKeys[renderKey] = true;
