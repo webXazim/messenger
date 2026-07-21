@@ -10,6 +10,7 @@ ENV NODE_ENV=development \
     NODE_OPTIONS="--max-old-space-size=384 --dns-result-order=ipv4first" \
     npm_config_audit=false \
     npm_config_fund=false \
+    npm_config_registry=https://registry.npmjs.org/ \
     npm_config_fetch_retries=3 \
     npm_config_fetch_retry_mintimeout=10000 \
     npm_config_fetch_retry_maxtimeout=60000 \
