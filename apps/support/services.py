@@ -8,9 +8,10 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+
+from apps.common.email import send_application_email
 
 from apps.support.models import (
     SupportAccount,
@@ -135,13 +136,63 @@ def send_agent_invitation_email(invitation: SupportAgentInvitation, raw_token: s
         "This invitation is connected to your email address and expires automatically. "
         "It does not add the inviter as a Messenger friend or expose personal Messenger data."
     )
-    return send_mail(
-        "You are invited to Support Chat",
-        body,
-        getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@localhost"),
-        [invitation.email],
+    return send_application_email(
+        subject="You are invited to Support Chat",
+        body=body,
+        recipients=[invitation.email],
         fail_silently=False,
     )
+
+
+def deliver_agent_invitation_email(invitation_id: str, raw_token: str) -> int:
+    """Deliver one exact invitation and persist its delivery result."""
+
+    invitation = (
+        SupportAgentInvitation.objects.select_related("invited_by", "invited_by__profile")
+        .prefetch_related("website_assignments__website", "team_assignments__team")
+        .filter(pk=invitation_id, status=SupportAgentInvitation.Status.PENDING)
+        .first()
+    )
+    if not invitation:
+        return 0
+    try:
+        sent = send_agent_invitation_email(invitation, raw_token)
+        if sent < 1:
+            raise RuntimeError("The configured email server did not accept the invitation email.")
+    except Exception as exc:
+        SupportAgentInvitation.objects.filter(pk=invitation.pk).update(
+            email_delivery_status=SupportAgentInvitation.DeliveryStatus.FAILED,
+            email_delivery_error=str(exc)[:1000],
+            email_delivered_at=None,
+        )
+        raise
+    SupportAgentInvitation.objects.filter(pk=invitation.pk).update(
+        email_delivery_status=SupportAgentInvitation.DeliveryStatus.SENT,
+        email_delivery_error="",
+        email_delivered_at=timezone.now(),
+    )
+    return sent
+
+
+def _dispatch_invitation_delivery(invitation_id: str, raw_token: str) -> None:
+    """Use Celery only when explicitly enabled; otherwise use auth SMTP directly."""
+
+    if getattr(settings, "SUPPORT_INVITATION_EMAIL_ASYNC", False):
+        from apps.support.tasks import send_support_agent_invitation_email
+
+        try:
+            send_support_agent_invitation_email.delay(invitation_id, raw_token)
+            return
+        except Exception:
+            # Broker failure falls back to the same configured authentication
+            # email server instead of leaving the invitation queued forever.
+            pass
+    try:
+        deliver_agent_invitation_email(invitation_id, raw_token)
+    except Exception:
+        # Delivery status is persisted as failed. The invitation remains valid
+        # and can be retried from the Agents page.
+        return
 
 
 def expire_stale_invitations(account: SupportAccount | None = None) -> int:
@@ -269,21 +320,10 @@ def create_agent_invitation(
 
     invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=invitation.pk)
 
-    def queue_delivery():
-        from django.conf import settings
-        from apps.support.tasks import send_support_agent_invitation_email
-
-        if getattr(settings, "SUPPORT_INVITATION_EMAIL_ASYNC", False):
-            try:
-                send_support_agent_invitation_email.delay(str(invitation.id), raw_token)
-                return
-            except Exception:
-                pass
-        # Direct delivery is the safe fallback and the default. It avoids a
-        # silently queued invitation when a Celery worker is unavailable.
-        send_support_agent_invitation_email.apply(args=[str(invitation.id), raw_token], throw=False)
-
-    transaction.on_commit(queue_delivery)
+    transaction.on_commit(
+        lambda invitation_id=str(invitation.id), token=raw_token: _dispatch_invitation_delivery(invitation_id, token)
+    )
+    invitation.refresh_from_db()
     return invitation
 
 
@@ -339,19 +379,10 @@ def resend_agent_invitation(*, actor, account: SupportAccount, invitation: Suppo
 
     locked_invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=locked_invitation.pk)
 
-    def queue_delivery():
-        from django.conf import settings
-        from apps.support.tasks import send_support_agent_invitation_email
-
-        if getattr(settings, "SUPPORT_INVITATION_EMAIL_ASYNC", False):
-            try:
-                send_support_agent_invitation_email.delay(str(locked_invitation.id), raw_token)
-                return
-            except Exception:
-                pass
-        send_support_agent_invitation_email.apply(args=[str(locked_invitation.id), raw_token], throw=False)
-
-    transaction.on_commit(queue_delivery)
+    transaction.on_commit(
+        lambda invitation_id=str(locked_invitation.id), token=raw_token: _dispatch_invitation_delivery(invitation_id, token)
+    )
+    locked_invitation.refresh_from_db()
     return locked_invitation
 
 

@@ -12,7 +12,6 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
-from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import OuterRef, Q
 from django.shortcuts import get_object_or_404
@@ -31,6 +30,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from apps.common.email import send_application_email
 from apps.accounts.models import AuthActionToken, FriendRequest, SocialAccount, UserSession
 from .serializers import (
     AccountDeleteSerializer,
@@ -265,10 +265,12 @@ def _build_frontend_url(path, *, token):
 
 
 def _send_account_email(*, subject, body, recipients):
-    if not recipients:
-        return 0
-    from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@localhost")
-    return send_mail(subject, body, from_email, recipients, fail_silently=True)
+    return send_application_email(
+        subject=subject,
+        body=body,
+        recipients=recipients,
+        fail_silently=True,
+    )
 
 
 def _create_auth_action_token(*, user, purpose, ttl_seconds, email="", metadata=None):

@@ -195,13 +195,13 @@ export function SupportAnalytics({ bootstrap }: { bootstrap: SupportBootstrap })
 
   return (
     <div className="ms-support-analytics-v2">
-      <section className="ms-page-surface ms-page-surface--padded">
-        <MessengerSectionHeader
-          eyebrow="Support performance"
-          title="Analytics"
-          description="Aggregated, account-scoped reporting for support demand, service quality, queues, and team performance."
-          actions={(
-            <div className="ms-support-analytics-v2-filters">
+      <section className="ms-page-surface ms-page-surface--padded ms-support-analytics-v2-overview">
+        <div className="ms-support-analytics-v2-commandbar">
+          <div>
+            <strong>Performance overview</strong>
+            <span>Aggregated reporting for demand, service quality, queues, and team performance.</span>
+          </div>
+          <div className="ms-support-analytics-v2-filters">
               <select value={days} onChange={(event) => setDays(Number(event.target.value))} aria-label="Report period">
                 <option value={7}>Last 7 days</option>
                 <option value={30}>Last 30 days</option>
@@ -219,9 +219,8 @@ export function SupportAnalytics({ bootstrap }: { bootstrap: SupportBootstrap })
               <button className="ms-button ms-button--secondary" type="button" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
                 {exportMutation.isPending ? "Queuing…" : "Export CSV"}
               </button>
-            </div>
-          )}
-        />
+          </div>
+        </div>
         {exportMessage ? <div className="ms-support-success" role="status">{exportMessage}</div> : null}
         {loading ? <div className="ms-support-empty">Loading aggregated Support analytics…</div> : null}
         {firstError ? <div className="ms-support-error">{parseApiError(firstError, "Support analytics could not be loaded.").message}</div> : null}

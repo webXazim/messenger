@@ -145,11 +145,10 @@ export function SupportWebsitesPage({ bootstrap }: { bootstrap: SupportBootstrap
 
   return (
     <div className="sc-websites-page">
-      <header className="sc-websites-toolbar">
-        <div>
-          <span className="sc-page-eyebrow">Support Chat</span>
-          <h1>Websites</h1>
-          <p>Manage support websites, widget installation, and visitor-facing behavior.</p>
+      <header className="sc-websites-toolbar sc-websites-toolbar--controls">
+        <div className="sc-websites-toolbar__summary">
+          <strong>{bootstrap.websites.length} connected website{bootstrap.websites.length === 1 ? "" : "s"}</strong>
+          <span>Search, filter, and manage widget installations.</span>
         </div>
         <div className="sc-websites-toolbar__actions">
           <label className="sc-search-field">

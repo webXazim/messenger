@@ -145,31 +145,6 @@ def build_support_analytics_export(export_id):
     max_retries=5,
 )
 def send_support_agent_invitation_email(invitation_id: str, raw_token: str):
-    from apps.support.models import SupportAgentInvitation
-    from apps.support.services import send_agent_invitation_email
+    from apps.support.services import deliver_agent_invitation_email
 
-    invitation = (
-        SupportAgentInvitation.objects.select_related("invited_by", "invited_by__profile")
-        .prefetch_related("website_assignments__website", "team_assignments__team")
-        .filter(pk=invitation_id, status=SupportAgentInvitation.Status.PENDING)
-        .first()
-    )
-    if not invitation:
-        return 0
-    try:
-        sent = send_agent_invitation_email(invitation, raw_token)
-        if sent < 1:
-            raise RuntimeError("Support agent invitation email was not accepted by the configured email backend.")
-    except Exception as exc:
-        SupportAgentInvitation.objects.filter(pk=invitation.pk).update(
-            email_delivery_status=SupportAgentInvitation.DeliveryStatus.FAILED,
-            email_delivery_error=str(exc)[:1000],
-            email_delivered_at=None,
-        )
-        raise
-    SupportAgentInvitation.objects.filter(pk=invitation.pk).update(
-        email_delivery_status=SupportAgentInvitation.DeliveryStatus.SENT,
-        email_delivery_error="",
-        email_delivered_at=timezone.now(),
-    )
-    return sent
+    return deliver_agent_invitation_email(invitation_id, raw_token)

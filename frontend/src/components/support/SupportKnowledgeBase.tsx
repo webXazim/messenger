@@ -14,7 +14,6 @@ import {
   SupportBadge,
   SupportButton,
   SupportModal,
-  SupportPage,
   SupportState,
   SupportSurface,
   SupportToggle,
@@ -159,7 +158,14 @@ export function SupportKnowledgeBase({ bootstrap }: { bootstrap: SupportBootstra
   const restore = useMutation({ mutationFn: (id: string) => supportApi.restoreKnowledgeArticle(id), onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["support-knowledge-articles"] }) });
   const metrics = useMemo(() => { const rows = articles.data || []; const views = rows.reduce((sum, item) => sum + item.view_count, 0); const feedback = rows.filter((item) => item.helpful_rate != null); return { published: rows.filter((item) => item.status === "published").length, views, helpful: feedback.length ? Math.round(feedback.reduce((sum, item) => sum + (item.helpful_rate || 0), 0) / feedback.length) : 0 }; }, [articles.data]);
 
-  return <SupportPage title="Knowledge" description="Publish accurate support answers for customers and give agents a reliable source of approved guidance." actions={canManage ? <SupportButton onClick={() => { setEditing(null); setEditorOpen(true); }}>New article</SupportButton> : undefined}>
+  return <div className="sc-kb-page">
+    <div className="sc-kb-commandbar">
+      <div>
+        <strong>Knowledge operations</strong>
+        <span>Manage approved customer answers, categories, publishing, and article availability.</span>
+      </div>
+      {canManage ? <SupportButton onClick={() => { setEditing(null); setEditorOpen(true); }}>New article</SupportButton> : null}
+    </div>
     <div className="sc-kb-metrics"><article><span>Published</span><strong>{metrics.published}</strong></article><article><span>Article views</span><strong>{metrics.views.toLocaleString()}</strong></article><article><span>Helpful rate</span><strong>{metrics.helpful}%</strong></article><article><span>Widget self-service</span><strong>{settings.data?.show_in_widget ? "On" : "Off"}</strong></article></div>
     {canManage && settings.data ? <SupportSurface className="sc-kb-settings"><SupportToggle checked={settings.data.enabled} onChange={(checked) => updateSettings.mutate({ enabled: checked })} label="Knowledge base enabled" /><SupportToggle checked={settings.data.show_in_widget} onChange={(checked) => updateSettings.mutate({ show_in_widget: checked })} label="Show in widget" /><SupportToggle checked={settings.data.allow_article_feedback} onChange={(checked) => updateSettings.mutate({ allow_article_feedback: checked })} label="Collect article feedback" /></SupportSurface> : null}
     <div className="sc-kb-layout">
@@ -170,5 +176,5 @@ export function SupportKnowledgeBase({ bootstrap }: { bootstrap: SupportBootstra
     {canManage ? <CategoryManager /> : null}
     <SupportModal open={editorOpen} title={editing ? "Edit knowledge article" : "Create knowledge article"} description="Prepare an approved answer, choose where it is available, and publish it when it is ready." onClose={() => setEditorOpen(false)} size="lg"><ArticleEditor bootstrap={bootstrap} article={editing} articles={articles.data || []} onDone={() => setEditorOpen(false)} /></SupportModal>
     {revisionArticle ? <RevisionPanel article={revisionArticle} onClose={() => setRevisionArticle(null)} /> : null}
-  </SupportPage>;
+  </div>;
 }

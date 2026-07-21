@@ -380,3 +380,22 @@
 .sc-pending-invitations__status small.is-error{color:var(--sc-danger);white-space:normal;overflow-wrap:anywhere}
 .sc-pending-invitations__actions{display:flex;align-items:center;gap:12px;justify-content:flex-end}
 @media(max-width:850px){.sc-pending-invitations__list article{grid-template-columns:1fr}.sc-pending-invitations__actions{justify-content:flex-start}.sc-agents-toolbar--controls .sc-agents-toolbar__actions{justify-content:stretch}.sc-agents-toolbar__actions>*{flex:1 1 100%}}
+
+
+/* Support Upgrade 20 — unified page structure without duplicate headings */
+.sc-websites-toolbar--controls{align-items:center;padding:14px 0 2px;border-bottom:0}
+.sc-websites-toolbar__summary{display:grid;gap:3px;min-width:240px}
+.sc-websites-toolbar__summary strong{font-size:14px;letter-spacing:-.01em}
+.sc-websites-toolbar__summary span{color:var(--sc-text-muted);font-size:12px}
+.sc-kb-page{display:grid;gap:18px}
+.sc-kb-commandbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;border:1px solid var(--sc-border);border-radius:14px;background:var(--sc-surface)}
+.sc-kb-commandbar>div{display:grid;gap:3px}
+.sc-kb-commandbar strong{font-size:14px}
+.sc-kb-commandbar span{color:var(--sc-text-muted);font-size:12px;line-height:1.45}
+.sc-kb-metrics{border-radius:14px;overflow:hidden}
+.sc-kb-settings{border-radius:14px}
+.sc-kb-layout{min-height:560px;border:1px solid var(--sc-border);border-radius:14px;overflow:hidden;background:var(--sc-surface)}
+.sc-kb-sidebar{border-right:1px solid var(--sc-border);background:#fafbfc}
+.sc-kb-list-panel{border-radius:0;border:0;border-right:1px solid var(--sc-border)}
+.sc-kb-detail{background:#fff}
+@media(max-width:900px){.sc-kb-commandbar{align-items:flex-start;flex-direction:column}.sc-kb-commandbar .sc-button{width:100%}.sc-websites-toolbar--controls{align-items:stretch}}
