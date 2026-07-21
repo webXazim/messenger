@@ -3,19 +3,22 @@ FROM node:22.14.0-bookworm-slim AS build
 WORKDIR /app
 
 # Keep installs reliable on small VPS hosts. The Debian-based Node image avoids
-# the npm/Alpine crash seen as "Exit handler never called" during npm ci.
+# the npm/Alpine crash seen as "Exit handler never called" during npm ci. Use
+# bounded concurrency: a single npm socket serialized every package download
+# and made a transient registry failure stall builds for several minutes.
 ENV NODE_ENV=development \
     NODE_OPTIONS=--max-old-space-size=1536 \
     npm_config_audit=false \
     npm_config_fund=false \
-    npm_config_fetch_retries=5 \
-    npm_config_fetch_retry_mintimeout=20000 \
-    npm_config_fetch_retry_maxtimeout=120000 \
-    npm_config_maxsockets=1 \
-    npm_config_jobs=1
+    npm_config_fetch_retries=3 \
+    npm_config_fetch_retry_mintimeout=10000 \
+    npm_config_fetch_retry_maxtimeout=60000 \
+    npm_config_fetch_timeout=120000 \
+    npm_config_maxsockets=8 \
+    npm_config_jobs=2
 
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
+RUN --mount=type=cache,id=messenger-frontend-npm,target=/root/.npm,sharing=locked \
     npm ci --include=dev --no-audit --no-fund --prefer-offline
 
 COPY index.html vite.config.ts tsconfig.json ./
