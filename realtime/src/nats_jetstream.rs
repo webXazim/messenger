@@ -150,7 +150,10 @@ async fn consume(state: Arc<AppState>) -> Result<()> {
                     }
                 }
 
-                message.ack().await.context("JetStream ACK failed")?;
+                message
+                    .ack()
+                    .await
+                    .map_err(|error| anyhow::anyhow!("JetStream ACK failed: {error}"))?;
                 state.stream_acks.fetch_add(1, Ordering::Relaxed);
             }
         }
