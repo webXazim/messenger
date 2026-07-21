@@ -258,6 +258,11 @@ export const supportApi = {
     await http.delete(`/support/knowledge/articles/${articleId}/`);
   },
 
+  async bulkDeleteKnowledgeArticles(articleIds: string[]) {
+    const response = await http.post("/support/knowledge/articles/bulk-delete/", { article_ids: articleIds });
+    return unwrapData<{ deleted: number }>(response.data);
+  },
+
   async restoreKnowledgeArticle(articleId: string) {
     const response = await http.post(`/support/knowledge/articles/${articleId}/restore/`);
     return unwrapData<SupportKnowledgeArticle>(response.data);

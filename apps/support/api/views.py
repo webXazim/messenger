@@ -2895,21 +2895,57 @@ class SupportKnowledgeArticleDetailView(APIView):
         if error:
             return error
         article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)
-        article.status = SupportKnowledgeArticle.Status.ARCHIVED
-        article.published_at = None
-        article.updated_by = request.user
-        article.save(update_fields=["status", "published_at", "updated_by", "updated_at"])
-        create_article_revision(article, actor=request.user, change_note="Archived")
+        article_id_value = article.id
+        article_title = article.title
         record_audit_event(
             account=context.account,
             actor=request.user,
-            action="knowledge.article_archived",
+            action="knowledge.article_deleted",
             target_type="support_knowledge_article",
-            target_id=article.id,
-            summary=f"{request.user.username} archived the knowledge article {article.title}.",
+            target_id=article_id_value,
+            summary=f"{request.user.username} deleted the knowledge article {article_title}.",
+            metadata={"title": article_title, "status": article.status},
             ip_address=request_ip(request),
         )
+        article.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SupportKnowledgeArticleBulkDeleteView(APIView):
+    def post(self, request):
+        context, error = require_knowledge_manager(request, self)
+        if error:
+            return error
+        article_ids = request.data.get("article_ids") or []
+        if not isinstance(article_ids, list) or not article_ids:
+            return Response(
+                {"detail": "Select at least one article.", "code": "article_selection_required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        queryset = SupportKnowledgeArticle.objects.filter(
+            support_account=context.account,
+            id__in=article_ids,
+        )
+        rows = list(queryset.values("id", "title", "status"))
+        if len(rows) != len(set(str(value) for value in article_ids)):
+            return Response(
+                {"detail": "One or more selected articles are unavailable.", "code": "article_selection_invalid"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            for row in rows:
+                record_audit_event(
+                    account=context.account,
+                    actor=request.user,
+                    action="knowledge.article_deleted",
+                    target_type="support_knowledge_article",
+                    target_id=row["id"],
+                    summary=f"{request.user.username} deleted the knowledge article {row['title']}.",
+                    metadata={"title": row["title"], "status": row["status"], "bulk": True},
+                    ip_address=request_ip(request),
+                )
+            queryset.delete()
+        return Response({"deleted": len(rows)})
 
 
 class SupportKnowledgeArticleRevisionListView(APIView):

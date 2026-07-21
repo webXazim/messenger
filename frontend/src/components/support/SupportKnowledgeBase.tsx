@@ -146,35 +146,343 @@ function CategoryManager() {
 }
 
 export function SupportKnowledgeBase({ bootstrap }: { bootstrap: SupportBootstrap }) {
-  const queryClient = useQueryClient(); const owner = bootstrap.role === "owner"; const canManage = owner || Boolean(bootstrap.agents[0]?.can_manage_knowledge);
-  const [search, setSearch] = useState(""); const [website, setWebsite] = useState(""); const [status, setStatus] = useState(canManage ? "" : "published"); const [category, setCategory] = useState("");
-  const [selected, setSelected] = useState<SupportKnowledgeArticle | null>(null); const [editing, setEditing] = useState<SupportKnowledgeArticle | null>(null); const [editorOpen, setEditorOpen] = useState(false); const [revisionArticle, setRevisionArticle] = useState<SupportKnowledgeArticle | null>(null);
-  const settings = useQuery({ queryKey: ["support-knowledge-settings"], queryFn: ({ signal }) => supportApi.getKnowledgeSettings(signal) });
-  const categories = useQuery({ queryKey: ["support-knowledge-categories", false], queryFn: ({ signal }) => supportApi.listKnowledgeCategories(false, signal) });
-  const articles = useQuery({ queryKey: ["support-knowledge-articles", search, website, status, category], queryFn: ({ signal }) => supportApi.listKnowledgeArticles({ q: search || undefined, website: website || undefined, status: status || undefined, category: category || undefined }, signal) });
-  useEffect(() => { if (!selected && articles.data?.length) setSelected(articles.data[0]); else if (selected) setSelected(articles.data?.find((item) => item.id === selected.id) || articles.data?.[0] || null); }, [articles.data]);
-  const updateSettings = useMutation({ mutationFn: (payload: Partial<SupportKnowledgeSettings>) => supportApi.updateKnowledgeSettings(payload), onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["support-knowledge-settings"] }) });
-  const archive = useMutation({ mutationFn: (id: string) => supportApi.removeKnowledgeArticle(id), onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["support-knowledge-articles"] }) });
-  const restore = useMutation({ mutationFn: (id: string) => supportApi.restoreKnowledgeArticle(id), onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["support-knowledge-articles"] }) });
-  const metrics = useMemo(() => { const rows = articles.data || []; const views = rows.reduce((sum, item) => sum + item.view_count, 0); const feedback = rows.filter((item) => item.helpful_rate != null); return { published: rows.filter((item) => item.status === "published").length, views, helpful: feedback.length ? Math.round(feedback.reduce((sum, item) => sum + (item.helpful_rate || 0), 0) / feedback.length) : 0 }; }, [articles.data]);
+  const queryClient = useQueryClient();
+  const owner = bootstrap.role === "owner";
+  const canManage = owner || Boolean(bootstrap.agents[0]?.can_manage_knowledge);
+  const [search, setSearch] = useState("");
+  const [website, setWebsite] = useState("");
+  const [status, setStatus] = useState(canManage ? "" : "published");
+  const [category, setCategory] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [revisionArticle, setRevisionArticle] = useState<SupportKnowledgeArticle | null>(null);
+  const [routeArticleId, setRouteArticleId] = useState<string | "new" | null>(() => {
+    const match = window.location.pathname.match(/\/support\/knowledge\/articles\/([^/]+)/);
+    return match?.[1] || null;
+  });
 
-  return <div className="sc-kb-page">
-    <div className="sc-kb-commandbar">
-      <div>
-        <strong>Knowledge operations</strong>
-        <span>Manage approved customer answers, categories, publishing, and article availability.</span>
+  const settings = useQuery({
+    queryKey: ["support-knowledge-settings"],
+    queryFn: ({ signal }) => supportApi.getKnowledgeSettings(signal),
+  });
+  const categories = useQuery({
+    queryKey: ["support-knowledge-categories", false],
+    queryFn: ({ signal }) => supportApi.listKnowledgeCategories(false, signal),
+  });
+  const articles = useQuery({
+    queryKey: ["support-knowledge-articles", search, website, status, category],
+    queryFn: ({ signal }) =>
+      supportApi.listKnowledgeArticles(
+        {
+          q: search || undefined,
+          website: website || undefined,
+          status: status || undefined,
+          category: category || undefined,
+        },
+        signal,
+      ),
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const match = window.location.pathname.match(/\/support\/knowledge\/articles\/([^/]+)/);
+      setRouteArticleId(match?.[1] || null);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    const visibleIds = new Set((articles.data || []).map((article) => article.id));
+    setSelectedIds((current) => current.filter((id) => visibleIds.has(id)));
+  }, [articles.data]);
+
+  const updateSettings = useMutation({
+    mutationFn: (payload: Partial<SupportKnowledgeSettings>) => supportApi.updateKnowledgeSettings(payload),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["support-knowledge-settings"] }),
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => supportApi.removeKnowledgeArticle(id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["support-knowledge-articles"] }),
+        queryClient.invalidateQueries({ queryKey: ["support-knowledge-categories"] }),
+      ]);
+    },
+  });
+  const bulkRemove = useMutation({
+    mutationFn: (ids: string[]) => supportApi.bulkDeleteKnowledgeArticles(ids),
+    onSuccess: async () => {
+      setSelectedIds([]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["support-knowledge-articles"] }),
+        queryClient.invalidateQueries({ queryKey: ["support-knowledge-categories"] }),
+      ]);
+    },
+  });
+
+  const metrics = useMemo(() => {
+    const rows = articles.data || [];
+    const feedback = rows.filter((item) => item.helpful_rate != null);
+    return {
+      published: rows.filter((item) => item.status === "published").length,
+      drafts: rows.filter((item) => item.status === "draft").length,
+      views: rows.reduce((sum, item) => sum + item.view_count, 0),
+      helpful: feedback.length
+        ? Math.round(feedback.reduce((sum, item) => sum + (item.helpful_rate || 0), 0) / feedback.length)
+        : 0,
+    };
+  }, [articles.data]);
+
+  const navigateToArticle = (articleId: string | "new") => {
+    const nextPath = `/support/knowledge/articles/${articleId}`;
+    window.history.pushState({}, "", nextPath);
+    setRouteArticleId(articleId);
+  };
+  const returnToList = () => {
+    window.history.pushState({}, "", "/support/knowledge");
+    setRouteArticleId(null);
+  };
+
+  const routeArticle = routeArticleId && routeArticleId !== "new"
+    ? articles.data?.find((article) => article.id === routeArticleId) || null
+    : null;
+
+  if (routeArticleId) {
+    if (routeArticleId !== "new" && articles.isLoading) {
+      return <SupportState kind="loading" title="Loading article" description="Preparing the article workspace." />;
+    }
+    if (routeArticleId !== "new" && !routeArticle) {
+      return (
+        <SupportState
+          kind="error"
+          title="Article unavailable"
+          description="This article may have been deleted or is outside your website access."
+          actionLabel="Back to articles"
+          onAction={returnToList}
+        />
+      );
+    }
+    if (!canManage && routeArticle) {
+      return (
+        <article className="sc-kb-reader-page">
+          <header className="sc-kb-article-page__head">
+            <button className="sc-kb-back" type="button" onClick={returnToList}>← Articles</button>
+            <div>
+              <span>{routeArticle.category_name || "Knowledge article"}</span>
+              <h2>{routeArticle.title}</h2>
+              <p>
+                Written by {routeArticle.created_by?.display_name || routeArticle.created_by?.username || "Support team"}
+                {` · Updated ${new Date(routeArticle.updated_at).toLocaleDateString()}`}
+              </p>
+            </div>
+          </header>
+          {routeArticle.summary ? <p className="sc-kb-reader-page__summary">{routeArticle.summary}</p> : null}
+          <div className="sc-kb-reader-page__content sc-article-content" dangerouslySetInnerHTML={{ __html: routeArticle.body }} />
+        </article>
+      );
+    }
+    if (!canManage && routeArticleId === "new") {
+      return <SupportState kind="error" title="Article management access required" description="Your Support Chat permissions do not allow article creation." actionLabel="Back to articles" onAction={returnToList} />;
+    }
+    return (
+      <div className="sc-kb-article-page">
+        <header className="sc-kb-article-page__head">
+          <button className="sc-kb-back" type="button" onClick={returnToList}>← Articles</button>
+          <div>
+            <span>{routeArticle ? "Knowledge article" : "New knowledge article"}</span>
+            <h2>{routeArticle?.title || "Create article"}</h2>
+            {routeArticle ? (
+              <p>
+                Written by {routeArticle.created_by?.display_name || routeArticle.created_by?.username || "Support team"}
+                {routeArticle.updated_by ? ` · Last updated by ${routeArticle.updated_by.display_name || routeArticle.updated_by.username}` : ""}
+              </p>
+            ) : (
+              <p>Create a customer-ready answer with controlled publishing and website availability.</p>
+            )}
+          </div>
+        </header>
+        <ArticleEditor
+          bootstrap={bootstrap}
+          article={routeArticle}
+          articles={articles.data || []}
+          onDone={returnToList}
+        />
       </div>
-      {canManage ? <SupportButton onClick={() => { setEditing(null); setEditorOpen(true); }}>New article</SupportButton> : null}
+    );
+  }
+
+  const allVisibleSelected = Boolean(articles.data?.length) && articles.data!.every((article) => selectedIds.includes(article.id));
+  const toggleAll = () => {
+    const visible = articles.data || [];
+    setSelectedIds(allVisibleSelected ? [] : visible.map((article) => article.id));
+  };
+
+  return (
+    <div className="sc-kb-page sc-kb-page--professional">
+      <div className="sc-kb-topline">
+        <div className="sc-kb-metrics sc-kb-metrics--flat">
+          <article><span>Published articles</span><strong>{metrics.published}</strong></article>
+          <article><span>Drafts</span><strong>{metrics.drafts}</strong></article>
+          <article><span>Article views</span><strong>{metrics.views.toLocaleString()}</strong></article>
+          <article><span>Helpful rate</span><strong>{metrics.helpful}%</strong></article>
+        </div>
+        {canManage ? (
+          <div className="sc-kb-primary-actions">
+            <details className="sc-kb-controls">
+              <summary>Controls</summary>
+              {settings.data ? (
+                <div className="sc-kb-controls__menu">
+                  <SupportToggle
+                    checked={settings.data.enabled}
+                    onChange={(checked) => updateSettings.mutate({ enabled: checked })}
+                    label="Knowledge base enabled"
+                    description="Allow approved articles to be used by the support team."
+                  />
+                  <SupportToggle
+                    checked={settings.data.show_in_widget}
+                    onChange={(checked) => updateSettings.mutate({ show_in_widget: checked })}
+                    label="Show in widget"
+                    description="Make published articles available to website visitors."
+                  />
+                  <SupportToggle
+                    checked={settings.data.allow_article_feedback}
+                    onChange={(checked) => updateSettings.mutate({ allow_article_feedback: checked })}
+                    label="Collect article feedback"
+                    description="Allow visitors to rate published answers."
+                  />
+                  <button type="button" onClick={() => setCategoryOpen(true)}>Manage categories</button>
+                </div>
+              ) : null}
+            </details>
+            <SupportButton onClick={() => navigateToArticle("new")}>＋ New article</SupportButton>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="sc-kb-search-rail">
+        <label className="sc-search-field">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search articles" />
+        </label>
+        <select value={website} onChange={(event) => setWebsite(event.target.value)}>
+          <option value="">All websites</option>
+          {bootstrap.websites.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+        </select>
+        {canManage ? (
+          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value="">All statuses</option>
+            <option value="published">Published</option>
+            <option value="draft">Draft</option>
+            <option value="archived">Archived</option>
+          </select>
+        ) : null}
+      </div>
+
+      <section className="sc-kb-workspace-flat">
+        <aside className="sc-kb-categories-rail">
+          <div className="sc-kb-categories-rail__head">
+            <strong>Categories</strong>
+            {canManage ? <button type="button" onClick={() => setCategoryOpen(true)}>＋</button> : null}
+          </div>
+          <button className={!category ? "is-active" : ""} onClick={() => setCategory("")}>
+            <span>All articles</span><small>{articles.data?.length || 0}</small>
+          </button>
+          {categories.data?.map((item) => (
+            <button className={category === item.id ? "is-active" : ""} key={item.id} onClick={() => setCategory(item.id)}>
+              <span>{item.name}</span><small>{item.article_count || 0}</small>
+            </button>
+          ))}
+        </aside>
+
+        <div className="sc-kb-articles-section">
+          <header className="sc-kb-articles-section__head">
+            <div><strong>{category ? categories.data?.find((item) => item.id === category)?.name : "All articles"}</strong><span>{articles.data?.length || 0} articles</span></div>
+            {selectedIds.length ? (
+              <div className="sc-kb-bulk-actions">
+                <span>{selectedIds.length} selected</span>
+                <SupportButton
+                  variant="danger"
+                  size="sm"
+                  isLoading={bulkRemove.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Delete ${selectedIds.length} selected article${selectedIds.length === 1 ? "" : "s"}? This cannot be undone.`)) {
+                      bulkRemove.mutate(selectedIds);
+                    }
+                  }}
+                >
+                  Delete selected
+                </SupportButton>
+              </div>
+            ) : null}
+          </header>
+
+          <div className="sc-kb-article-table" role="table" aria-label="Knowledge articles">
+            <div className="sc-kb-article-row sc-kb-article-row--head" role="row">
+              {canManage ? <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} aria-label="Select all visible articles" /> : null}
+              <span>Title</span><span>Category</span><span>Website</span><span>Status</span><span>Written by</span><span>Updated</span><span />
+            </div>
+            {articles.isLoading ? (
+              <SupportState kind="loading" title="Loading articles" />
+            ) : !articles.data?.length ? (
+              <SupportState
+                title="No articles found"
+                description={canManage ? "Create the first approved article or adjust the current filters." : "No published articles match the current filters."}
+                actionLabel={canManage ? "New article" : undefined}
+                onAction={canManage ? () => navigateToArticle("new") : undefined}
+              />
+            ) : (
+              articles.data.map((article) => (
+                <div className="sc-kb-article-row" role="row" key={article.id}>
+                  {canManage ? (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(article.id)}
+                      onChange={(event) => {
+                        event.stopPropagation();
+                        setSelectedIds((current) => event.target.checked ? [...current, article.id] : current.filter((id) => id !== article.id));
+                      }}
+                      aria-label={`Select ${article.title}`}
+                    />
+                  ) : null}
+                  <button type="button" className="sc-kb-article-title" onClick={() => navigateToArticle(article.id)}>
+                    <strong>{article.title}</strong>
+                    <small>{article.summary || plainTextFromHtml(article.body).slice(0, 90)}</small>
+                  </button>
+                  <span>{article.category_name || "Uncategorized"}</span>
+                  <span>{article.all_websites ? "All websites" : article.website_names.join(", ")}</span>
+                  <span><SupportBadge tone={article.status === "published" ? "success" : article.status === "archived" ? "danger" : "neutral"}>{article.status}</SupportBadge></span>
+                  <span>{article.created_by?.display_name || article.created_by?.username || "Support team"}</span>
+                  <span>{new Date(article.updated_at).toLocaleDateString()}</span>
+                  {canManage ? (
+                    <button
+                      type="button"
+                      className="sc-kb-delete-one"
+                      aria-label={`Delete ${article.title}`}
+                      onClick={() => {
+                        if (window.confirm(`Delete “${article.title}”? This cannot be undone.`)) remove.mutate(article.id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  ) : <span />}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
+      <SupportModal
+        open={categoryOpen}
+        title="Manage categories"
+        description="Organize articles using customer-ready category names."
+        onClose={() => setCategoryOpen(false)}
+        size="lg"
+      >
+        <CategoryManager />
+      </SupportModal>
+      {revisionArticle ? <RevisionPanel article={revisionArticle} onClose={() => setRevisionArticle(null)} /> : null}
     </div>
-    <div className="sc-kb-metrics"><article><span>Published</span><strong>{metrics.published}</strong></article><article><span>Article views</span><strong>{metrics.views.toLocaleString()}</strong></article><article><span>Helpful rate</span><strong>{metrics.helpful}%</strong></article><article><span>Widget self-service</span><strong>{settings.data?.show_in_widget ? "On" : "Off"}</strong></article></div>
-    {canManage && settings.data ? <SupportSurface className="sc-kb-settings"><SupportToggle checked={settings.data.enabled} onChange={(checked) => updateSettings.mutate({ enabled: checked })} label="Knowledge base enabled" /><SupportToggle checked={settings.data.show_in_widget} onChange={(checked) => updateSettings.mutate({ show_in_widget: checked })} label="Show in widget" /><SupportToggle checked={settings.data.allow_article_feedback} onChange={(checked) => updateSettings.mutate({ allow_article_feedback: checked })} label="Collect article feedback" /></SupportSurface> : null}
-    <div className="sc-kb-layout">
-      <aside className="sc-kb-sidebar"><div className="sc-kb-sidebar__title">Categories</div><button className={!category ? "is-active" : ""} onClick={() => setCategory("")}>All articles</button>{categories.data?.map((item) => <button className={category === item.id ? "is-active" : ""} key={item.id} onClick={() => setCategory(item.id)}>{item.name}<span>{item.article_count || 0}</span></button>)}</aside>
-      <SupportSurface className="sc-kb-list-panel"><div className="sc-kb-toolbar"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search articles" /><select value={website} onChange={(event) => setWebsite(event.target.value)}><option value="">All websites</option>{bootstrap.websites.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>{canManage ? <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></select> : null}</div>{articles.isLoading ? <SupportState kind="loading" title="Loading articles" /> : !articles.data?.length ? <SupportState title="No articles found" description={canManage ? "Create the first approved article or adjust the current filters." : "No published articles match the current filters."} /> : <div className="sc-kb-table">{articles.data.map((article) => <button className={selected?.id === article.id ? "is-selected" : ""} key={article.id} onClick={() => setSelected(article)}><div><strong>{article.title}</strong><span>{article.summary || plainTextFromHtml(article.body).slice(0, 100)}</span></div><small>{article.category_name || "Uncategorized"}</small><SupportBadge tone={article.status === "published" ? "success" : article.status === "archived" ? "danger" : "neutral"}>{article.status}</SupportBadge><small>{article.helpful_rate == null ? "—" : `${article.helpful_rate}%`}</small><small>{article.view_count}</small></button>)}</div>}</SupportSurface>
-      <aside className="sc-kb-detail">{selected ? <><div className="sc-kb-detail__head"><div><SupportBadge tone={selected.status === "published" ? "success" : selected.status === "archived" ? "danger" : "neutral"}>{selected.status}</SupportBadge><h2>{selected.title}</h2><p>{selected.category_name || "Uncategorized"} · {selected.language.toUpperCase()} · Updated {new Date(selected.updated_at).toLocaleDateString()}</p></div></div><div className="sc-kb-detail__body"><p>{selected.summary}</p><div className="sc-kb-content-preview sc-article-content" dangerouslySetInnerHTML={{ __html: selected.body }} /></div><dl className="sc-kb-facts"><div><dt>Websites</dt><dd>{selected.all_websites ? "All websites" : selected.website_names.join(", ")}</dd></div><div><dt>Feedback</dt><dd>{selected.helpful_rate == null ? "No feedback" : `${selected.helpful_rate}% helpful`}</dd></div><div><dt>Versions</dt><dd>{selected.revision_count}</dd></div><div><dt>Related</dt><dd>{selected.related_articles.length || "None"}</dd></div></dl>{canManage ? <div className="sc-kb-detail__actions"><SupportButton variant="secondary" onClick={() => { setEditing(selected); setEditorOpen(true); }}>Edit</SupportButton><SupportButton variant="ghost" onClick={() => setRevisionArticle(selected)}>Versions</SupportButton>{selected.status === "archived" ? <SupportButton onClick={() => restore.mutate(selected.id)}>Restore draft</SupportButton> : <SupportButton variant="danger" onClick={() => archive.mutate(selected.id)}>Archive</SupportButton>}</div> : null}</> : <SupportState title="Select an article to review" />}</aside>
-    </div>
-    {canManage ? <CategoryManager /> : null}
-    <SupportModal open={editorOpen} title={editing ? "Edit knowledge article" : "Create knowledge article"} description="Prepare an approved answer, choose where it is available, and publish it when it is ready." onClose={() => setEditorOpen(false)} size="lg"><ArticleEditor bootstrap={bootstrap} article={editing} articles={articles.data || []} onDone={() => setEditorOpen(false)} /></SupportModal>
-    {revisionArticle ? <RevisionPanel article={revisionArticle} onClose={() => setRevisionArticle(null)} /> : null}
-  </div>;
+  );
 }

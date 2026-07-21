@@ -224,3 +224,30 @@ class SupportKnowledgeTests(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(SupportKnowledgeArticleWebsite.objects.filter(website=other_website).exists())
+
+    def test_owner_can_delete_one_article_permanently(self):
+        _, article = self.create_category_and_article(title="Delete one article")
+        self.client.force_authenticate(self.owner)
+        response = self.client.delete(f"/api/v1/support/knowledge/articles/{article['id']}/")
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(SupportKnowledgeArticle.objects.filter(pk=article["id"]).exists())
+
+    def test_owner_can_bulk_delete_only_selected_articles(self):
+        _, first = self.create_category_and_article(title="Bulk delete first")
+        _, second = self.create_category_and_article(title="Bulk delete second")
+        _, untouched = self.create_category_and_article(title="Keep this article")
+        self.client.force_authenticate(self.owner)
+        response = self.client.post(
+            "/api/v1/support/knowledge/articles/bulk-delete/",
+            {"article_ids": [first["id"], second["id"]]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["deleted"], 2)
+        self.assertFalse(SupportKnowledgeArticle.objects.filter(pk__in=[first["id"], second["id"]]).exists())
+        self.assertTrue(SupportKnowledgeArticle.objects.filter(pk=untouched["id"]).exists())
+
+    def test_article_response_identifies_writer(self):
+        _, article = self.create_category_and_article(title="Author attribution")
+        self.assertEqual(article["created_by"]["id"], str(self.owner.id))
+        self.assertEqual(article["created_by"]["username"], self.owner.username)
