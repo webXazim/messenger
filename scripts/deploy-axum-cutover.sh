@@ -70,6 +70,9 @@ bash ./scripts/generate-realtime-lockfile.sh
 [[ -s secrets/realtime-public.pem ]] || fail "Missing realtime public key; run ./scripts/generate-realtime-keys.sh"
 "${compose[@]}" config --quiet
 
+info "Rendering and parsing the NATS configuration"
+"${compose[@]}" run --rm --no-deps -e NATS_CONFIG_TEST_ONLY=1 nats
+
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 rollback_file=".axum-rollback-images-${stamp}.env"
 : > "$rollback_file"

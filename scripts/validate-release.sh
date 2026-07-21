@@ -40,6 +40,19 @@ for path in [
     missing = {service for service in expected_services if service not in script}
     if missing:
         raise SystemExit(f'{path} is missing production services: {sorted(missing)}')
+nats_template = Path('deploy/nats/nats.conf').read_text()
+for placeholder in (
+    '__NATS_APP_USER__', '__NATS_APP_PASSWORD__',
+    '__NATS_REALTIME_USER__', '__NATS_REALTIME_PASSWORD__',
+):
+    if f'"{placeholder}"' not in nats_template:
+        raise SystemExit(f'NATS template is missing quoted placeholder: {placeholder}')
+if '$NATS_APP_PASSWORD' in nats_template or '$NATS_REALTIME_PASSWORD' in nats_template:
+    raise SystemExit('NATS passwords must be rendered as quoted strings, not parsed as raw variables')
+compose_text = Path('docker-compose.yml').read_text()
+for required in ('/etc/nats/render-config.sh', '/etc/nats/nats.conf.template'):
+    if required not in compose_text:
+        raise SystemExit(f'Compose is missing the safe NATS renderer mount: {required}')
 print('Python, JSON, and YAML validation passed.')
 PY
 

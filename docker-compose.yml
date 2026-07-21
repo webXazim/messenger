@@ -207,7 +207,7 @@ services:
     image: nats:2.14.3-alpine
     restart: unless-stopped
     logging: *default-logging
-    command: ["--config", "/etc/nats/nats.conf"]
+    entrypoint: ["/bin/sh", "/etc/nats/render-config.sh"]
     environment:
       GOMEMLIMIT: 120MiB
       NATS_APP_USER: ${NATS_APP_USER:-django}
@@ -215,7 +215,8 @@ services:
       NATS_REALTIME_USER: ${NATS_REALTIME_USER:-realtime}
       NATS_REALTIME_PASSWORD: ${NATS_REALTIME_PASSWORD:-change-me-nats-realtime}
     volumes:
-      - ./deploy/nats/nats.conf:/etc/nats/nats.conf:ro
+      - ./deploy/nats/nats.conf:/etc/nats/nats.conf.template:ro
+      - ./deploy/nats/render-config.sh:/etc/nats/render-config.sh:ro
       - nats_data:/data
     expose:
       - "4222"
