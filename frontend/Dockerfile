@@ -1,14 +1,21 @@
-FROM node:22-alpine AS build
+FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 
-COPY package*.json ./
-# Use the npm version bundled with the official Node image. Upgrading npm
-# inside the build made npm 11.6.2 crash with "Exit handler never called".
-RUN npm config set fetch-retries 5 \
-    && npm config set fetch-retry-mintimeout 20000 \
-    && npm config set fetch-retry-maxtimeout 120000 \
-    && npm ci --no-audit --no-fund
+# Keep installs reliable on small VPS hosts. The Debian-based Node image avoids
+# the npm/Alpine crash seen as "Exit handler never called" during npm ci.
+ENV NODE_OPTIONS=--max-old-space-size=384 \
+    npm_config_audit=false \
+    npm_config_fund=false \
+    npm_config_fetch_retries=5 \
+    npm_config_fetch_retry_mintimeout=20000 \
+    npm_config_fetch_retry_maxtimeout=120000 \
+    npm_config_maxsockets=1 \
+    npm_config_jobs=1
+
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund --prefer-offline
 
 COPY index.html vite.config.ts tsconfig.json ./
 COPY public ./public
@@ -33,7 +40,6 @@ ENV VITE_SOCIAL_BASE_URL=$VITE_SOCIAL_BASE_URL
 ENV VITE_SUPPORT_PLANS_URL=$VITE_SUPPORT_PLANS_URL
 
 RUN npm run build
-
 
 FROM nginx:1.27-alpine AS runtime
 
