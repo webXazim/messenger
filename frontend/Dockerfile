@@ -3,7 +3,11 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --global npm@11.6.2 \
+# Use the npm version bundled with the official Node image. Upgrading npm
+# inside the build made npm 11.6.2 crash with "Exit handler never called".
+RUN npm config set fetch-retries 5 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
     && npm ci --no-audit --no-fund
 
 COPY index.html vite.config.ts tsconfig.json ./
