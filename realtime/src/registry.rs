@@ -8,7 +8,7 @@ use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::protocol::{AudienceKey, OutboundMessage};
+use crate::protocol::{AudienceKey, OutboundMessage, TextFrame};
 
 #[derive(Clone)]
 pub struct ConnectionHandle {
@@ -49,6 +49,10 @@ impl Registry {
 
     pub fn connection_count(&self) -> usize { self.connections.len() }
     pub fn audience_count(&self) -> usize { self.audiences.len() }
+
+    pub fn audience_snapshot(&self) -> Vec<AudienceKey> {
+        self.audiences.iter().map(|entry| entry.key().clone()).collect()
+    }
 
     pub fn register(&self, id: Uuid, handle: ConnectionHandle) {
         self.connections.insert(id, handle);
@@ -168,14 +172,14 @@ impl Registry {
         recipients.iter().map(|value| *value.key()).collect()
     }
 
-    pub fn fanout_high(&self, audiences: &[AudienceKey], message: Arc<str>) -> usize {
+    pub fn fanout_high(&self, audiences: &[AudienceKey], message: TextFrame) -> usize {
         self.fanout_high_filtered(audiences, message, None, None)
     }
 
     pub fn fanout_high_filtered(
         &self,
         audiences: &[AudienceKey],
-        message: Arc<str>,
+        message: TextFrame,
         exclude: Option<Uuid>,
         target_actor_id: Option<&str>,
     ) -> usize {
@@ -189,7 +193,7 @@ impl Registry {
     pub fn fanout_low(
         &self,
         audiences: &[AudienceKey],
-        message: Arc<str>,
+        message: TextFrame,
         exclude: Option<Uuid>,
         target_actor_id: Option<&str>,
     ) -> usize {

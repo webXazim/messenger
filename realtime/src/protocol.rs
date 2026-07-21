@@ -1,5 +1,7 @@
 use std::{fmt, sync::Arc};
 
+use axum::extract::ws::Utf8Bytes;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
@@ -88,9 +90,11 @@ struct ServerEvent<'a> {
     data: Value,
 }
 
+pub type TextFrame = Utf8Bytes;
+
 #[derive(Clone, Debug)]
 pub enum OutboundMessage {
-    Text(Arc<str>),
+    Text(TextFrame),
     Pong(Vec<u8>),
     Close { code: u16, reason: Arc<str> },
 }
@@ -99,7 +103,7 @@ pub fn control_message(
     event: &str,
     request_id: Option<&str>,
     data: Value,
-) -> Result<Arc<str>, serde_json::Error> {
+) -> Result<TextFrame, serde_json::Error> {
     serde_json::to_string(&ServerControl {
         r#type: "realtime.control",
         version: 1,
@@ -107,10 +111,10 @@ pub fn control_message(
         request_id,
         data,
     })
-    .map(Arc::<str>::from)
+    .map(TextFrame::from)
 }
 
-pub fn event_message(event: &str, data: Value) -> Result<Arc<str>, serde_json::Error> {
+pub fn event_message(event: &str, data: Value) -> Result<TextFrame, serde_json::Error> {
     let occurred_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| OffsetDateTime::now_utc().unix_timestamp().to_string());
@@ -122,5 +126,5 @@ pub fn event_message(event: &str, data: Value) -> Result<Arc<str>, serde_json::E
         occurred_at,
         data,
     })
-    .map(Arc::<str>::from)
+    .map(TextFrame::from)
 }

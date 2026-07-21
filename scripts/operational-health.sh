@@ -15,7 +15,7 @@ read_env() {
   printf '%s' "${value:-$default}"
 }
 
-for service in postgres redis web worker beat realtime frontend nginx; do
+for service in postgres pgbouncer redis nats web worker beat realtime frontend nginx; do
   cid="$("${compose[@]}" ps -q "$service")"
   if [[ -z "$cid" ]]; then failures+=("$service container is missing"); continue; fi
   status="$(docker inspect -f '{{.State.Status}}' "$cid")"
@@ -51,7 +51,7 @@ env_path=Path(sys.argv[2])
 max_age_days=int(sys.argv[3])
 current_fingerprint=sys.argv[4]
 report=json.loads(report_path.read_text())
-if report.get('schema_version') != 2 or not report.get('passed') or not report.get('verification_complete'):
+if report.get('schema_version') != 3 or not report.get('passed') or not report.get('verification_complete'):
     raise SystemExit('report_failed_or_incomplete')
 recommended=int(report.get('recommended_production_max_connections') or 0)
 match=re.search(r'^REALTIME_MAX_CONNECTIONS=([0-9]+)$', env_path.read_text(), re.M)
@@ -92,7 +92,7 @@ else
 fi
 
 "${compose[@]}" exec -T web python manage.py check_realtime_pipeline --json >"$tmpdir/realtime-pipeline.json" \
-  || failures+=("Django outbox/Redis Stream pipeline is degraded")
+  || failures+=("Django outbox/JetStream pipeline is degraded")
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats >"$tmpdir/realtime-stats.json" \
   || failures+=("Axum internal stats endpoint failed")
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/metrics >"$tmpdir/realtime-metrics.txt" \
@@ -110,8 +110,28 @@ fi
 redis_rejected="$("${compose[@]}" exec -T redis redis-cli INFO stats | sed -n 's/^rejected_connections:\([0-9]*\).*/\1/p')"
 [[ "${redis_rejected:-0}" == 0 ]] || warnings+=("Redis has ${redis_rejected} rejected connection(s) since startup")
 
+nats_varz="$("${compose[@]}" exec -T nats wget -qO- http://127.0.0.1:8222/varz 2>/dev/null || true)"
+nats_jsz="$("${compose[@]}" exec -T nats wget -qO- 'http://127.0.0.1:8222/jsz?streams=true&consumers=true' 2>/dev/null || true)"
+if [[ -z "$nats_varz" || -z "$nats_jsz" ]]; then
+  failures+=("NATS monitoring endpoints are unavailable")
+else
+  nats_check="$(python3 - "$nats_varz" "$nats_jsz" <<'PY_NATS'
+import json,sys
+varz=json.loads(sys.argv[1]); jsz=json.loads(sys.argv[2])
+slow=int(varz.get('slow_consumers') or 0)
+streams=int(jsz.get('streams') or 0)
+consumers=int(jsz.get('consumers') or 0)
+print(f'slow_consumers={slow} streams={streams} consumers={consumers}')
+if slow or streams < 1 or consumers < 1: raise SystemExit(1)
+PY_NATS
+)" || failures+=("NATS/JetStream health is degraded: ${nats_check:-invalid response}")
+fi
+
+pgbouncer_waiting="$("${compose[@]}" exec -T pgbouncer sh -lc 'PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p 6432 -U "$DB_USER" pgbouncer -Atc "SHOW POOLS"' 2>/dev/null | awk -F'|' '{s+=$4} END{print s+0}')"
+(( ${pgbouncer_waiting:-0} < 5 )) || failures+=("PgBouncer has ${pgbouncer_waiting} waiting clients")
+
 echo "Operational snapshot"
-echo "  disk=${disk_percent}% available_memory=${available_mb}MB postgres_connections=${pg_connections}/${pg_max}"
+echo "  disk=${disk_percent}% available_memory=${available_mb}MB postgres_connections=${pg_connections}/${pg_max} pgbouncer_waiting=${pgbouncer_waiting:-unknown}"
 [[ -f "$tmpdir/realtime-pipeline.json" ]] && echo "  realtime_pipeline=$(cat "$tmpdir/realtime-pipeline.json")"
 [[ -f "$tmpdir/realtime-stats.json" ]] && echo "  axum=$(cat "$tmpdir/realtime-stats.json")"
 if ((${#warnings[@]})); then printf 'WARNING: %s\n' "${warnings[@]}"; fi

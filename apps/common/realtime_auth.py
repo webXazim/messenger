@@ -241,6 +241,7 @@ def issue_user_realtime_ticket(*, user, request, device_id: str = "", device_typ
             "device_type": str(device_type or "unknown")[:32],
             "origin": origin,
             "initial_audiences": _audience_dicts(initial_audiences),
+            "presence_recipient_ids": [str(value) for value in recipient_ids],
             "support": support_context,
         }
     )

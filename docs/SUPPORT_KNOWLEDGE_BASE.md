@@ -1,6 +1,6 @@
 # Support Knowledge Base and Visitor Self-Service
 
-Upgrade 10 adds a Support-only knowledge base without changing personal Messenger behavior.
+Support includes a dedicated knowledge base without changing personal Messenger behavior.
 
 ## Product boundary
 

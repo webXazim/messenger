@@ -883,6 +883,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "is_deleted",
             "deleted_at",
             "client_temp_id",
+            "sequence",
             "delivery_status",
             "failed_reason",
             "retry_count",
@@ -915,6 +916,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "edited_at",
             "is_deleted",
             "deleted_at",
+            "sequence",
             "attachments",
             "reactions",
             "deliveries",
@@ -1795,6 +1797,7 @@ class CallSpeakerStateSerializer(serializers.Serializer):
 
 class TurnCredentialsSerializer(serializers.Serializer):
     configured = serializers.BooleanField()
+    provider = serializers.CharField(required=False, allow_blank=True)
     ttl_seconds = serializers.IntegerField()
     username = serializers.CharField(required=False, allow_blank=True)
     credential = serializers.CharField(required=False, allow_blank=True)

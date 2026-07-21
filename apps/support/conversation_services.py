@@ -8,6 +8,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.chat.models import Conversation, Message
+from apps.chat.sequencing import allocate_message_sequence
 from apps.support.models import (
     SupportAgent,
     SupportConversation,
@@ -435,9 +436,12 @@ def send_visitor_message(
     except SupportMediaError as exc:
         raise SupportConversationError(exc.detail, code=exc.code, status_code=exc.status_code) from exc
 
+    chat_conversation, message_sequence = allocate_message_sequence(support_conversation.conversation)
+    support_conversation.conversation = chat_conversation
     message = Message.objects.create(
-        conversation=support_conversation.conversation,
+        conversation=chat_conversation,
         sender=None,
+        sequence=message_sequence,
         type=Message.MessageType.AUDIO if voice_note else Message.MessageType.TEXT,
         text=clean_text,
         metadata={"voice_note": True} if voice_note else {},
@@ -546,9 +550,12 @@ def send_team_message(
     except SupportMediaError as exc:
         raise SupportConversationError(exc.detail, code=exc.code, status_code=exc.status_code) from exc
 
+    chat_conversation, message_sequence = allocate_message_sequence(support_conversation.conversation)
+    support_conversation.conversation = chat_conversation
     message = Message.objects.create(
-        conversation=support_conversation.conversation,
+        conversation=chat_conversation,
         sender=actor,
+        sequence=message_sequence,
         type=Message.MessageType.AUDIO if voice_note else Message.MessageType.TEXT,
         text=clean_text,
         metadata={"voice_note": True} if voice_note else {},

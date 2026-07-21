@@ -1,13 +1,10 @@
-FROM rust:1.86-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 WORKDIR /app
 ENV CARGO_INCREMENTAL=0 \
     CARGO_BUILD_JOBS=1
 COPY . .
-RUN if [ -f Cargo.lock ]; then \
-      cargo build --release --locked --jobs 1; \
-    else \
-      cargo build --release --jobs 1; \
-    fi
+RUN test -s Cargo.lock || { echo "Cargo.lock is required; run ./scripts/generate-realtime-lockfile.sh first" >&2; exit 1; }
+RUN cargo build --release --locked --jobs 1
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \

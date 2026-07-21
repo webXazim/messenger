@@ -1,6 +1,6 @@
 # Support Chat visitor and widget foundation
 
-This upgrade adds the public visitor identity and session boundary for Support Chat. It does not change personal Messenger conversations, accounts, E2EE, calls, attachments, presence, or unread state.
+This component provides the public visitor identity and session boundary for Support Chat. It does not change personal Messenger conversations, accounts, E2EE, calls, attachments, presence, or unread state.
 
 ## Public rollout flags
 
@@ -38,7 +38,7 @@ The owner-facing Websites page generates a versioned script tag:
 <script async src="https://your-domain.example/support-widget/v1/widget.js" data-support-site-key="WEBSITE_SITE_KEY"></script>
 ```
 
-The loader establishes the public configuration, resumable visitor session, and isolated Support conversation APIs. Text messaging is available; realtime delivery and media remain separate later upgrades, with polling retained as the fallback.
+The loader establishes the public configuration, resumable visitor session, and isolated Support conversation APIs. Text messaging is available; realtime delivery and media remain separate separate production services, with polling retained as the fallback.
 
 ## Session security
 

@@ -88,6 +88,7 @@ class Conversation(BaseUUIDModel):
     e2ee_rekey_required = models.BooleanField(default=False)
     e2ee_last_key_rotation_at = models.DateTimeField(null=True, blank=True)
     e2ee_last_security_event_at = models.DateTimeField(null=True, blank=True)
+    next_message_sequence = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         ordering = ["-last_message_at", "-created_at"]
@@ -281,6 +282,7 @@ class Message(BaseUUIDModel):
         FAILED = "failed", "Failed"
 
     client_temp_id = models.CharField(max_length=100, blank=True, db_index=True)
+    sequence = models.PositiveBigIntegerField(null=True, blank=True)
     delivery_status = models.CharField(max_length=16, choices=DeliveryStatus.choices, default=DeliveryStatus.SENT)
     failed_reason = models.CharField(max_length=255, blank=True)
     retry_count = models.PositiveSmallIntegerField(default=0)
@@ -290,6 +292,7 @@ class Message(BaseUUIDModel):
         indexes = [
             models.Index(fields=["conversation", "-created_at"]),
             models.Index(fields=["sender", "-created_at"]),
+            models.Index(fields=["conversation", "-sequence"], name="chat_msg_conv_seq_idx"),
             models.Index(
                 fields=["conversation", "created_at", "id"],
                 condition=models.Q(is_deleted=False),
@@ -297,6 +300,11 @@ class Message(BaseUUIDModel):
             ),
         ]
         constraints = [
+            models.UniqueConstraint(
+                fields=["conversation", "sequence"],
+                condition=models.Q(sequence__isnull=False),
+                name="uniq_msg_conversation_sequence",
+            ),
             models.UniqueConstraint(
                 fields=["conversation", "sender", "client_temp_id"],
                 condition=models.Q(client_temp_id__gt="", sender__isnull=False),

@@ -197,10 +197,54 @@ def redis_snapshot() -> dict:
     }
 
 
+def nats_snapshot() -> dict:
+    compose = compose_base()
+    varz = json_command([*compose, "exec", "-T", "nats", "wget", "-qO-", "http://127.0.0.1:8222/varz"])
+    jsz = json_command([*compose, "exec", "-T", "nats", "wget", "-qO-", "http://127.0.0.1:8222/jsz?accounts=true&streams=true&consumers=true"])
+    return {
+        "connections": int(varz.get("connections", 0) or 0),
+        "subscriptions": int(varz.get("subscriptions", 0) or 0),
+        "slow_consumers": int(varz.get("slow_consumers", 0) or 0),
+        "in_msgs": int(varz.get("in_msgs", 0) or 0),
+        "out_msgs": int(varz.get("out_msgs", 0) or 0),
+        "in_bytes": int(varz.get("in_bytes", 0) or 0),
+        "out_bytes": int(varz.get("out_bytes", 0) or 0),
+        "mem": int(varz.get("mem", 0) or 0),
+        "cpu": float(varz.get("cpu", 0) or 0),
+        "jetstream": jsz.get("memory", 0) is not None and {
+            "memory": int(jsz.get("memory", 0) or 0),
+            "storage": int(jsz.get("storage", 0) or 0),
+            "messages": int(jsz.get("messages", 0) or 0),
+            "streams": int(jsz.get("streams", 0) or 0),
+            "consumers": int(jsz.get("consumers", 0) or 0),
+        } or {},
+    }
+
+
+def pgbouncer_snapshot() -> dict:
+    compose = compose_base()
+    db_user = os.getenv("DB_USER", "")
+    if not db_user and Path(".env").exists():
+        for line in Path(".env").read_text(encoding="utf-8").splitlines():
+            if line.startswith("DB_USER="):
+                db_user = line.split("=", 1)[1].strip().strip("\"'")
+                break
+    raw = run([*compose, "exec", "-T", "pgbouncer", "psql", "-h", "127.0.0.1", "-p", "6432", "-U", db_user, "pgbouncer", "-At", "-F", "|", "-c", "SHOW POOLS;"])
+    active = waiting = server_active = server_idle = 0
+    for line in raw.splitlines():
+        parts = line.split("|")
+        if len(parts) >= 10:
+            try:
+                active += int(parts[2]); waiting += int(parts[3]); server_active += int(parts[5]); server_idle += int(parts[6])
+            except (ValueError, IndexError):
+                pass
+    return {"client_active": active, "client_waiting": waiting, "server_active": server_active, "server_idle": server_idle}
+
+
 def sample(deployment: dict) -> dict:
     compose = compose_base()
     containers = {service: container_snapshot(service) for service in (
-        "postgres", "redis", "web", "worker", "beat", "realtime", "frontend", "nginx"
+        "postgres", "pgbouncer", "redis", "nats", "web", "worker", "beat", "realtime", "frontend", "nginx"
     )}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -209,6 +253,8 @@ def sample(deployment: dict) -> dict:
         "containers": containers,
         "postgres": database_snapshot(),
         "redis": redis_snapshot(),
+        "nats": nats_snapshot(),
+        "pgbouncer": pgbouncer_snapshot(),
         "axum": json_command([*compose, "exec", "-T", "realtime", "curl", "-fsS", "http://127.0.0.1:9000/internal/stats"]),
         "pipeline": json_command([*compose, "exec", "-T", "web", "python", "manage.py", "check_realtime_pipeline", "--json", "--warn-only"]),
     }

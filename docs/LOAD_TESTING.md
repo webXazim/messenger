@@ -68,7 +68,7 @@ The mixed scenario keeps authenticated sockets open while concurrently loading:
 - Conversation lists
 - Message pages
 - Message creation and durable outbox publication
-- Redis Stream consumption and Axum fanout
+- NATS JetStream consumption and Axum fanout
 - Presence, typing, pings, grants, and tickets
 
 Copy the k6 result directory back to the VPS under `loadtests/results/final-suite`.
@@ -143,7 +143,7 @@ A passing report requires, among other checks:
 - No PostgreSQL deadlocks and fewer than five new temp files
 - Redis below 85%, with no evictions or rejected connections
 - No Axum Stream errors, malformed events, connection rejection, or container restart
-- Healthy outbox and Redis Stream state for every sample
+- Healthy outbox and NATS JetStream state for every sample
 - Passing PostgreSQL audit and complete strict `EXPLAIN ANALYZE` coverage
 - One unchanged deployment fingerprint for the complete measurement window
 
@@ -183,4 +183,4 @@ rm -f /path/on/load-generator/users.json
   loadtests/results/capacity-report.json
 ```
 
-Run a new complete suite after changing any application image, dependency lockfile, Compose performance setting, Gunicorn worker/thread count, Celery worker configuration, Axum queue capacity, or database connection configuration.
+Run a new complete suite after changing any application image, dependency lockfile, Compose performance setting, Granian worker count, Celery worker configuration, Axum queue capacity, or database connection configuration.

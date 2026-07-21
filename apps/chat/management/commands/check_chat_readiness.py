@@ -14,7 +14,9 @@ class Command(BaseCommand):
         migrations_ok, migrations_detail = migrations_ready()
         integrations = integration_health_snapshot()
         realtime_transport = str(getattr(settings, "REALTIME_TRANSPORT", "") or "")
-        realtime_stream_enabled = bool(getattr(settings, "REALTIME_STREAM_ENABLED", False))
+        realtime_durable_backend = str(getattr(settings, "REALTIME_DURABLE_BACKEND", "") or "").strip().lower()
+        realtime_ephemeral_backend = str(getattr(settings, "REALTIME_EPHEMERAL_BACKEND", "") or "").strip().lower()
+        realtime_presence_backend = str(getattr(settings, "REALTIME_PRESENCE_BACKEND", "") or "").strip().lower()
         realtime_outbox_enabled = bool(getattr(settings, "REALTIME_OUTBOX_ENABLED", False))
         realtime_auth_enabled = bool(getattr(settings, "REALTIME_AUTH_ENABLED", False))
         cache_backend = settings.CACHES.get("default", {}).get("BACKEND", "")
@@ -28,7 +30,9 @@ class Command(BaseCommand):
             ("migrations", f"{'ok' if migrations_ok else 'fail'} ({migrations_detail})"),
             ("db engine", settings.DB_ENGINE),
             ("realtime transport", realtime_transport),
-            ("realtime stream", realtime_stream_enabled),
+            ("realtime durable backend", realtime_durable_backend),
+            ("realtime ephemeral backend", realtime_ephemeral_backend),
+            ("realtime presence backend", realtime_presence_backend),
             ("realtime outbox", realtime_outbox_enabled),
             ("realtime auth", realtime_auth_enabled),
             ("cache backend", cache_backend),
@@ -72,8 +76,12 @@ class Command(BaseCommand):
             issues.append("Database is not healthy")
         if realtime_transport.lower() != "axum":
             issues.append("REALTIME_TRANSPORT is not axum")
-        if not realtime_stream_enabled:
-            issues.append("Realtime Redis Stream delivery is disabled")
+        if realtime_durable_backend not in {"nats", "jetstream"}:
+            issues.append("Realtime durable backend is invalid")
+        if realtime_ephemeral_backend not in {"nats", "local", "memory"}:
+            issues.append("Realtime ephemeral backend is invalid")
+        if realtime_presence_backend not in {"local", "memory", "legacy_redis", "redis"}:
+            issues.append("Realtime presence backend is invalid")
         if not realtime_outbox_enabled:
             issues.append("Realtime outbox durability is disabled")
         if not realtime_auth_enabled:

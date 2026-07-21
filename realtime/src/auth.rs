@@ -1,5 +1,7 @@
 use std::{collections::HashSet, fs, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
+use tokio::sync::OnceCell;
+
 use anyhow::{Context, Result};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
@@ -32,6 +34,8 @@ pub struct TicketClaims {
     pub support_conversation_id: String,
     #[serde(default)]
     pub initial_audiences: Vec<AudienceKey>,
+    #[serde(default)]
+    pub presence_recipient_ids: Vec<String>,
     pub jti: String,
     pub exp: usize,
     pub token_use: String,
@@ -95,6 +99,7 @@ pub struct AuthenticatedSession {
     pub website_id: String,
     pub support_conversation_id: String,
     pub initial_audiences: Vec<AudienceKey>,
+    pub presence_recipient_ids: Vec<String>,
     pub require_grants: bool,
 }
 
@@ -113,6 +118,7 @@ impl AuthenticatedSession {
             website_id: String::new(),
             support_conversation_id: String::new(),
             initial_audiences: Vec::new(),
+            presence_recipient_ids: Vec::new(),
             require_grants: false,
         }
     }
@@ -144,6 +150,7 @@ pub struct Authenticator {
     grant_validation: Validation,
     call_grant_validation: Validation,
     redis_client: redis::Client,
+    redis_connection: OnceCell<redis::aio::ConnectionManager>,
     replay_prefix: String,
     require_origin: bool,
     allowed_origins: HashSet<String>,
@@ -190,6 +197,7 @@ impl Authenticator {
             grant_validation,
             call_grant_validation,
             redis_client,
+            redis_connection: OnceCell::new(),
             replay_prefix: config.ticket_replay_prefix.clone(),
             require_origin: config.require_origin,
             allowed_origins: normalize_allowed_origins(&config.allowed_origins)?,
@@ -239,6 +247,7 @@ impl Authenticator {
             website_id: claims.website_id,
             support_conversation_id: claims.support_conversation_id,
             initial_audiences: claims.initial_audiences,
+            presence_recipient_ids: claims.presence_recipient_ids,
             require_grants: true,
         })
     }
@@ -307,8 +316,21 @@ impl Authenticator {
         Ok(())
     }
 
+    async fn connection(&self) -> Result<redis::aio::ConnectionManager, AuthError> {
+        let connection = self
+            .redis_connection
+            .get_or_try_init(|| async {
+                self.redis_client
+                    .get_connection_manager()
+                    .await
+                    .map_err(|_| AuthError::StorageUnavailable)
+            })
+            .await?;
+        Ok(connection.clone())
+    }
+
     pub async fn check_storage(&self) -> bool {
-        let Ok(mut connection) = self.redis_client.get_multiplexed_async_connection().await else {
+        let Ok(mut connection) = self.connection().await else {
             return false;
         };
         let response: redis::RedisResult<String> = redis::cmd("PING")
@@ -332,11 +354,7 @@ impl Authenticator {
         }
         let ttl = exp.saturating_sub(now).saturating_add(30).max(30);
         let key = format!("{}{}", self.replay_prefix, jti);
-        let mut connection = self
-            .redis_client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|_| AuthError::StorageUnavailable)?;
+        let mut connection = self.connection().await?;
         let result: Option<String> = redis::cmd("SET")
             .arg(key)
             .arg("1")

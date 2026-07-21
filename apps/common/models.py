@@ -30,7 +30,7 @@ class RealtimeOutboxEvent(BaseUUIDModel):
     attempts = models.PositiveIntegerField(default=0)
     available_at = models.DateTimeField(default=timezone.now, db_index=True)
     published_at = models.DateTimeField(null=True, blank=True)
-    delivery_target = models.CharField(max_length=24, default="redis_stream", db_index=True)
+    delivery_target = models.CharField(max_length=24, default="nats_jetstream", db_index=True)
     published_transport = models.CharField(max_length=24, blank=True)
     stream_entry_id = models.CharField(max_length=64, blank=True)
     last_error = models.TextField(blank=True)

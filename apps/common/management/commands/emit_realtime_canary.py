@@ -11,7 +11,7 @@ from apps.common.realtime import publish_realtime_event, user_audience
 
 
 class Command(BaseCommand):
-    help = "Publish one durable no-recipient realtime canary and wait for Redis Stream publication."
+    help = "Publish one durable no-recipient realtime canary and wait for JetStream publication."
 
     def add_arguments(self, parser):
         parser.add_argument("--timeout", type=int, default=20)

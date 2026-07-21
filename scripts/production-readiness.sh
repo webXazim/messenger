@@ -110,7 +110,20 @@ if [[ "$(read_env BACKUP_R2_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]]; then
   require_value BACKUP_R2_BUCKET_NAME
 fi
 [[ "$(read_env REALTIME_TRANSPORT)" == "axum" ]] || failures+=("REALTIME_TRANSPORT must be axum")
-[[ "$(read_env REALTIME_STREAM_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_STREAM_ENABLED must be true")
+durable_backend="$(read_env REALTIME_DURABLE_BACKEND)"
+case "$durable_backend" in
+  nats|jetstream)
+    require_value NATS_APP_USER
+    require_value NATS_APP_PASSWORD
+    require_value NATS_REALTIME_USER
+    require_value NATS_REALTIME_PASSWORD
+    app_password="$(read_env NATS_APP_PASSWORD)"
+    realtime_password="$(read_env NATS_REALTIME_PASSWORD)"
+    [[ "$app_password" != "change-me-nats-app" ]] || failures+=("Replace the example NATS_APP_PASSWORD")
+    [[ "$realtime_password" != "change-me-nats-realtime" ]] || failures+=("Replace the example NATS_REALTIME_PASSWORD")
+    ;;
+  *) failures+=("REALTIME_DURABLE_BACKEND must be nats") ;;
+esac
 [[ "$(read_env REALTIME_OUTBOX_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_OUTBOX_ENABLED must be true")
 require_value REALTIME_ALLOWED_ORIGINS
 realtime_origins=",$(read_env REALTIME_ALLOWED_ORIGINS),"

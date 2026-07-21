@@ -17,7 +17,7 @@ highest-volume Django read paths without duplicating business logic in Rust.
 - Call lists reuse prefetched participants, batch presence, and compute participant summaries in Python without extra count queries.
 - Reverse block lookups have a matching PostgreSQL index for privacy checks.
 - Live-message unread scans use a partial PostgreSQL index.
-- Gunicorn workers recycle after a staggered request count.
+- Granian serves Django over HTTP-only ASGI; Gunicorn remains a rollback-compatible fallback.
 - Production rejects eager Celery execution, stored task results, and synchronous
   upload scanning.
 
@@ -65,7 +65,7 @@ python manage.py explain_support_inbox --user owner@example.com
 
 ## Final measured-production gate
 
-Upgrade 13 does not add speculative indexes. It captures PostgreSQL table health,
+The production design does not add speculative indexes. It captures PostgreSQL table health,
 critical-index validity, and controlled `EXPLAIN ANALYZE` plans for the Messenger
 conversation list, message page, Support Inbox, realtime outbox claim, and webhook
 claim. A capacity recommendation is issued only when those plans, the mixed
@@ -81,6 +81,6 @@ PERFORMANCE_PLAN_ACK=RUN_EXPLAIN_ANALYZE \
   loadtests/results/final-suite
 ```
 
-Any application image, dependency lockfile, Gunicorn/Celery setting, Axum queue
+Any application image, dependency lockfile, Granian/Celery setting, Axum queue
 capacity, or database connection setting change invalidates the report and requires
 a new measured suite.

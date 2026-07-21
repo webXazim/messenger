@@ -16,24 +16,45 @@ x-backend-common: &backend-common
     - path: .env
       required: false
   environment:
+    DJANGO_SERVER: ${DJANGO_SERVER:-gunicorn}
+    DJANGO_BIND_HOST: ${DJANGO_BIND_HOST:-0.0.0.0}
+    DJANGO_PORT: ${DJANGO_PORT:-8000}
+    GRANIAN_WORKERS: ${GRANIAN_WORKERS:-2}
     DB_ENGINE: ${DB_ENGINE:-postgres}
     DB_NAME: ${DB_NAME:-messenger_api}
     DB_USER: ${DB_USER:-messenger_user}
     DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
     DB_HOST: postgres
     DB_PORT: 5432
+    DATABASE_RUNTIME_ENDPOINT: ${DATABASE_RUNTIME_ENDPOINT:-postgres}
+    DB_PGBOUNCER_HOST: ${DB_PGBOUNCER_HOST:-pgbouncer}
+    DB_PGBOUNCER_PORT: ${DB_PGBOUNCER_PORT:-6432}
+    DB_MIGRATION_HOST: ${DB_MIGRATION_HOST:-postgres}
+    DB_MIGRATION_PORT: ${DB_MIGRATION_PORT:-5432}
+    DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+    DATABASE_CONN_MAX_AGE: ${DATABASE_CONN_MAX_AGE:-60}
     REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
     REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
     CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-    CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-    REALTIME_STREAM_URL: ${REALTIME_STREAM_URL:-redis://redis:6379/3}
-    REALTIME_STREAM_NAME: ${REALTIME_STREAM_NAME:-realtime:durable:v1}
+    CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
     REALTIME_PRESENCE_REDIS_URL: ${REALTIME_PRESENCE_REDIS_URL:-redis://redis:6379/3}
     REALTIME_PRESENCE_TTL_SECONDS: ${REALTIME_PRESENCE_TTL_SECONDS:-90}
     REALTIME_PRESENCE_METADATA_TTL_SECONDS: ${REALTIME_PRESENCE_METADATA_TTL_SECONDS:-300}
-    REALTIME_STREAM_ENABLED: ${REALTIME_STREAM_ENABLED:-true}
     REALTIME_OUTBOX_ENABLED: ${REALTIME_OUTBOX_ENABLED:-true}
     REALTIME_TRANSPORT: ${REALTIME_TRANSPORT:-axum}
+    REALTIME_DURABLE_BACKEND: ${REALTIME_DURABLE_BACKEND:-nats}
+    REALTIME_EPHEMERAL_BACKEND: ${REALTIME_EPHEMERAL_BACKEND:-local}
+    REALTIME_PRESENCE_BACKEND: ${REALTIME_PRESENCE_BACKEND:-legacy_redis}
+    CHAT_COMMAND_BACKEND: ${CHAT_COMMAND_BACKEND:-django}
+    CHAT_COMMAND_JWT_ISSUER: ${CHAT_COMMAND_JWT_ISSUER:-${AUTH_PAYMENT_JWT_ISSUER:-crescentsphere-django}}
+    CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-}
+    CHAT_READ_BACKEND: ${CHAT_READ_BACKEND:-django}
+    SQLX_DATABASE_URL: ${SQLX_DATABASE_URL:-postgres://${DB_USER:-messenger_user}:${DB_PASSWORD:-messenger_password}@pgbouncer:6432/${DB_NAME:-messenger_api}}
+    SQLX_MAX_CONNECTIONS: ${SQLX_MAX_CONNECTIONS:-4}
+    SQLX_ACQUIRE_TIMEOUT_SECONDS: ${SQLX_ACQUIRE_TIMEOUT_SECONDS:-3}
+    NATS_URL: ${NATS_APP_URL:-nats://django:change-me-nats-app@nats:4222}
+    NATS_CONNECT_TIMEOUT_SECONDS: ${NATS_CONNECT_TIMEOUT_SECONDS:-3}
+    NATS_CHAT_STREAM: ${NATS_CHAT_STREAM:-CHAT_EVENTS}
     REALTIME_AUTH_ENABLED: ${REALTIME_AUTH_ENABLED:-true}
     REALTIME_TOKEN_ALGORITHM: RS256
     REALTIME_TOKEN_ISSUER: ${REALTIME_TOKEN_ISSUER:-crescentsphere-django}
@@ -64,7 +85,11 @@ x-backend-common: &backend-common
   depends_on:
     postgres:
       condition: service_healthy
+    pgbouncer:
+      condition: service_healthy
     redis:
+      condition: service_healthy
+    nats:
       condition: service_healthy
 
 services:
@@ -77,7 +102,7 @@ services:
     command:
       - postgres
       - -c
-      - max_connections=40
+      - max_connections=30
       - -c
       - shared_buffers=128MB
       - -c
@@ -104,13 +129,66 @@ services:
       retries: 10
     networks: [messenger]
 
+  pgbouncer:
+    init: true
+    stop_grace_period: 20s
+    build:
+      context: ./deploy/pgbouncer
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      DB_NAME: ${DB_NAME:-messenger_api}
+      DB_USER: ${DB_USER:-messenger_user}
+      DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      PGBOUNCER_POOL_MODE: ${PGBOUNCER_POOL_MODE:-transaction}
+      PGBOUNCER_DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-10}
+      PGBOUNCER_RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-2}
+      PGBOUNCER_MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-100}
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: ${PGBOUNCER_SERVER_IDLE_TIMEOUT:-60}
+      PGBOUNCER_QUERY_TIMEOUT: ${PGBOUNCER_QUERY_TIMEOUT:-30}
+      PGBOUNCER_CLIENT_IDLE_TIMEOUT: ${PGBOUNCER_CLIENT_IDLE_TIMEOUT:-300}
+    expose:
+      - "6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${DB_PASSWORD} pg_isready -h 127.0.0.1 -p 6432 -U $${DB_USER} -d $${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 32m
+    cpus: 0.15
+    pids_limit: 64
+    networks: [messenger]
+
   redis:
     init: true
     stop_grace_period: 30s
     image: redis:7-alpine
     restart: unless-stopped
     logging: *default-logging
-    command: redis-server --appendonly yes --appendfsync everysec --save 60 1000 --maxmemory 160mb --maxmemory-policy noeviction --latency-monitor-threshold 100 --slowlog-log-slower-than 10000 --slowlog-max-len 128
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - ""
+      - --maxmemory
+      - 160mb
+      - --maxmemory-policy
+      - noeviction
+      - --latency-monitor-threshold
+      - "100"
+      - --slowlog-log-slower-than
+      - "10000"
+      - --slowlog-max-len
+      - "128"
     mem_limit: 192m
     cpus: 0.75
     pids_limit: 96
@@ -123,13 +201,43 @@ services:
       retries: 10
     networks: [messenger]
 
+  nats:
+    init: true
+    stop_grace_period: 20s
+    image: nats:2.14.3-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    command: ["--config", "/etc/nats/nats.conf"]
+    environment:
+      GOMEMLIMIT: 120MiB
+      NATS_APP_USER: ${NATS_APP_USER:-django}
+      NATS_APP_PASSWORD: ${NATS_APP_PASSWORD:-change-me-nats-app}
+      NATS_REALTIME_USER: ${NATS_REALTIME_USER:-realtime}
+      NATS_REALTIME_PASSWORD: ${NATS_REALTIME_PASSWORD:-change-me-nats-realtime}
+    volumes:
+      - ./deploy/nats/nats.conf:/etc/nats/nats.conf:ro
+      - nats_data:/data
+    expose:
+      - "4222"
+      - "8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null 'http://127.0.0.1:8222/healthz?js-enabled-only=true' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 144m
+    cpus: 0.35
+    pids_limit: 96
+    networks: [messenger]
+
   web:
     <<: *backend-common
     ulimits:
       nofile:
         soft: 4096
         hard: 4096
-    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers ${GUNICORN_WORKERS:-2} --threads ${GUNICORN_THREADS:-2} --timeout 30 --keep-alive 5 --max-requests ${GUNICORN_MAX_REQUESTS:-1000} --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER:-100}
+    command: ["/app/deploy/django/start-server.sh"]
     environment:
       DB_ENGINE: ${DB_ENGINE:-postgres}
       DB_NAME: ${DB_NAME:-messenger_api}
@@ -137,22 +245,35 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
       DB_HOST: postgres
       DB_PORT: 5432
+      DATABASE_RUNTIME_ENDPOINT: ${DATABASE_RUNTIME_ENDPOINT:-postgres}
+      DB_PGBOUNCER_HOST: ${DB_PGBOUNCER_HOST:-pgbouncer}
+      DB_PGBOUNCER_PORT: ${DB_PGBOUNCER_PORT:-6432}
+      DB_MIGRATION_HOST: ${DB_MIGRATION_HOST:-postgres}
+      DB_MIGRATION_PORT: ${DB_MIGRATION_PORT:-5432}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      DATABASE_CONN_MAX_AGE: ${DATABASE_CONN_MAX_AGE:-60}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      REALTIME_STREAM_URL: ${REALTIME_STREAM_URL:-redis://redis:6379/3}
-      REALTIME_STREAM_NAME: ${REALTIME_STREAM_NAME:-realtime:durable:v1}
-      REALTIME_STREAM_GROUP: ${REALTIME_STREAM_GROUP:-axum-single-v1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      NATS_URL: ${NATS_APP_URL:-nats://django:change-me-nats-app@nats:4222}
       REALTIME_OUTBOX_MAX_AGE_SECONDS: ${REALTIME_OUTBOX_MAX_AGE_SECONDS:-120}
       REALTIME_OUTBOX_MAX_FAILED: ${REALTIME_OUTBOX_MAX_FAILED:-25}
-      REALTIME_STREAM_MAX_PENDING: ${REALTIME_STREAM_MAX_PENDING:-250}
       REALTIME_PRESENCE_REDIS_URL: ${REALTIME_PRESENCE_REDIS_URL:-redis://redis:6379/3}
       REALTIME_PRESENCE_TTL_SECONDS: ${REALTIME_PRESENCE_TTL_SECONDS:-90}
       REALTIME_PRESENCE_METADATA_TTL_SECONDS: ${REALTIME_PRESENCE_METADATA_TTL_SECONDS:-300}
-      REALTIME_STREAM_ENABLED: ${REALTIME_STREAM_ENABLED:-true}
       REALTIME_OUTBOX_ENABLED: ${REALTIME_OUTBOX_ENABLED:-true}
       REALTIME_TRANSPORT: ${REALTIME_TRANSPORT:-axum}
+      REALTIME_DURABLE_BACKEND: ${REALTIME_DURABLE_BACKEND:-nats}
+      REALTIME_EPHEMERAL_BACKEND: ${REALTIME_EPHEMERAL_BACKEND:-local}
+      REALTIME_PRESENCE_BACKEND: ${REALTIME_PRESENCE_BACKEND:-legacy_redis}
+      CHAT_COMMAND_BACKEND: ${CHAT_COMMAND_BACKEND:-django}
+      CHAT_COMMAND_JWT_ISSUER: ${CHAT_COMMAND_JWT_ISSUER:-${AUTH_PAYMENT_JWT_ISSUER:-crescentsphere-django}}
+      CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-}
+      CHAT_READ_BACKEND: ${CHAT_READ_BACKEND:-django}
+      SQLX_DATABASE_URL: ${SQLX_DATABASE_URL:-postgres://${DB_USER:-messenger_user}:${DB_PASSWORD:-messenger_password}@pgbouncer:6432/${DB_NAME:-messenger_api}}
+      SQLX_MAX_CONNECTIONS: ${SQLX_MAX_CONNECTIONS:-4}
+      SQLX_ACQUIRE_TIMEOUT_SECONDS: ${SQLX_ACQUIRE_TIMEOUT_SECONDS:-3}
       REALTIME_AUTH_ENABLED: ${REALTIME_AUTH_ENABLED:-true}
       REALTIME_TOKEN_ALGORITHM: RS256
       REALTIME_TOKEN_ISSUER: ${REALTIME_TOKEN_ISSUER:-crescentsphere-django}
@@ -185,6 +306,7 @@ services:
       # host .env value to start new application code against an old schema.
       RUN_MIGRATIONS: "1"
       RUN_COLLECTSTATIC: "1"
+      ENSURE_NATS_STREAM: "1"
     expose:
       - "8000"
     healthcheck:
@@ -216,22 +338,35 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
       DB_HOST: postgres
       DB_PORT: 5432
+      DATABASE_RUNTIME_ENDPOINT: ${DATABASE_RUNTIME_ENDPOINT:-postgres}
+      DB_PGBOUNCER_HOST: ${DB_PGBOUNCER_HOST:-pgbouncer}
+      DB_PGBOUNCER_PORT: ${DB_PGBOUNCER_PORT:-6432}
+      DB_MIGRATION_HOST: ${DB_MIGRATION_HOST:-postgres}
+      DB_MIGRATION_PORT: ${DB_MIGRATION_PORT:-5432}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      DATABASE_CONN_MAX_AGE: ${DATABASE_CONN_MAX_AGE:-60}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      REALTIME_STREAM_URL: ${REALTIME_STREAM_URL:-redis://redis:6379/3}
-      REALTIME_STREAM_NAME: ${REALTIME_STREAM_NAME:-realtime:durable:v1}
-      REALTIME_STREAM_GROUP: ${REALTIME_STREAM_GROUP:-axum-single-v1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      NATS_URL: ${NATS_APP_URL:-nats://django:change-me-nats-app@nats:4222}
       REALTIME_OUTBOX_MAX_AGE_SECONDS: ${REALTIME_OUTBOX_MAX_AGE_SECONDS:-120}
       REALTIME_OUTBOX_MAX_FAILED: ${REALTIME_OUTBOX_MAX_FAILED:-25}
-      REALTIME_STREAM_MAX_PENDING: ${REALTIME_STREAM_MAX_PENDING:-250}
       REALTIME_PRESENCE_REDIS_URL: ${REALTIME_PRESENCE_REDIS_URL:-redis://redis:6379/3}
       REALTIME_PRESENCE_TTL_SECONDS: ${REALTIME_PRESENCE_TTL_SECONDS:-90}
       REALTIME_PRESENCE_METADATA_TTL_SECONDS: ${REALTIME_PRESENCE_METADATA_TTL_SECONDS:-300}
-      REALTIME_STREAM_ENABLED: ${REALTIME_STREAM_ENABLED:-true}
       REALTIME_OUTBOX_ENABLED: ${REALTIME_OUTBOX_ENABLED:-true}
       REALTIME_TRANSPORT: ${REALTIME_TRANSPORT:-axum}
+      REALTIME_DURABLE_BACKEND: ${REALTIME_DURABLE_BACKEND:-nats}
+      REALTIME_EPHEMERAL_BACKEND: ${REALTIME_EPHEMERAL_BACKEND:-local}
+      REALTIME_PRESENCE_BACKEND: ${REALTIME_PRESENCE_BACKEND:-legacy_redis}
+      CHAT_COMMAND_BACKEND: ${CHAT_COMMAND_BACKEND:-django}
+      CHAT_COMMAND_JWT_ISSUER: ${CHAT_COMMAND_JWT_ISSUER:-${AUTH_PAYMENT_JWT_ISSUER:-crescentsphere-django}}
+      CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-}
+      CHAT_READ_BACKEND: ${CHAT_READ_BACKEND:-django}
+      SQLX_DATABASE_URL: ${SQLX_DATABASE_URL:-postgres://${DB_USER:-messenger_user}:${DB_PASSWORD:-messenger_password}@pgbouncer:6432/${DB_NAME:-messenger_api}}
+      SQLX_MAX_CONNECTIONS: ${SQLX_MAX_CONNECTIONS:-4}
+      SQLX_ACQUIRE_TIMEOUT_SECONDS: ${SQLX_ACQUIRE_TIMEOUT_SECONDS:-3}
       REALTIME_AUTH_ENABLED: ${REALTIME_AUTH_ENABLED:-true}
       REALTIME_TOKEN_ALGORITHM: RS256
       REALTIME_TOKEN_ISSUER: ${REALTIME_TOKEN_ISSUER:-crescentsphere-django}
@@ -266,22 +401,35 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-messenger_password}
       DB_HOST: postgres
       DB_PORT: 5432
+      DATABASE_RUNTIME_ENDPOINT: ${DATABASE_RUNTIME_ENDPOINT:-postgres}
+      DB_PGBOUNCER_HOST: ${DB_PGBOUNCER_HOST:-pgbouncer}
+      DB_PGBOUNCER_PORT: ${DB_PGBOUNCER_PORT:-6432}
+      DB_MIGRATION_HOST: ${DB_MIGRATION_HOST:-postgres}
+      DB_MIGRATION_PORT: ${DB_MIGRATION_PORT:-5432}
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      DATABASE_CONN_MAX_AGE: ${DATABASE_CONN_MAX_AGE:-60}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/1}
       REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/2}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
-      REALTIME_STREAM_URL: ${REALTIME_STREAM_URL:-redis://redis:6379/3}
-      REALTIME_STREAM_NAME: ${REALTIME_STREAM_NAME:-realtime:durable:v1}
-      REALTIME_STREAM_GROUP: ${REALTIME_STREAM_GROUP:-axum-single-v1}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      NATS_URL: ${NATS_APP_URL:-nats://django:change-me-nats-app@nats:4222}
       REALTIME_OUTBOX_MAX_AGE_SECONDS: ${REALTIME_OUTBOX_MAX_AGE_SECONDS:-120}
       REALTIME_OUTBOX_MAX_FAILED: ${REALTIME_OUTBOX_MAX_FAILED:-25}
-      REALTIME_STREAM_MAX_PENDING: ${REALTIME_STREAM_MAX_PENDING:-250}
       REALTIME_PRESENCE_REDIS_URL: ${REALTIME_PRESENCE_REDIS_URL:-redis://redis:6379/3}
       REALTIME_PRESENCE_TTL_SECONDS: ${REALTIME_PRESENCE_TTL_SECONDS:-90}
       REALTIME_PRESENCE_METADATA_TTL_SECONDS: ${REALTIME_PRESENCE_METADATA_TTL_SECONDS:-300}
-      REALTIME_STREAM_ENABLED: ${REALTIME_STREAM_ENABLED:-true}
       REALTIME_OUTBOX_ENABLED: ${REALTIME_OUTBOX_ENABLED:-true}
       REALTIME_TRANSPORT: ${REALTIME_TRANSPORT:-axum}
+      REALTIME_DURABLE_BACKEND: ${REALTIME_DURABLE_BACKEND:-nats}
+      REALTIME_EPHEMERAL_BACKEND: ${REALTIME_EPHEMERAL_BACKEND:-local}
+      REALTIME_PRESENCE_BACKEND: ${REALTIME_PRESENCE_BACKEND:-legacy_redis}
+      CHAT_COMMAND_BACKEND: ${CHAT_COMMAND_BACKEND:-django}
+      CHAT_COMMAND_JWT_ISSUER: ${CHAT_COMMAND_JWT_ISSUER:-${AUTH_PAYMENT_JWT_ISSUER:-crescentsphere-django}}
+      CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-}
+      CHAT_READ_BACKEND: ${CHAT_READ_BACKEND:-django}
+      SQLX_DATABASE_URL: ${SQLX_DATABASE_URL:-postgres://${DB_USER:-messenger_user}:${DB_PASSWORD:-messenger_password}@pgbouncer:6432/${DB_NAME:-messenger_api}}
+      SQLX_MAX_CONNECTIONS: ${SQLX_MAX_CONNECTIONS:-4}
+      SQLX_ACQUIRE_TIMEOUT_SECONDS: ${SQLX_ACQUIRE_TIMEOUT_SECONDS:-3}
       REALTIME_AUTH_ENABLED: ${REALTIME_AUTH_ENABLED:-true}
       REALTIME_TOKEN_ALGORITHM: RS256
       REALTIME_TOKEN_ISSUER: ${REALTIME_TOKEN_ISSUER:-crescentsphere-django}
@@ -301,7 +449,7 @@ services:
       SUPPORT_CALLS_ENABLED: ${SUPPORT_CALLS_ENABLED:-true}
       RUN_MIGRATIONS: "0"
       RUN_COLLECTSTATIC: "0"
-    mem_limit: 64m
+    mem_limit: 96m
     cpus: 0.25
     pids_limit: 64
     networks: [messenger]
@@ -320,16 +468,38 @@ services:
     environment:
       RUST_LOG: ${REALTIME_RUST_LOG:-crescentsphere_realtime=info,tower_http=info}
       REALTIME_BIND: 0.0.0.0:9000
-      REALTIME_STREAM_URL: ${REALTIME_STREAM_URL:-redis://redis:6379/3}
-      REALTIME_STREAM_NAME: ${REALTIME_STREAM_NAME:-realtime:durable:v1}
-      REALTIME_STREAM_GROUP: ${REALTIME_STREAM_GROUP:-axum-single-v1}
+      REALTIME_DURABLE_BACKEND: ${REALTIME_DURABLE_BACKEND:-nats}
+      REALTIME_EPHEMERAL_BACKEND: ${REALTIME_EPHEMERAL_BACKEND:-local}
+      REALTIME_PRESENCE_BACKEND: ${REALTIME_PRESENCE_BACKEND:-legacy_redis}
+      CHAT_COMMAND_BACKEND: ${CHAT_COMMAND_BACKEND:-django}
+      CHAT_COMMAND_JWT_ISSUER: ${CHAT_COMMAND_JWT_ISSUER:-${AUTH_PAYMENT_JWT_ISSUER:-crescentsphere-django}}
+      CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-}
+      CHAT_READ_BACKEND: ${CHAT_READ_BACKEND:-django}
+      SQLX_DATABASE_URL: ${SQLX_DATABASE_URL:-postgres://${DB_USER:-messenger_user}:${DB_PASSWORD:-messenger_password}@pgbouncer:6432/${DB_NAME:-messenger_api}}
+      SQLX_MAX_CONNECTIONS: ${SQLX_MAX_CONNECTIONS:-4}
+      SQLX_ACQUIRE_TIMEOUT_SECONDS: ${SQLX_ACQUIRE_TIMEOUT_SECONDS:-3}
+      NATS_PROBE_ENABLED: ${NATS_PROBE_ENABLED:-false}
+      NATS_URL: ${NATS_REALTIME_URL:-nats://realtime:change-me-nats-realtime@nats:4222}
+      NATS_CONNECT_TIMEOUT_SECONDS: ${NATS_CONNECT_TIMEOUT_SECONDS:-3}
+      NATS_CHAT_STREAM: ${NATS_CHAT_STREAM:-CHAT_EVENTS}
+      NATS_NODE_ID: ${NATS_NODE_ID:-axum-01}
+      REALTIME_CONNECTION_OWNERSHIP_BACKEND: ${REALTIME_CONNECTION_OWNERSHIP_BACKEND:-local}
+      NATS_OWNERSHIP_SUBJECT: ${NATS_OWNERSHIP_SUBJECT:-rt.ownership.v1}
+      NATS_DELIVERY_SUBJECT_PREFIX: ${NATS_DELIVERY_SUBJECT_PREFIX:-rt.deliver}
+      REALTIME_OWNERSHIP_ANNOUNCE_SECONDS: ${REALTIME_OWNERSHIP_ANNOUNCE_SECONDS:-5}
+      REALTIME_OWNERSHIP_LEASE_TTL_SECONDS: ${REALTIME_OWNERSHIP_LEASE_TTL_SECONDS:-20}
+      NATS_EPHEMERAL_SUBJECT: ${NATS_EPHEMERAL_SUBJECT:-rt.ephemeral.v1}
+      NATS_DURABLE_CONSUMER: ${NATS_DURABLE_CONSUMER:-realtime-axum-v1}
+      NATS_DURABLE_SUBJECT_FILTER: ${NATS_DURABLE_SUBJECT_FILTER:-event.chat.>}
+      NATS_ACK_WAIT_SECONDS: ${NATS_ACK_WAIT_SECONDS:-30}
+      NATS_MAX_DELIVER: ${NATS_MAX_DELIVER:-5}
+      NATS_MAX_ACK_PENDING: ${NATS_MAX_ACK_PENDING:-128}
+      REALTIME_EVENT_DEDUPE_CAPACITY: ${REALTIME_EVENT_DEDUPE_CAPACITY:-10000}
       REALTIME_OUTBOX_MAX_AGE_SECONDS: ${REALTIME_OUTBOX_MAX_AGE_SECONDS:-120}
       REALTIME_OUTBOX_MAX_FAILED: ${REALTIME_OUTBOX_MAX_FAILED:-25}
-      REALTIME_STREAM_MAX_PENDING: ${REALTIME_STREAM_MAX_PENDING:-250}
       REALTIME_PRESENCE_REDIS_URL: ${REALTIME_PRESENCE_REDIS_URL:-redis://redis:6379/3}
       REALTIME_PRESENCE_TTL_SECONDS: ${REALTIME_PRESENCE_TTL_SECONDS:-90}
       REALTIME_PRESENCE_METADATA_TTL_SECONDS: ${REALTIME_PRESENCE_METADATA_TTL_SECONDS:-300}
-      REALTIME_STREAM_CONSUMER: ${REALTIME_STREAM_CONSUMER:-axum-1}
       REALTIME_AUTH_ENABLED: ${REALTIME_AUTH_ENABLED:-true}
       REALTIME_AUTH_REDIS_URL: ${REALTIME_AUTH_REDIS_URL:-redis://redis:6379/3}
       REALTIME_PRESENCE_DISCONNECT_GRACE_SECONDS: ${REALTIME_PRESENCE_DISCONNECT_GRACE_SECONDS:-12}
@@ -350,18 +520,26 @@ services:
       REALTIME_MAX_DEVICE_CONNECTIONS: ${REALTIME_MAX_DEVICE_CONNECTIONS:-2}
       REALTIME_HIGH_QUEUE_CAPACITY: ${REALTIME_HIGH_QUEUE_CAPACITY:-32}
       REALTIME_LOW_QUEUE_CAPACITY: ${REALTIME_LOW_QUEUE_CAPACITY:-8}
+      REALTIME_READ_BUFFER_SIZE: ${REALTIME_READ_BUFFER_SIZE:-4096}
+      REALTIME_WRITE_BUFFER_SIZE: ${REALTIME_WRITE_BUFFER_SIZE:-4096}
+      REALTIME_MAX_WRITE_BUFFER_SIZE: ${REALTIME_MAX_WRITE_BUFFER_SIZE:-131072}
       REALTIME_MAX_MESSAGE_SIZE: ${REALTIME_MAX_MESSAGE_SIZE:-65536}
       REALTIME_MAX_FRAME_SIZE: ${REALTIME_MAX_FRAME_SIZE:-65536}
-      REALTIME_HEARTBEAT_SECONDS: ${REALTIME_HEARTBEAT_SECONDS:-25}
-      REALTIME_CLIENT_TIMEOUT_SECONDS: ${REALTIME_CLIENT_TIMEOUT_SECONDS:-75}
-      REALTIME_MAX_CONNECTION_AGE_SECONDS: ${REALTIME_MAX_CONNECTION_AGE_SECONDS:-600}
-      REALTIME_CONNECTION_REFRESH_JITTER_SECONDS: ${REALTIME_CONNECTION_REFRESH_JITTER_SECONDS:-60}
+      REALTIME_HEARTBEAT_SECONDS: ${REALTIME_HEARTBEAT_SECONDS:-30}
+      REALTIME_CLIENT_TIMEOUT_SECONDS: ${REALTIME_CLIENT_TIMEOUT_SECONDS:-90}
+      REALTIME_MAX_CONNECTION_AGE_SECONDS: ${REALTIME_MAX_CONNECTION_AGE_SECONDS:-3600}
+      REALTIME_CONNECTION_REFRESH_JITTER_SECONDS: ${REALTIME_CONNECTION_REFRESH_JITTER_SECONDS:-300}
       REALTIME_SEND_TIMEOUT_SECONDS: ${REALTIME_SEND_TIMEOUT_SECONDS:-5}
     volumes:
       - ./secrets:/run/secrets:ro
     expose:
       - "9000"
+    # The production release is NATS-primary. Wait for both NATS and Redis:
+    # NATS carries realtime events, while Redis remains required for one-time
+    # ticket replay protection and shared presence compatibility.
     depends_on:
+      nats:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -383,6 +561,7 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+        VITE_CHAT_COMMAND_BACKEND: ${VITE_CHAT_COMMAND_BACKEND:-django}
         VITE_AUTH_BASE_URL: ${VITE_AUTH_BASE_URL:-/api/v1}
         VITE_CENTRAL_AUTH_ORIGIN: ${VITE_CENTRAL_AUTH_ORIGIN:-http://localhost:8080}
         VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
@@ -410,7 +589,7 @@ services:
         soft: 8192
         hard: 8192
     stop_grace_period: 30s
-    image: nginx:1.27-alpine
+    image: nginx:1.30.4-alpine
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 64m
@@ -438,6 +617,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  nats_data:
   private_media:
   media:
 

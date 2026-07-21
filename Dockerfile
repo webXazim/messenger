@@ -1,27 +1,47 @@
-FROM python:3.12-slim
+FROM python:3.12-slim AS python-builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-WORKDIR /app
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
-    curl \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv
+WORKDIR /build
+COPY requirements.txt ./requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
 
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:$PATH
+
+WORKDIR /app
+
+# Keep compilers and development headers out of the production image. ffmpeg is
+# retained because background media jobs use it; curl is used by health checks.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=python-builder /opt/venv /opt/venv
 COPY . /app
+
 RUN adduser --disabled-password --gecos "" appuser \
     && mkdir -p /app/staticfiles /app/media /app/private_media \
-    && chmod +x /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh /app/deploy/django/start-server.sh \
+    && python -m compileall -q /app/config /app/apps \
     && chown -R appuser:appuser /app
 
 USER appuser
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "2", "--timeout", "30", "--keep-alive", "5", "--max-requests", "1000", "--max-requests-jitter", "100"]
+CMD ["/app/deploy/django/start-server.sh"]

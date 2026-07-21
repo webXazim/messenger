@@ -28,7 +28,7 @@ Durable Support Chat actions remain Django HTTP operations:
 - Call lifecycle and signaling records
 - Website and subscription changes
 
-Django commits the business state and its realtime outbox row in PostgreSQL, publishes the event to the Redis Stream, and Axum delivers it to matching local sockets.
+Django commits the business state and its realtime outbox row in PostgreSQL, publishes the event to NATS JetStream, and Axum delivers it to matching local sockets.
 
 Disposable events use Axum directly:
 
@@ -71,4 +71,4 @@ Axum is normally served from the same public origin, so the frontend can derive 
 VITE_SUPPORT_WS_URL=wss://realtime.example.com/ws
 ```
 
-Nginx must proxy the exact `/ws` path to Axum. `/ws/*` is intentionally rejected. Redis remains private and is used for the Django-to-Axum stream, ticket replay protection, presence, Celery, and cache—not as a Django Channels layer.
+Nginx must proxy the exact `/ws` path to Axum. `/ws/*` is intentionally rejected. NATS remains private and carries realtime events. Redis remains private for ticket replay protection, shared presence, Celery, and cache—not as a Django Channels layer.

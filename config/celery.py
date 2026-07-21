@@ -70,10 +70,11 @@ app.conf.beat_schedule = {
     },
 }
 
-# Avoid generating a no-op Celery task every five seconds while the current
-# Channels production transport is still active.
-if getattr(settings, "REALTIME_STREAM_ENABLED", False):
-    app.conf.beat_schedule["publish-realtime-outbox-every-5-seconds"] = {
+# The transactional outbox is transport-neutral. Keep a periodic recovery
+# sweep enabled whenever durable realtime delivery is enabled, including the NATS-primary configuration.
+if getattr(settings, "REALTIME_OUTBOX_ENABLED", False):
+    recovery_interval = float(getattr(settings, "REALTIME_OUTBOX_RECOVERY_INTERVAL_SECONDS", 15))
+    app.conf.beat_schedule["recover-realtime-outbox"] = {
         "task": "apps.common.tasks.publish_realtime_outbox_events",
-        "schedule": 5.0,
+        "schedule": recovery_interval,
     }

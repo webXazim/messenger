@@ -157,15 +157,34 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 DB_ENGINE = env_str("DB_ENGINE", "sqlite").lower()
+DATABASE_RUNTIME_ENDPOINT = env_str("DATABASE_RUNTIME_ENDPOINT", "postgres").strip().lower()
+if DATABASE_RUNTIME_ENDPOINT not in {"postgres", "pgbouncer"}:
+    raise ImproperlyConfigured(
+        "DATABASE_RUNTIME_ENDPOINT must be either 'postgres' or 'pgbouncer'."
+    )
+
 if DB_ENGINE == "postgres":
+    if DATABASE_RUNTIME_ENDPOINT == "pgbouncer":
+        database_host = env_str("DB_PGBOUNCER_HOST", "pgbouncer")
+        database_port = env_str("DB_PGBOUNCER_PORT", "6432")
+    else:
+        database_host = env_str("DB_HOST", "127.0.0.1")
+        database_port = env_str("DB_PORT", "5432")
+
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
             "NAME": env_str("DB_NAME", "snm"),
             "USER": env_str("DB_USER", "postgres"),
             "PASSWORD": env_str("DB_PASSWORD", ""),
-            "HOST": env_str("DB_HOST", "127.0.0.1"),
-            "PORT": env_str("DB_PORT", "5432"),
+            "HOST": database_host,
+            "PORT": database_port,
+            "OPTIONS": {
+                "connect_timeout": max(1, env_int("DATABASE_CONNECT_TIMEOUT_SECONDS", 5)),
+            },
+            # Transaction pooling cannot preserve a server-side cursor across
+            # requests because each transaction may use a different backend.
+            "DISABLE_SERVER_SIDE_CURSORS": DATABASE_RUNTIME_ENDPOINT == "pgbouncer",
         }
     }
 else:
@@ -177,7 +196,11 @@ else:
     }
 
 
-DATABASE_CONN_MAX_AGE = env_int("DATABASE_CONN_MAX_AGE", 60)
+DATABASE_CONN_MAX_AGE = (
+    0
+    if DB_ENGINE == "postgres" and DATABASE_RUNTIME_ENDPOINT == "pgbouncer"
+    else env_int("DATABASE_CONN_MAX_AGE", 60)
+)
 DATABASE_CONN_HEALTH_CHECKS = env_bool("DATABASE_CONN_HEALTH_CHECKS", DB_ENGINE == "postgres")
 DATABASES["default"]["CONN_MAX_AGE"] = DATABASE_CONN_MAX_AGE
 DATABASES["default"]["CONN_HEALTH_CHECKS"] = DATABASE_CONN_HEALTH_CHECKS
@@ -358,23 +381,57 @@ SIMPLE_JWT = {
 }
 
 # Axum is the only production realtime transport. Django persists business
-# events to PostgreSQL and hands committed notifications to Axum through a
-# durable Redis Stream. There is no Channels/Daphne fallback path.
+# events to PostgreSQL and hands committed notifications to Axum through the
+# currently selected migration mode. The legacy Redis implementation remains available as an explicit rollback baseline; NATS is the production transport
+# behind this compatibility setting without changing the public protocol.
 REALTIME_TRANSPORT = "axum"
+REALTIME_MIGRATION_MODE = env_str("REALTIME_MIGRATION_MODE", "nats").strip().lower() or "nats"
+REALTIME_DURABLE_BACKEND = env_str("REALTIME_DURABLE_BACKEND", REALTIME_MIGRATION_MODE).strip().lower() or "nats"
+REALTIME_EPHEMERAL_BACKEND = env_str("REALTIME_EPHEMERAL_BACKEND", "local").strip().lower() or "local"
+REALTIME_PRESENCE_BACKEND = env_str("REALTIME_PRESENCE_BACKEND", "legacy_redis").strip().lower() or "legacy_redis"
+NATS_PROBE_ENABLED = env_bool("NATS_PROBE_ENABLED", False)
+NATS_URL = env_str("NATS_URL", env_str("NATS_APP_URL", "")).strip()
+NATS_CONNECT_TIMEOUT_SECONDS = env_int("NATS_CONNECT_TIMEOUT_SECONDS", 3)
+NATS_CHAT_STREAM = env_str("NATS_CHAT_STREAM", "CHAT_EVENTS").strip()
+NATS_NODE_ID = env_str("NATS_NODE_ID", "axum-01").strip()
+
+NATS_DURABLE_SUBJECT_PREFIX = env_str("NATS_DURABLE_SUBJECT_PREFIX", "event.chat").strip() or "event.chat"
+NATS_DURABLE_MAX_AGE_SECONDS = max(3600, env_int("NATS_DURABLE_MAX_AGE_SECONDS", 86400))
+NATS_DURABLE_MAX_BYTES = max(64 * 1024 * 1024, env_int("NATS_DURABLE_MAX_BYTES", 512 * 1024 * 1024))
+NATS_DURABLE_CONSUMER = env_str("NATS_DURABLE_CONSUMER", "realtime-axum-v1").strip() or "realtime-axum-v1"
+NATS_DURABLE_SUBJECT_FILTER = env_str("NATS_DURABLE_SUBJECT_FILTER", "event.chat.>").strip() or "event.chat.>"
+NATS_EPHEMERAL_SUBJECT = env_str("NATS_EPHEMERAL_SUBJECT", "rt.ephemeral.v1").strip() or "rt.ephemeral.v1"
+NATS_ACK_WAIT_SECONDS = max(1, env_int("NATS_ACK_WAIT_SECONDS", 30))
+NATS_MAX_DELIVER = max(1, env_int("NATS_MAX_DELIVER", 5))
+NATS_MAX_ACK_PENDING = max(1, env_int("NATS_MAX_ACK_PENDING", 512))
+REALTIME_EVENT_DEDUPE_CAPACITY = max(100, env_int("REALTIME_EVENT_DEDUPE_CAPACITY", 10000))
+_REALTIME_DURABLE_BACKENDS = {"nats", "jetstream"}
+_REALTIME_EPHEMERAL_BACKENDS = {"nats", "local", "memory"}
+_REALTIME_PRESENCE_BACKENDS = {"legacy_redis", "redis", "local", "memory"}
+if REALTIME_DURABLE_BACKEND not in _REALTIME_DURABLE_BACKENDS:
+    raise ImproperlyConfigured(
+        f"REALTIME_DURABLE_BACKEND={REALTIME_DURABLE_BACKEND!r} is invalid. "
+        "Use nats."
+    )
+if REALTIME_EPHEMERAL_BACKEND not in _REALTIME_EPHEMERAL_BACKENDS:
+    raise ImproperlyConfigured(
+        f"REALTIME_EPHEMERAL_BACKEND={REALTIME_EPHEMERAL_BACKEND!r} is invalid. "
+        "Use local or nats."
+    )
+if REALTIME_PRESENCE_BACKEND not in _REALTIME_PRESENCE_BACKENDS:
+    raise ImproperlyConfigured(
+        f"REALTIME_PRESENCE_BACKEND={REALTIME_PRESENCE_BACKEND!r} is invalid. "
+        "Use legacy_redis or local."
+    )
 REALTIME_OUTBOX_ENABLED = env_bool("REALTIME_OUTBOX_ENABLED", True)
-REALTIME_STREAM_ENABLED = env_bool("REALTIME_STREAM_ENABLED", True)
-REALTIME_STREAM_URL = env_str("REALTIME_STREAM_URL", "").strip()
-REALTIME_STREAM_NAME = env_str("REALTIME_STREAM_NAME", "realtime:durable:v1").strip() or "realtime:durable:v1"
-REALTIME_STREAM_GROUP = env_str("REALTIME_STREAM_GROUP", "axum-single-v1").strip() or "axum-single-v1"
-REALTIME_STREAM_MAXLEN = max(1_000, env_int("REALTIME_STREAM_MAXLEN", 25_000))
-REALTIME_STREAM_CONNECT_TIMEOUT_SECONDS = float(env_str("REALTIME_STREAM_CONNECT_TIMEOUT_SECONDS", "2") or "2")
-REALTIME_STREAM_SOCKET_TIMEOUT_SECONDS = float(env_str("REALTIME_STREAM_SOCKET_TIMEOUT_SECONDS", "2") or "2")
 REALTIME_OUTBOX_BATCH_SIZE = max(1, env_int("REALTIME_OUTBOX_BATCH_SIZE", 100))
 REALTIME_OUTBOX_LEASE_SECONDS = max(15, env_int("REALTIME_OUTBOX_LEASE_SECONDS", 60))
+REALTIME_OUTBOX_WAKE_KEY = env_str("REALTIME_OUTBOX_WAKE_KEY", "realtime:outbox:wake").strip() or "realtime:outbox:wake"
+REALTIME_OUTBOX_WAKE_TTL_SECONDS = max(3, env_int("REALTIME_OUTBOX_WAKE_TTL_SECONDS", 10))
+REALTIME_OUTBOX_RECOVERY_INTERVAL_SECONDS = max(5, env_int("REALTIME_OUTBOX_RECOVERY_INTERVAL_SECONDS", 15))
 REALTIME_OUTBOX_RETENTION_DAYS = max(1, env_int("REALTIME_OUTBOX_RETENTION_DAYS", 7))
 REALTIME_OUTBOX_MAX_AGE_SECONDS = max(10, env_int("REALTIME_OUTBOX_MAX_AGE_SECONDS", 120))
 REALTIME_OUTBOX_MAX_FAILED = max(0, env_int("REALTIME_OUTBOX_MAX_FAILED", 25))
-REALTIME_STREAM_MAX_PENDING = max(0, env_int("REALTIME_STREAM_MAX_PENDING", 250))
 REALTIME_PRESENCE_REDIS_URL = env_str("REALTIME_PRESENCE_REDIS_URL", env_str("REDIS_CACHE_URL", "")).strip()
 REALTIME_PRESENCE_TTL_SECONDS = max(45, env_int("REALTIME_PRESENCE_TTL_SECONDS", 90))
 REALTIME_PRESENCE_METADATA_TTL_SECONDS = max(300, env_int("REALTIME_PRESENCE_METADATA_TTL_SECONDS", 3600))
@@ -406,10 +463,6 @@ REALTIME_SIGNING_PUBLIC_KEY_PATH = env_str("REALTIME_SIGNING_PUBLIC_KEY_PATH", "
 
 if not REALTIME_OUTBOX_ENABLED:
     raise ImproperlyConfigured("REALTIME_OUTBOX_ENABLED must remain true when Axum is the realtime transport.")
-if not REALTIME_STREAM_ENABLED:
-    raise ImproperlyConfigured("REALTIME_STREAM_ENABLED must remain true when Axum is the realtime transport.")
-if not REALTIME_STREAM_URL and not USE_LOCAL_TEST_SERVICES:
-    raise ImproperlyConfigured("REALTIME_STREAM_URL is required for the Axum realtime transport.")
 if REALTIME_TOKEN_ALGORITHM != "RS256":
     raise ImproperlyConfigured("REALTIME_TOKEN_ALGORITHM must be RS256.")
 if not REALTIME_AUTH_ENABLED:
@@ -472,7 +525,7 @@ UPLOAD_SCAN_ASYNC = False if USE_LOCAL_TEST_SERVICES else env_bool("UPLOAD_SCAN_
 
 CHAT_ATTACHMENT_FORCE_DOWNLOAD = env_bool("CHAT_ATTACHMENT_FORCE_DOWNLOAD", True)
 CELERY_BROKER_URL = "memory://" if USE_LOCAL_TEST_SERVICES else env_str("CELERY_BROKER_URL", REDIS_URL or "redis://127.0.0.1:6379/0")
-CELERY_RESULT_BACKEND = "cache+memory://" if USE_LOCAL_TEST_SERVICES else env_str("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_RESULT_BACKEND = "cache+memory://" if USE_LOCAL_TEST_SERVICES else (env_str("CELERY_RESULT_BACKEND", "").strip() or None)
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TASK_ALWAYS_EAGER = True if USE_LOCAL_TEST_SERVICES else env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 CELERY_TASK_IGNORE_RESULT = env_bool("CELERY_TASK_IGNORE_RESULT", True)
@@ -778,3 +831,12 @@ def _validate_production_settings() -> None:
 
 if MESSENGER_REQUIRE_SECURE_SETTINGS:
     _validate_production_settings()
+if NATS_PROBE_ENABLED or REALTIME_DURABLE_BACKEND in {"nats", "jetstream"} or REALTIME_EPHEMERAL_BACKEND == "nats":
+    if not NATS_URL:
+        raise ImproperlyConfigured("NATS_URL is required when NATS is enabled")
+    if NATS_CONNECT_TIMEOUT_SECONDS <= 0:
+        raise ImproperlyConfigured("NATS_CONNECT_TIMEOUT_SECONDS must be greater than zero")
+    if REALTIME_EPHEMERAL_BACKEND == "nats" and (not NATS_EPHEMERAL_SUBJECT or not NATS_NODE_ID):
+        raise ImproperlyConfigured("NATS_EPHEMERAL_SUBJECT and NATS_NODE_ID are required for Core NATS ephemeral delivery")
+
+

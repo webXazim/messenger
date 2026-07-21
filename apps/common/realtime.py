@@ -3,21 +3,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
 from django.utils import timezone
 
 from apps.common.models import RealtimeOutboxEvent
-from apps.common.realtime_stream import (
-    publish_event_to_stream,
-    publish_outbox_event_to_stream,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -120,42 +115,7 @@ def _record_outbox_event(
         event_name=event_name,
         payload=event,
         audiences=[audience.as_dict() for audience in audiences],
-        delivery_target="redis_stream",
-    )
-
-
-def _claim_outbox_for_immediate_delivery(outbox_event: RealtimeOutboxEvent) -> bool:
-    lease_seconds = max(15, int(getattr(settings, "REALTIME_OUTBOX_LEASE_SECONDS", 60)))
-    return bool(
-        RealtimeOutboxEvent.objects.filter(
-            pk=outbox_event.pk,
-            status__in=[RealtimeOutboxEvent.Status.PENDING, RealtimeOutboxEvent.Status.FAILED],
-        ).update(
-            status=RealtimeOutboxEvent.Status.PROCESSING,
-            available_at=timezone.now() + timedelta(seconds=lease_seconds),
-        )
-    )
-
-
-def _mark_outbox_published(outbox_event: RealtimeOutboxEvent, stream_entry_id: str) -> None:
-    RealtimeOutboxEvent.objects.filter(pk=outbox_event.pk).update(
-        status=RealtimeOutboxEvent.Status.PUBLISHED,
-        attempts=F("attempts") + 1,
-        published_at=timezone.now(),
-        published_transport="redis_stream",
-        stream_entry_id=stream_entry_id,
-        last_error="",
-    )
-
-
-def _mark_outbox_failed(outbox_event: RealtimeOutboxEvent, exc: Exception) -> None:
-    attempts = int(outbox_event.attempts or 0) + 1
-    retry_seconds = min(300, max(2, 2 ** min(attempts, 8)))
-    RealtimeOutboxEvent.objects.filter(pk=outbox_event.pk).update(
-        status=RealtimeOutboxEvent.Status.FAILED,
-        attempts=F("attempts") + 1,
-        available_at=timezone.now() + timedelta(seconds=retry_seconds),
-        last_error=str(exc)[:2000],
+        delivery_target="nats_jetstream",
     )
 
 
@@ -167,12 +127,9 @@ def publish_realtime_event(
     durable: bool = True,
     defer_until_commit: bool = True,
 ) -> dict[str, Any] | None:
-    """Publish one event to the Axum Redis Stream.
+    """Persist durable events to the outbox and publish them to JetStream after commit.
 
-    Durable events are written to the PostgreSQL outbox in the same business
-    transaction and retried by Celery if Redis is unavailable. Disposable
-    events skip the outbox but still use the stream so every live socket is
-    served exclusively by Axum.
+    Disposable realtime events are handled directly by Axum through Core NATS.
     """
     normalized = _normalize_audiences(audiences)
     if not normalized:
@@ -185,21 +142,25 @@ def publish_realtime_event(
     )
 
     def deliver() -> None:
+        if outbox_event is None:
+            logger.debug(
+                "Disposable event skipped by Django; Axum/Core NATS owns ephemeral delivery",
+                extra={"event": event_name},
+            )
+            return
         try:
-            if outbox_event is not None:
-                if not _claim_outbox_for_immediate_delivery(outbox_event):
-                    return
-                stream_id = publish_outbox_event_to_stream(outbox_event)
-                _mark_outbox_published(outbox_event, stream_id)
-            else:
-                publish_event_to_stream(
-                    event=event,
-                    audiences=[audience.as_dict() for audience in normalized],
-                )
-        except Exception as exc:  # Business work stays committed; retry durable events.
-            logger.exception("Axum realtime event delivery failed", extra={"event": event_name})
-            if outbox_event is not None:
-                _mark_outbox_failed(outbox_event, exc)
+            # Wake the existing Celery worker instead of opening a new NATS
+            # connection inside the HTTP request. The outbox row stays pending
+            # if Redis/Celery is temporarily unavailable, and the periodic beat
+            # sweep retries it.
+            from apps.common.tasks import schedule_realtime_outbox_publish
+
+            schedule_realtime_outbox_publish()
+        except Exception:
+            logger.exception(
+                "Unable to wake realtime outbox worker; periodic recovery will retry",
+                extra={"event": event_name, "outbox_event_id": str(outbox_event.event_id)},
+            )
 
     if defer_until_commit:
         transaction.on_commit(deliver, robust=True)

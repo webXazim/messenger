@@ -1,7 +1,7 @@
 import { http } from "../lib/http";
 import { unwrapCursorPage, unwrapData, unwrapObject } from "../lib/apiResponse";
 import { resolveMediaUrl } from "../lib/mediaUrl";
-import { API_BASE_URL } from "../lib/config";
+import { API_BASE_URL, CHAT_COMMAND_BACKEND, CHAT_COMMAND_URL } from "../lib/config";
 import { safeId } from "../lib/safeId";
 import { collectCursorPages, type CursorPage } from "../lib/pagination";
 import type { Call, CallConfig, Conversation, ConversationE2EEKeyMaterial, ConversationInviteLink, E2EEDeviceKey, Message, NotificationPreferences, TurnCredentials, UserStatus } from "../types/chat";
@@ -916,6 +916,14 @@ export const chatApi = {
     const requestPayload = Object.fromEntries(
       Object.entries(payload).filter(([key]) => !key.startsWith("_")),
     );
+    if (CHAT_COMMAND_BACKEND === "axum") {
+      try {
+        const response = await http.post(`${CHAT_COMMAND_URL}/conversations/${conversationId}/messages/`, requestPayload);
+        return normalizeMessage(unwrapData<unknown>(response.data));
+      } catch (error: any) {
+        if (error?.response?.status !== 422 || error?.response?.data?.code !== "django_fallback_required") throw error;
+      }
+    }
     const response = await http.post(`/chat/conversations/${conversationId}/messages/`, requestPayload);
     return normalizeMessage(unwrapData<unknown>(response.data));
   },

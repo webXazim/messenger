@@ -287,7 +287,6 @@ class DeployCheckTests(TestCase):
                 CSRF_COOKIE_SECURE=True,
                 DB_ENGINE="sqlite",
                 REALTIME_TRANSPORT="disabled",
-                REALTIME_STREAM_ENABLED=False,
                 REALTIME_OUTBOX_ENABLED=False,
                 REALTIME_AUTH_ENABLED=False,
                 CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "test"}},
@@ -3174,7 +3173,7 @@ class PlatformStabilityTests(TestCase):
 
     @override_settings(
         REALTIME_TRANSPORT="disabled",
-        REALTIME_STREAM_ENABLED=False,
+        REALTIME_DURABLE_BACKEND="invalid",
         REALTIME_OUTBOX_ENABLED=False,
         REALTIME_AUTH_ENABLED=False,
         CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "health-tests"}},
@@ -3188,7 +3187,7 @@ class PlatformStabilityTests(TestCase):
         self.assertIn("realtime transport: disabled", output)
         self.assertIn("Readiness warnings:", output)
         self.assertIn("REALTIME_TRANSPORT is not axum", output)
-        self.assertIn("Realtime Redis Stream delivery is disabled", output)
+        self.assertIn("Realtime durable backend is invalid", output)
         self.assertIn("Realtime outbox durability is disabled", output)
         self.assertIn("Realtime ticket authentication is disabled", output)
         self.assertIn("Cache backend is local memory", output)
@@ -3255,13 +3254,17 @@ class PlatformStabilityTests(TestCase):
         )
         self.assertEqual(allowed.status_code, 200)
 
-    @patch("secrets.token_urlsafe", return_value="verify-token-123")
-    def test_email_verification_request_and_confirm(self, _mock_token):
+    @patch("secrets.randbelow", return_value=123456)
+    def test_email_verification_request_and_confirm(self, _mock_randbelow):
         response = self.client.post(reverse("email-verify-request"), format="json")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(AuthActionToken.objects.filter(user=self.user, purpose="email_verify", used_at__isnull=True).exists())
 
-        confirm = APIClient().post(reverse("email-verify-confirm"), {"token": "verify-token-123"}, format="json")
+        confirm = APIClient().post(
+            reverse("email-verify-confirm"),
+            {"email": self.user.email, "code": "123456"},
+            format="json",
+        )
         self.assertEqual(confirm.status_code, 200)
         self.user.refresh_from_db()
         self.assertTrue(self.user.email_verified)

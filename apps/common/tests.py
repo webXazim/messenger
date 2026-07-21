@@ -30,13 +30,9 @@ class RealtimeEnvelopeTests(TestCase):
 
 
 class RealtimePublisherTests(TestCase):
-    @override_settings(
-        REALTIME_OUTBOX_ENABLED=True,
-        REALTIME_STREAM_ENABLED=True,
-        REALTIME_STREAM_URL="redis://example.invalid/3",
-    )
-    @patch("apps.common.realtime.publish_outbox_event_to_stream", return_value="1-0")
-    def test_durable_event_is_recorded_and_published_to_axum_stream(self, stream_delivery):
+    @override_settings(REALTIME_OUTBOX_ENABLED=True)
+    @patch("apps.common.tasks.schedule_realtime_outbox_publish", return_value=True)
+    def test_durable_event_is_recorded_for_nats_and_wakes_publisher(self, schedule):
         event = publish_realtime_event(
             event_name="message.created",
             data={"message_id": "message-1"},
@@ -44,17 +40,14 @@ class RealtimePublisherTests(TestCase):
             defer_until_commit=False,
         )
 
-        stream_delivery.assert_called_once()
+        schedule.assert_called_once()
         row = RealtimeOutboxEvent.objects.get(event_id=event["event_id"])
-        self.assertEqual(row.status, RealtimeOutboxEvent.Status.PUBLISHED)
-        self.assertEqual(row.delivery_target, "redis_stream")
-        self.assertEqual(row.published_transport, "redis_stream")
-        self.assertEqual(row.stream_entry_id, "1-0")
+        self.assertEqual(row.status, RealtimeOutboxEvent.Status.PENDING)
+        self.assertEqual(row.delivery_target, "nats_jetstream")
         self.assertEqual(row.audiences, [{"kind": "conversation", "id": "conversation-1"}])
 
-    @override_settings(REALTIME_STREAM_ENABLED=True, REALTIME_STREAM_URL="redis://example.invalid/3")
-    @patch("apps.common.realtime.publish_event_to_stream", return_value="2-0")
-    def test_disposable_event_skips_database_outbox(self, stream_delivery):
+    @patch("apps.common.tasks.schedule_realtime_outbox_publish", return_value=True)
+    def test_disposable_event_skips_database_and_worker_wakeup(self, schedule):
         event = publish_realtime_event(
             event_name="presence.updated",
             data={"is_online": True},
@@ -63,24 +56,24 @@ class RealtimePublisherTests(TestCase):
             defer_until_commit=False,
         )
 
-        stream_delivery.assert_called_once()
+        schedule.assert_not_called()
         self.assertFalse(RealtimeOutboxEvent.objects.filter(event_id=event["event_id"]).exists())
 
 
 class RealtimeOutboxTaskTests(TestCase):
-    @override_settings(
-        REALTIME_STREAM_ENABLED=True,
-        REALTIME_STREAM_URL="redis://example.invalid/3",
-        REALTIME_OUTBOX_BATCH_SIZE=10,
-    )
-    @patch("apps.common.tasks.publish_outbox_event_to_stream", return_value="2-0")
-    def test_retry_task_publishes_pending_rows(self, publish):
+    @override_settings(REALTIME_OUTBOX_BATCH_SIZE=10)
+    @patch("apps.common.tasks.schedule_realtime_outbox_publish", return_value=False)
+    @patch("apps.common.tasks.publish_rows_sync")
+    def test_retry_task_bulk_publishes_pending_rows(self, publish, _schedule):
+        from apps.common.nats_durable import PublishResult
+
         row = RealtimeOutboxEvent.objects.create(
             event_name="message.created",
             payload={"event": "message.created"},
             audiences=[{"kind": "conversation", "id": "conversation-1"}],
-            delivery_target="redis_stream",
+            delivery_target="nats_jetstream",
         )
+        publish.return_value = [PublishResult(str(row.event_id), 2)]
 
         result = publish_realtime_outbox_events.run()
 
@@ -88,7 +81,8 @@ class RealtimeOutboxTaskTests(TestCase):
         publish.assert_called_once()
         row.refresh_from_db()
         self.assertEqual(row.status, RealtimeOutboxEvent.Status.PUBLISHED)
-        self.assertEqual(row.stream_entry_id, "2-0")
+        self.assertEqual(row.published_transport, "nats_jetstream")
+        self.assertEqual(row.stream_entry_id, "2")
 
 
 class QueryMetricsMiddlewareTests(TestCase):

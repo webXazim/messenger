@@ -38,7 +38,7 @@ from pathlib import Path
 report=json.loads(Path(sys.argv[1]).read_text())
 audit=json.loads(Path(sys.argv[2]).read_text())
 plans=json.loads(Path(sys.argv[3]).read_text())
-if report.get('schema_version') != 2:
+if report.get('schema_version') != 3:
     raise SystemExit('Capacity report schema is not the final schema version.')
 if report.get('passed') is not True or report.get('verification_complete') is not True:
     raise SystemExit('Capacity report did not pass complete verification.')

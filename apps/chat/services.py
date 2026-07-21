@@ -72,6 +72,7 @@ from .models import (
     UserBlock,
     UserDevice,
 )
+from .sequencing import allocate_message_sequence
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -817,10 +818,17 @@ def _extract_audio_waveform(upload, sample_count=48):
             )
         except subprocess.TimeoutExpired:
             return None, "ffmpeg_timeout"
-    if result.returncode != 0 or len(result.stdout) < 2:
+    raw_output = result.stdout
+    if isinstance(raw_output, str):
+        # subprocess.run(capture_output=True) returns bytes in production, but
+        # tests and alternate runners may provide text. Normalize defensively
+        # so media enrichment fails gracefully rather than crashing the task.
+        raw_output = raw_output.encode("latin-1", errors="ignore")
+    if not isinstance(raw_output, (bytes, bytearray, memoryview)) or result.returncode != 0 or len(raw_output) < 2:
         return None, "ffmpeg_failed"
+    raw_bytes = bytes(raw_output)
     samples = array("h")
-    samples.frombytes(result.stdout[:len(result.stdout) - (len(result.stdout) % 2)])
+    samples.frombytes(raw_bytes[:len(raw_bytes) - (len(raw_bytes) % 2)])
     if sys.byteorder != "little":
         samples.byteswap()
     if not samples:
@@ -2818,6 +2826,8 @@ def send_message(
         existing_message._deduplicated_send = True
         return existing_message
 
+    conversation, message_sequence = allocate_message_sequence(conversation)
+
     if encryption_payload:
         text = ""
         entities = []
@@ -2897,6 +2907,7 @@ def send_message(
         text=text,
         reply_to=reply_to,
         client_temp_id=client_temp_id,
+        sequence=message_sequence,
         metadata=metadata,
         delivery_status=Message.DeliveryStatus.SENT,
     )
@@ -2945,6 +2956,7 @@ def forward_message(actor, source_message, target_conversation, client_temp_id="
     if existing_message is not None:
         existing_message._deduplicated_send = True
         return existing_message
+    target_conversation, message_sequence = allocate_message_sequence(target_conversation)
     source_message = Message.objects.select_for_update().select_related("conversation", "sender").get(pk=source_message.pk)
     if source_message.is_deleted:
         raise ValidationError({"message": "Deleted messages cannot be forwarded."})
@@ -2962,6 +2974,7 @@ def forward_message(actor, source_message, target_conversation, client_temp_id="
         metadata=source_message.metadata or {},
         forwarded_from=source_message,
         client_temp_id=client_temp_id,
+        sequence=message_sequence,
     )
     _lock_message_editing(source_message, "message_was_forwarded")
     forwarded._edit_locked_source = source_message
@@ -3431,9 +3444,11 @@ def _upsert_call_event_message(call, *, actor=None):
             break
     created = False
     if target_message is None:
+        call_conversation, message_sequence = allocate_message_sequence(call.conversation)
         target_message = Message.objects.create(
-            conversation=call.conversation,
+            conversation=call_conversation,
             sender=call.initiated_by,
+            sequence=message_sequence,
             type=Message.MessageType.SYSTEM,
             text=payload["summary_text"],
             metadata=payload,

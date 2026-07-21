@@ -2,10 +2,10 @@
 
 The application now has one realtime implementation only:
 
-- Django/Gunicorn owns HTTP APIs, business rules, PostgreSQL transactions, admin, billing, and durable receipts.
+- Django/Granian owns HTTP APIs, business rules, PostgreSQL transactions, admin, billing, and durable receipts.
 - Axum owns `/ws`, connection lifecycle, `socket.split()`, bounded queues, presence, typing, and signaling transport.
-- Redis Stream is the committed Django-to-Axum event bridge.
-- Redis remains the Celery broker, cache/security store, ticket replay store, and presence store.
+- NATS JetStream is the committed Django-to-Axum event bridge.
+- Redis remains the Celery broker, cache/security store, ticket replay store, and shared presence store.
 
 Daphne, Django Channels, `channels_redis`, the Messenger consumer, and the Support Chat consumers are removed from runtime.
 
@@ -14,7 +14,9 @@ Daphne, Django Channels, `channels_redis`, the Messenger consumer, and the Suppo
 ```env
 REALTIME_TRANSPORT=axum
 REALTIME_OUTBOX_ENABLED=true
-REALTIME_STREAM_ENABLED=true
+REALTIME_DURABLE_BACKEND=nats
+REALTIME_EPHEMERAL_BACKEND=local
+REALTIME_PRESENCE_BACKEND=legacy_redis
 REALTIME_AUTH_ENABLED=true
 REALTIME_ALLOWED_ORIGINS=https://your-domain.example
 REALTIME_INTERNAL_TEST_ENABLED=false

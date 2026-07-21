@@ -4,6 +4,14 @@ This deployment intentionally avoids a permanent Prometheus/Grafana stack on the
 2 GB VPS. Health data is available through lightweight scripts, Django checks,
 and Axum's container-internal metrics endpoint.
 
+## Durable transport initialization
+
+A fresh NATS volume must contain the durable stream before Axum can become ready. The web entrypoint and production preflight perform this idempotently:
+
+```bash
+python manage.py ensure_nats_stream
+```
+
 ## Daily operating commands
 
 ```bash
@@ -18,7 +26,7 @@ and Axum's container-internal metrics endpoint.
 - PostgreSQL connection pressure;
 - Redis memory and rejected connections;
 - PostgreSQL realtime outbox age and failures;
-- Redis Stream consumer pending and lag;
+- NATS JetStream consumer state, slow consumers, memory, and storage;
 - Axum connection, delivery, queue, and restart counters;
 - encrypted system-backup freshness and checksum.
 
@@ -98,23 +106,22 @@ The defaults are deliberately conservative for a 2 GB VPS:
 ```env
 REALTIME_OUTBOX_MAX_AGE_SECONDS=120
 REALTIME_OUTBOX_MAX_FAILED=25
-REALTIME_STREAM_MAX_PENDING=250
+OPS_NATS_MAX_SLOW_CONSUMERS=0
+OPS_JETSTREAM_MAX_STORAGE_BYTES=1610612736
 OPS_DISK_MAX_PERCENT=85
 OPS_MIN_AVAILABLE_MEMORY_MB=256
 OPS_BACKUP_MAX_AGE_HOURS=30
 ```
 
-Adjust only after measuring normal production behavior. A growing outbox normally
-means Redis or Axum is unavailable; a growing Stream pending count means the Axum
-consumer is connected but not acknowledging fast enough.
+Adjust only after measuring normal production behavior. A growing outbox normally means NATS, JetStream, or Axum is unavailable; a growing JetStream consumer backlog means the Axum consumer is connected but not acknowledging fast enough.
 
 ## Incident order
 
 1. Run `./scripts/operational-health.sh`.
 2. Check `docker compose ... ps` and the affected container logs.
-3. Confirm PostgreSQL and Redis are healthy before restarting application services.
+3. Confirm PostgreSQL, PgBouncer, NATS, and Redis are healthy before restarting application services.
 4. Restart only the failed service when possible.
 5. If Axum restarted, clients reconnect and durable events recover through the
-   Redis Stream and Django message APIs.
+   JetStream and Django message APIs.
 6. If the release itself is faulty, use the previous release directory rollback.
 7. Restore the database only when data corruption or loss is confirmed.

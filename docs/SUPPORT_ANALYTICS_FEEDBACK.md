@@ -1,6 +1,6 @@
 # Support analytics and customer feedback
 
-Upgrade 09 adds Support-only service reporting and customer satisfaction (CSAT)
+Support includes service reporting and customer satisfaction (CSAT)
 without changing personal Messenger conversations, unread state, notifications,
 WebSockets, E2EE, calls, or media behavior.
 

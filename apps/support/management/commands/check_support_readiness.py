@@ -64,8 +64,10 @@ class Command(BaseCommand):
                     failures.append("Legacy TURN authentication is not configured.")
             if str(getattr(settings, "REALTIME_TRANSPORT", "") or "").lower() != "axum":
                 failures.append("Guest calls require the Axum realtime transport.")
-            if not bool(getattr(settings, "REALTIME_STREAM_ENABLED", False)):
-                failures.append("Guest calls require the realtime Redis Stream bridge.")
+            ephemeral_backend = str(getattr(settings, "REALTIME_EPHEMERAL_BACKEND", "") or "").strip().lower()
+            if ephemeral_backend not in {"nats", "local", "memory"}:
+                failures.append("Guest calls require REALTIME_EPHEMERAL_BACKEND=nats or local.")
+
 
         beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None)
         if beat_schedule is None:

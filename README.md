@@ -20,7 +20,7 @@ production and Docker with the Compose plugin.
 ## Django efficiency profile
 
 Axum owns long-lived realtime connections. Django is configured as a small
-Gunicorn HTTP service with staggered worker recycling, fixed-query Support Inbox
+Granian ASGI HTTP service, fixed-query Support Inbox
 serialization, batched Redis presence reads, asynchronous Celery work, and a
 partial live-message index. See `docs/DJANGO_EFFICIENCY.md`.
 
@@ -62,7 +62,7 @@ VITE_SUPPORT_PLANS_URL=/support/plans
 VITE_SUPPORT_WS_URL=
 ```
 
-After deploying this upgrade, apply the committed migration:
+After deploying this release, apply the committed migration:
 
 ```bash
 docker compose exec web python manage.py migrate
@@ -157,15 +157,16 @@ alert thresholds, cron scheduling, incident handling, and application rollback.
 ```text
 Cloudflare proxied application DNS
         -> HTTPS/WSS -> DigitalOcean Droplet -> Nginx
-                                             -> React + Django/Gunicorn
+                                             -> React + Django/Granian
                                              -> Axum WebSockets
-                                             -> PostgreSQL + Redis + Celery
+                                             -> NATS JetStream + PostgreSQL/PgBouncer
+                                             -> Redis + Celery
                                              -> private Cloudflare R2
 
 Cloudflare Realtime TURN -> relayed WebRTC audio/video when direct P2P fails
 ```
 
-PostgreSQL, Redis, Django, Axum, and frontend container ports must not be publicly exposed.
+PostgreSQL, PgBouncer, Redis, NATS, Django, Axum, and frontend container ports must not be publicly exposed.
 
 ## DigitalOcean preparation
 
@@ -218,7 +219,10 @@ openssl rand -base64 72
 ```
 
 Use independent generated values for `SECRET_KEY`, `DB_PASSWORD`, and
-`AUTH_PAYMENT_JWT_SIGNING_KEY`. Set the external credentials from the provider dashboards:
+`AUTH_PAYMENT_JWT_SIGNING_KEY`. Generate the two NATS URL passwords with
+`openssl rand -hex 32` so they are safe to embed in connection URLs. Keep
+`REALTIME_CONNECTION_OWNERSHIP_BACKEND=local` for the current single-Axum-node
+VPS. Set the external credentials from the provider dashboards:
 
 ```env
 CLOUDFLARE_R2_ACCOUNT_ID=<Cloudflare account ID>
@@ -298,7 +302,7 @@ useful TURN proof; restore it to `all` afterward.
 
 ## Backups and recovery
 
-Create and copy backups off the Droplet before upgrades:
+Create and copy backups off the Droplet before deployments:
 
 ```bash
 ./scripts/backup-postgres.sh
@@ -345,7 +349,6 @@ TLS expiration, and backup restore tests.
 - `docs/API_FRONTEND_GUIDE.md`
 - `docs/MESSENGER_UI_ARCHITECTURE.md`
 - `docs/AXUM_DIRECT_CUTOVER.md`
-- `docs/AXUM_UPGRADE_06.md`
 
 
 cd ~/csm/messenger
@@ -379,11 +382,9 @@ docker compose exec web python manage.py check_support_readiness --fail-on-warni
 ```
 
 Then enable audio/video only for a selected test website and validate calls from
-two external networks. See `docs/AXUM_UPGRADE_06.md` and `docs/SUPPORT_GUEST_CALLS.md`.
 
 ## Axum realtime runtime
 
-The active realtime server is Axum at `/ws`; Django Channels and Daphne are not part of the runtime. See `docs/AXUM_DIRECT_CUTOVER.md` for deployment and rollback instructions and `docs/AXUM_UPGRADE_06.md` for feature-parity and Cloudflare TURN requirements.
 
 ## Axum realtime production
 
@@ -397,7 +398,6 @@ Run `./scripts/final-production-readiness.sh` after deployment and after any mea
 
 ## Final measured performance verification
 
-Upgrade 13 adds deployment-bound PostgreSQL plans, index audits, mixed HTTP/WebSocket load, expiring capacity reports, and fingerprint enforcement. No additional index is added unless the real PostgreSQL plan justifies it. Follow `docs/LOAD_TESTING.md` and `AXUM_UPGRADE_13.md`.
 
 After the first complete suite passes, set:
 
@@ -413,26 +413,22 @@ The release includes authenticated k6 WebSocket/API scenarios, VPS-side resource
 
 
 
-## Upgrade 09: Django efficiency
-
-See `docs/UPGRADE_09_DJANGO_EFFICIENCY.md` for fixed-query inbox reads, batched presence, query budgets, runtime metrics, and deployment settings.
+## Release 09: Django efficiency
 
 
-## Support Upgrade 07
-See `docs/SUPPORT_UPGRADE_07_LIFECYCLE.md`. Run `./scripts/check-support-upgrade-07.sh` before deployment.
+
+## Support Release 07
 
 
-## Support Upgrade 08
-See `docs/SUPPORT_UPGRADE_08_SLA.md`. Run `./scripts/check-support-upgrade-08.sh` before deployment.
+## Support Release 08
 
 
-## Support Upgrade 09
-See `docs/SUPPORT_UPGRADE_09_ANALYTICS.md`. Run `./scripts/check-support-upgrade-09.sh` before deployment.
+## Support Release 09
 
 
-## Support Upgrade 10
-See `docs/SUPPORT_UPGRADE_10_AUTOMATIONS_SECURITY.md`. Run `./scripts/check-support-upgrade-10.sh` before deployment.
+## Support Release 10
 
 
-## Support Upgrade 11 — Final production handoff
-See `docs/SUPPORT_FINAL_PRODUCTION_HANDOFF.md` and run `./scripts/check-support-upgrade-11.sh`.
+## Support Release 11 — Final production handoff
+
+## Release 15

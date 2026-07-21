@@ -50,11 +50,13 @@ Ephemeral events may be dropped under backpressure:
 ```env
 REALTIME_TRANSPORT=axum
 REALTIME_OUTBOX_ENABLED=true
-REALTIME_STREAM_ENABLED=true
+REALTIME_DURABLE_BACKEND=nats
+REALTIME_EPHEMERAL_BACKEND=local
+REALTIME_PRESENCE_BACKEND=legacy_redis
 REALTIME_AUTH_ENABLED=true
 ```
 
-Durable state is committed in PostgreSQL before its outbox event is published to the Redis Stream.
+Durable state is committed in PostgreSQL before its outbox event is published to NATS JetStream.
 Clients recover any missed durable events through the Django HTTP synchronization APIs.
 
 ## Authenticated Axum connection

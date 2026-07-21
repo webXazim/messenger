@@ -146,10 +146,20 @@ def main() -> int:
         ),
         default=0.0,
     )
-    max_pending = max((int(item.get("pipeline", {}).get("consumer_pending", 0)) for item in records), default=0)
-    max_failed_outbox = max((int(item.get("pipeline", {}).get("outbox_failed", 0)) for item in records), default=0)
+    max_pending = max((int(item.get("pipeline", {}).get("outbox_pending", item.get("pipeline", {}).get("consumer_pending", 0)) or 0) for item in records), default=0)
+    max_failed_outbox = max((int(item.get("pipeline", {}).get("outbox_failed", 0) or 0) for item in records), default=0)
     pipeline_healthy = all(item.get("pipeline", {}).get("ok") is True for item in records)
-    axum_ready = all(item.get("axum", {}).get("stream_ready") is True for item in records)
+    axum_ready = all(
+        item.get("axum", {}).get("stream_ready") is True
+        and item.get("axum", {}).get("ephemeral_ready") is True
+        and item.get("axum", {}).get("ownership_ready") is True
+        for item in records
+    )
+    nats_slow_delta = int(delta(records, "nats", "slow_consumers"))
+    nats_connections_max = max((int(item.get("nats", {}).get("connections", 0) or 0) for item in records), default=0)
+    nats_js_storage_max = max((int(item.get("nats", {}).get("jetstream", {}).get("storage", 0) or 0) for item in records), default=0)
+    nats_js_memory_max = max((int(item.get("nats", {}).get("jetstream", {}).get("memory", 0) or 0) for item in records), default=0)
+    pgbouncer_waiting_max = max((int(item.get("pgbouncer", {}).get("client_waiting", 0) or 0) for item in records), default=0)
     redis_rejected_delta = int(delta(records, "redis", "rejected_connections"))
     redis_evicted_delta = int(delta(records, "redis", "evicted_keys"))
     postgres_deadlocks_delta = int(delta(records, "postgres", "deadlocks"))
@@ -209,10 +219,15 @@ def main() -> int:
         "no_axum_stream_errors": stream_errors_delta == 0,
         "no_malformed_stream_events": malformed_stream_delta == 0,
         "no_container_restarts": restart_delta == 0,
-        "stream_pending_below_250": max_pending < 250,
+        "durable_outbox_pending_below_250": max_pending < 250,
         "failed_outbox_below_25": max_failed_outbox < 25,
         "pipeline_healthy_for_all_samples": pipeline_healthy,
-        "axum_stream_ready_for_all_samples": axum_ready,
+        "axum_nats_transports_ready_for_all_samples": axum_ready,
+        "nats_no_new_slow_consumers": nats_slow_delta == 0,
+        "nats_has_application_connections": nats_connections_max >= 2,
+        "nats_jetstream_storage_below_1536mb": nats_js_storage_max < 1536 * 1024 * 1024,
+        "nats_jetstream_memory_below_28mb": nats_js_memory_max < 28 * 1024 * 1024,
+        "pgbouncer_waiting_clients_below_5": pgbouncer_waiting_max < 5,
         "redis_rejected_connections_unchanged": redis_rejected_delta == 0,
         "all_required_containers_running": containers_healthy,
         "disk_below_85_percent": max(disk) < 85,
@@ -230,7 +245,7 @@ def main() -> int:
     valid_until = generated_at + timedelta(hours=max(1, int(args.valid_hours)))
 
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": generated_at.isoformat(),
         "valid_until": valid_until.isoformat(),
         "passed": passed,
@@ -275,7 +290,12 @@ def main() -> int:
             "axum_stream_errors_delta": stream_errors_delta,
             "malformed_stream_events_delta": malformed_stream_delta,
             "container_restart_delta_max": restart_delta,
-            "stream_pending_max": max_pending,
+            "durable_outbox_pending_max": max_pending,
+            "nats_slow_consumers_delta": nats_slow_delta,
+            "nats_connections_max": nats_connections_max,
+            "nats_jetstream_storage_max_bytes": nats_js_storage_max,
+            "nats_jetstream_memory_max_bytes": nats_js_memory_max,
+            "pgbouncer_waiting_clients_max": pgbouncer_waiting_max,
             "failed_outbox_max": max_failed_outbox,
             "redis_rejected_connections_delta": redis_rejected_delta,
             "disk_max_percent": max(disk),

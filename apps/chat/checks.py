@@ -71,8 +71,9 @@ def enterprise_deploy_checks(app_configs, **kwargs):
     realtime_transport = str(getattr(settings, "REALTIME_TRANSPORT", "") or "").lower()
     if realtime_transport != "axum":
         issues.append(Error("REALTIME_TRANSPORT must be axum in production.", id="chat.E013"))
-    if not bool(getattr(settings, "REALTIME_STREAM_ENABLED", False)):
-        issues.append(Error("REALTIME_STREAM_ENABLED must be enabled for Axum delivery.", id="chat.E016"))
+    durable_backend = str(getattr(settings, "REALTIME_DURABLE_BACKEND", "") or "").strip().lower()
+    if durable_backend not in {"nats", "jetstream"}:
+        issues.append(Error("REALTIME_DURABLE_BACKEND must be nats.", id="chat.E016"))
     if not bool(getattr(settings, "REALTIME_OUTBOX_ENABLED", False)):
         issues.append(Error("REALTIME_OUTBOX_ENABLED must be enabled for durable realtime delivery.", id="chat.E017"))
     if not bool(getattr(settings, "REALTIME_AUTH_ENABLED", False)):

@@ -106,7 +106,7 @@ for (const required of [
 assert.ok(axumSocket.includes("validate_call_grant"), "Axum does not validate active-call signaling grants.");
 assert.ok(axumSocket.includes("REALTIME_MAX_CONNECTION_AGE_SECONDS") || read("../realtime/src/config.rs").includes("REALTIME_MAX_CONNECTION_AGE_SECONDS"), "Realtime connections are not periodically re-authorized.");
 assert.ok(read("../realtime/src/config.rs").includes("REALTIME_CONNECTION_REFRESH_JITTER_SECONDS"), "Credential refresh jitter is missing.");
-assert.ok(realtimePublisher.includes('redis_stream') && realtimePublisher.includes('Axum realtime event delivery failed'), "Django realtime publishing is not transport-neutral.");
+assert.ok(realtimePublisher.includes('nats_jetstream') && realtimePublisher.includes('schedule_realtime_outbox_publish'), "Django durable events are not using the coalesced NATS-primary outbox.");
 
 
 for (const required of [

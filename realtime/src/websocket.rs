@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
+    nats_core::{self, EphemeralPriority},
     auth::{ActorType, AuthError, AuthenticatedSession},
     protocol::{
         control_message, event_message, AudienceKey, AudienceKind, ClientCommand,
@@ -418,13 +419,11 @@ fn schedule_presence_disconnect(
     });
 }
 
-fn fanout_user_presence(state: &AppState, session: &AuthenticatedSession, snapshot: Value) {
-    let state_registry = state.registry.clone();
-    let presence = state.presence.clone();
+fn fanout_user_presence(state: &Arc<AppState>, session: &AuthenticatedSession, snapshot: Value) {
+    let state = state.clone();
     let session = session.clone();
     tokio::spawn(async move {
-        let Ok(recipient_ids) = presence.recipient_ids(&session.actor_id).await else { return; };
-        let audiences: Vec<AudienceKey> = recipient_ids
+        let audiences: Vec<AudienceKey> = session.presence_recipient_ids.clone()
             .into_iter()
             .map(|identifier| AudienceKey { kind: AudienceKind::User, identifier })
             .collect();
@@ -438,13 +437,14 @@ fn fanout_user_presence(state: &AppState, session: &AuthenticatedSession, snapsh
         }
         data.insert("visibility".to_owned(), json!("public"));
         if let Ok(message) = event_message("presence.updated", Value::Object(data)) {
-            state_registry.fanout_low(&audiences, message, None, None);
+            state.registry.fanout_low(&audiences, message.clone(), None, None);
+            nats_core::publish_after_local(&state, audiences, message, EphemeralPriority::Low, None, None).await;
         }
     });
 }
 
 fn fanout_support_visitor_presence(
-    state: &AppState,
+    state: &Arc<AppState>,
     session: &AuthenticatedSession,
     online: bool,
 ) {
@@ -461,12 +461,12 @@ fn fanout_support_visitor_presence(
             "referrer": "",
         }),
     ) {
-        state.registry.fanout_low(
-            &[AudienceKey { kind: AudienceKind::SupportWebsite, identifier: session.website_id.clone() }],
-            message,
-            None,
-            None,
-        );
+        let audience = AudienceKey { kind: AudienceKind::SupportWebsite, identifier: session.website_id.clone() };
+        state.registry.fanout_low(&[audience.clone()], message.clone(), None, None);
+        let state = state.clone();
+        tokio::spawn(async move {
+            nats_core::publish_after_local(&state, vec![audience], message, EphemeralPriority::Low, None, None).await;
+        });
     }
 }
 
@@ -561,11 +561,11 @@ async fn handle_command(
         "audience.subscribe" => handle_subscribe(command, connection_id, state, session, high_tx),
         "audience.unsubscribe" => handle_unsubscribe(command, connection_id, state, high_tx),
         "presence.ping" => handle_presence_ping(command, connection_id, state, session, high_tx).await,
-        "typing.start" | "typing.stop" => handle_messenger_typing(command, connection_id, state, session, high_tx),
-        "call.signal" => handle_call_signal(command, connection_id, state, session, high_tx),
+        "typing.start" | "typing.stop" => handle_messenger_typing(command, connection_id, state, session, high_tx).await,
+        "call.signal" => handle_call_signal(command, connection_id, state, session, high_tx).await,
         "support.ping" => handle_support_ping(command, connection_id, state, session, high_tx).await,
         "support.typing.start" | "support.typing.stop" => {
-            handle_support_typing(command, connection_id, state, session, high_tx)
+            handle_support_typing(command, connection_id, state, session, high_tx).await
         }
         "message.send" | "message.edit" | "message.delete" | "message.react"
         | "message.unreact" | "message.delivered" | "message.read" | "call.accept"
@@ -679,7 +679,7 @@ async fn handle_presence_ping(
     }
 }
 
-fn handle_messenger_typing(
+async fn handle_messenger_typing(
     command: ClientCommand,
     connection_id: Uuid,
     state: Arc<AppState>,
@@ -712,11 +712,19 @@ fn handle_messenger_typing(
             "expires_at": if started { Some(epoch_seconds() + 7) } else { None },
         }),
     ) {
-        state.registry.fanout_low(&[audience], message, Some(connection_id), None);
+        state.registry.fanout_low(&[audience.clone()], message.clone(), Some(connection_id), None);
+        nats_core::publish_after_local(
+            &state,
+            vec![audience],
+            message,
+            EphemeralPriority::Low,
+            Some(connection_id),
+            None,
+        ).await;
     }
 }
 
-fn handle_call_signal(
+async fn handle_call_signal(
     command: ClientCommand,
     connection_id: Uuid,
     state: Arc<AppState>,
@@ -777,13 +785,29 @@ fn handle_call_signal(
             // Target only connections that are both the requested actor and subscribed
             // to this authorized conversation. A client cannot signal an arbitrary user.
             state.registry.fanout_high_filtered(
-                &[conversation],
-                message,
+                &[conversation.clone()],
+                message.clone(),
                 Some(connection_id),
                 Some(user_id),
             );
+            nats_core::publish_after_local(
+                &state,
+                vec![conversation],
+                message,
+                EphemeralPriority::High,
+                Some(connection_id),
+                Some(user_id.to_owned()),
+            ).await;
         } else {
-            state.registry.fanout_high_filtered(&[conversation], message, Some(connection_id), None);
+            state.registry.fanout_high_filtered(&[conversation.clone()], message.clone(), Some(connection_id), None);
+            nats_core::publish_after_local(
+                &state,
+                vec![conversation],
+                message,
+                EphemeralPriority::High,
+                Some(connection_id),
+                None,
+            ).await;
         }
     }
 }
@@ -805,7 +829,7 @@ async fn handle_support_ping(
     send_control(high_tx, "support.pong", command.request_id.as_deref(), json!({}));
 }
 
-fn handle_support_typing(
+async fn handle_support_typing(
     command: ClientCommand,
     connection_id: Uuid,
     state: Arc<AppState>,
@@ -829,12 +853,11 @@ fn handle_support_typing(
                     "expires_at": if started { Some(epoch_seconds() + 7) } else { None },
                 }),
             ) {
-                state.registry.fanout_low(
-                    &[AudienceKey { kind: AudienceKind::SupportWebsite, identifier: session.website_id.clone() }],
-                    message,
-                    Some(connection_id),
-                    None,
-                );
+                let audience = AudienceKey { kind: AudienceKind::SupportWebsite, identifier: session.website_id.clone() };
+                state.registry.fanout_low(&[audience.clone()], message.clone(), Some(connection_id), None);
+                nats_core::publish_after_local(
+                    &state, vec![audience], message, EphemeralPriority::Low, Some(connection_id), None,
+                ).await;
             }
         }
         ActorType::User if session.has_scope("support_team") => {
@@ -856,12 +879,11 @@ fn handle_support_typing(
                     "expires_at": if started { Some(epoch_seconds() + 7) } else { None },
                 }),
             ) {
-                state.registry.fanout_low(
-                    &[AudienceKey { kind: AudienceKind::SupportVisitor, identifier: visitor_id.to_owned() }],
-                    message,
-                    Some(connection_id),
-                    None,
-                );
+                let audience = AudienceKey { kind: AudienceKind::SupportVisitor, identifier: visitor_id.to_owned() };
+                state.registry.fanout_low(&[audience.clone()], message.clone(), Some(connection_id), None);
+                nats_core::publish_after_local(
+                    &state, vec![audience], message, EphemeralPriority::Low, Some(connection_id), None,
+                ).await;
             }
         }
         _ => send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "scope_denied"})),
@@ -941,7 +963,7 @@ async fn send_outbound(
     message: OutboundMessage,
 ) -> anyhow::Result<()> {
     match message {
-        OutboundMessage::Text(text) => sender.send(Message::Text(text.to_string().into())).await?,
+        OutboundMessage::Text(text) => sender.send(Message::Text(text)).await?,
         OutboundMessage::Pong(payload) => sender.send(Message::Pong(payload.into())).await?,
         OutboundMessage::Close { code, reason } => {
             sender.send(Message::Close(Some(CloseFrame { code, reason: reason.to_string().into() }))).await?;

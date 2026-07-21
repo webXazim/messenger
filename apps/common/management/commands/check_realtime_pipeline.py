@@ -8,7 +8,7 @@ from apps.common.operational_health import realtime_pipeline_snapshot
 
 
 class Command(BaseCommand):
-    help = "Check PostgreSQL outbox and Redis Stream health for the Axum realtime pipeline."
+    help = "Check PostgreSQL outbox and NATS JetStream health for the Axum realtime pipeline."
 
     def add_arguments(self, parser):
         parser.add_argument("--json", action="store_true", dest="as_json")

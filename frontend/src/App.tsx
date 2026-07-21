@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "./app/ProtectedRoute";
 import { RouteAccessibility } from "./components/RouteAccessibility";
@@ -7,14 +8,19 @@ import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { AuthRedirectPage } from "./pages/AuthRedirectPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { ConversationPage } from "./pages/ConversationPage";
-import { CallsPage } from "./pages/CallsPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { FriendsPage } from "./pages/FriendsPage";
 import { GroupsPage } from "./pages/GroupsPage";
-import { SupportChatPage } from "./pages/SupportChatPage";
-import { SupportInvitationPage } from "./pages/SupportInvitationPage";
-import { SupportPlansPage } from "./pages/SupportPlansPage";
 import { safeAppReturnPath } from "./lib/returnPath";
+
+const CallsPage = lazy(() => import("./pages/CallsPage").then((module) => ({ default: module.CallsPage })));
+const SettingsPage = lazy(() => import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+const SupportChatPage = lazy(() => import("./pages/SupportChatPage").then((module) => ({ default: module.SupportChatPage })));
+const SupportInvitationPage = lazy(() => import("./pages/SupportInvitationPage").then((module) => ({ default: module.SupportInvitationPage })));
+const SupportPlansPage = lazy(() => import("./pages/SupportPlansPage").then((module) => ({ default: module.SupportPlansPage })));
+
+function RouteLoadingFallback() {
+  return <div className="route-loading" role="status" aria-live="polite">Loading…</div>;
+}
 
 export default function App() {
   const { isAuthenticated } = useAuth();
@@ -23,6 +29,7 @@ export default function App() {
   return (
     <>
       <RouteAccessibility />
+      <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         <Route path="/login" element={isAuthenticated ? <Navigate to={authReturnPath} replace /> : <AuthRedirectPage mode="login" />} />
         <Route path="/register" element={isAuthenticated ? <Navigate to={authReturnPath} replace /> : <AuthRedirectPage mode="signup" />} />
@@ -52,6 +59,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to={isAuthenticated ? "/chat" : "/login"} replace />} />
       </Routes>
+      </Suspense>
     </>
   );
 }

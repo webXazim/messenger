@@ -1,6 +1,6 @@
 # Support integrations and data governance
 
-Upgrade 11 adds owner-only operational privacy controls to Support Chat without
+Support includes owner-only operational privacy controls without
 changing personal Messenger. Every query begins from a `SupportAccount`, website,
 Support conversation, or signed widget visitor; no export, retention, webhook, or
 deletion service selects personal Messenger conversations.

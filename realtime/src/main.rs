@@ -1,8 +1,14 @@
 mod auth;
+mod command_auth;
+mod commands;
 mod config;
+mod database;
+mod nats_jetstream;
+mod nats_core;
+mod nats_probe;
+mod ownership;
 mod protocol;
 mod presence;
-mod redis_stream;
 mod registry;
 mod session_limit;
 mod state;
@@ -37,13 +43,23 @@ async fn main() -> Result<()> {
     let bind_addr = config.bind_addr;
     let state = AppState::new(config)?;
 
-    let stream_task = tokio::spawn(redis_stream::run(state.clone()));
+    tracing::info!(
+        durable_backend = state.config.durable_backend.as_str(),
+        ephemeral_backend = state.config.ephemeral_backend.as_str(),
+        presence_backend = state.config.presence_backend.as_str(),
+        "realtime transport backends selected"
+    );
+    let nats_probe_task = tokio::spawn(nats_probe::run(state.clone()));
+    let ephemeral_task = tokio::spawn(nats_core::run(state.clone()));
+    let ownership_task = tokio::spawn(ownership::run(state.clone()));
+    let durable_task = tokio::spawn(nats_jetstream::run(state.clone()));
     let app = Router::new()
         .route("/health/live", get(live))
         .route("/health/ready", get(ready))
         .route("/internal/stats", get(stats))
         .route("/internal/metrics", get(metrics))
-        .route("/ws", get(websocket::authenticated_websocket_handler));
+        .route("/ws", get(websocket::authenticated_websocket_handler))
+        .route("/api/v1/chat-fast/conversations/{conversation_id}/messages/", axum::routing::post(commands::send_message));
     let app = if state.config.internal_test_enabled {
         app.route("/internal/ws-test", get(websocket::test_websocket_handler))
     } else {
@@ -59,7 +75,10 @@ async fn main() -> Result<()> {
         .await?;
 
     state.shutdown.cancel();
-    let _ = time::timeout(Duration::from_secs(5), stream_task).await;
+    let _ = time::timeout(Duration::from_secs(5), durable_task).await;
+    let _ = time::timeout(Duration::from_secs(5), nats_probe_task).await;
+    let _ = time::timeout(Duration::from_secs(5), ephemeral_task).await;
+    let _ = time::timeout(Duration::from_secs(5), ownership_task).await;
     Ok(())
 }
 
@@ -74,21 +93,32 @@ async fn ready(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         None => !state.config.auth_enabled,
     };
     let presence_ready = state.presence.check().await;
-    if stream_ready && auth_ready && presence_ready {
-        (
-            StatusCode::OK,
-            Json(json!({"status": "ready", "redis_stream": true, "auth": auth_ready, "presence": presence_ready})),
-        )
+    let database_ready = state.database.check().await;
+    let ephemeral_ready = state.ephemeral_ready.load(Ordering::Acquire);
+    let ownership_ready = state.ownership_ready.load(Ordering::Acquire);
+    let payload = json!({
+        "status": if stream_ready && auth_ready && presence_ready && ephemeral_ready && ownership_ready && database_ready { "ready" } else { "not_ready" },
+        "durable_backend": state.config.durable_backend.as_str(),
+        "ephemeral_backend": state.config.ephemeral_backend.as_str(),
+        "presence_backend": state.config.presence_backend.as_str(),
+        "durable_transport": stream_ready,
+        "ephemeral_transport": ephemeral_ready,
+        "connection_ownership_backend": state.config.connection_ownership_backend.as_str(),
+        "connection_ownership": ownership_ready,
+        "jetstream": stream_ready && state.config.durable_backend.as_str() == "nats",
+        "auth": auth_ready,
+        "presence": presence_ready,
+        "chat_read_backend": state.database.backend_name(),
+        "chat_command_backend": state.config.chat_command_backend.as_str(),
+        "sqlx_enabled": state.database.enabled(),
+        "sqlx_database": database_ready,
+        "nats_probe_enabled": state.config.nats_probe_enabled,
+        "nats_probe_ready": state.nats_ready.load(Ordering::Acquire),
+    });
+    if stream_ready && auth_ready && presence_ready && ephemeral_ready && ownership_ready && database_ready {
+        (StatusCode::OK, Json(payload))
     } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "status": "not_ready",
-                "redis_stream": stream_ready,
-                "auth": auth_ready,
-                "presence": presence_ready,
-            })),
-        )
+        (StatusCode::SERVICE_UNAVAILABLE, Json(payload))
     }
 }
 
@@ -100,6 +130,28 @@ async fn stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "audiences": state.registry.audience_count(),
         "available_connection_slots": state.connection_slots.available_permits(),
         "stream_ready": state.stream_ready.load(Ordering::Acquire),
+        "ephemeral_ready": state.ephemeral_ready.load(Ordering::Acquire),
+        "ephemeral_events": state.ephemeral_events.load(Ordering::Relaxed),
+        "ephemeral_published": state.ephemeral_published.load(Ordering::Relaxed),
+        "ephemeral_errors": state.ephemeral_errors.load(Ordering::Relaxed),
+        "ephemeral_reconnects": state.ephemeral_reconnects.load(Ordering::Relaxed),
+        "connection_ownership_backend": state.config.connection_ownership_backend.as_str(),
+        "ownership_ready": state.ownership_ready.load(Ordering::Acquire),
+        "ownership_snapshots_published": state.ownership_snapshots_published.load(Ordering::Relaxed),
+        "ownership_snapshots_received": state.ownership_snapshots_received.load(Ordering::Relaxed),
+        "ownership_reconnects": state.ownership_reconnects.load(Ordering::Relaxed),
+        "targeted_deliveries_published": state.targeted_deliveries_published.load(Ordering::Relaxed),
+        "targeted_deliveries_received": state.targeted_deliveries_received.load(Ordering::Relaxed),
+        "durable_backend": state.config.durable_backend.as_str(),
+        "ephemeral_backend": state.config.ephemeral_backend.as_str(),
+        "presence_backend": state.presence.backend_name(),
+        "chat_read_backend": state.database.backend_name(),
+        "chat_command_backend": state.config.chat_command_backend.as_str(),
+        "sqlx_enabled": state.database.enabled(),
+        "local_presence_user_connections": state.presence.local_user_connection_count(),
+        "local_presence_support_connections": state.presence.local_support_connection_count(),
+        "nats_probe_enabled": state.config.nats_probe_enabled,
+        "nats_probe_ready": state.nats_ready.load(Ordering::Acquire),
         "auth_enabled": state.config.auth_enabled,
         "auth_configured": state.auth.is_some(),
         "internal_test_enabled": state.config.internal_test_enabled,
@@ -136,6 +188,12 @@ async fn metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             "realtime_stream_errors_total {}\n",
             "realtime_stream_reconnects_total {}\n",
             "realtime_malformed_stream_events_total {}\n",
+            "# TYPE realtime_ephemeral_ready gauge\n",
+            "realtime_ephemeral_ready {}\n",
+            "realtime_ephemeral_events_total {}\n",
+            "realtime_ephemeral_published_total {}\n",
+            "realtime_ephemeral_errors_total {}\n",
+            "realtime_ephemeral_reconnects_total {}\n",
             "realtime_connections_accepted_total {}\n",
             "realtime_connections_rejected_total {}\n",
             "realtime_rate_limited_events_total {}\n",
@@ -153,6 +211,11 @@ async fn metrics(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         state.stream_errors.load(Ordering::Relaxed),
         state.stream_reconnects.load(Ordering::Relaxed),
         state.malformed_stream_events.load(Ordering::Relaxed),
+        u8::from(state.ephemeral_ready.load(Ordering::Acquire)),
+        state.ephemeral_events.load(Ordering::Relaxed),
+        state.ephemeral_published.load(Ordering::Relaxed),
+        state.ephemeral_errors.load(Ordering::Relaxed),
+        state.ephemeral_reconnects.load(Ordering::Relaxed),
         state.connections_accepted.load(Ordering::Relaxed),
         state.connections_rejected.load(Ordering::Relaxed),
         state.rate_limited_events.load(Ordering::Relaxed),

@@ -34,3 +34,10 @@ backups/
 realtime/target/
 
 logs/
+
+frontend/.npm-cache/
+.npm/
+.tmp-*
+*_status.sqlite3
+frontend/dist/
+frontend/*.tsbuildinfo

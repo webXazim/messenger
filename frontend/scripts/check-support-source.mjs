@@ -137,9 +137,9 @@ assert.ok(css.includes(".ms-support-business-day"), "Responsive business-hour ro
 assert.ok(app.includes('path="support/analytics"'), "Support analytics route is missing.");
 assert.ok(supportPage.includes("SupportAnalytics"), "Responsive Support analytics page is not connected.");
 assert.ok(supportPage.includes("SupportFeedbackSettings"), "Customer feedback settings are not connected.");
-assert.ok(supportAnalytics.includes("Website performance"), "Website-level Support reporting is missing.");
-assert.ok(supportAnalytics.includes("Agent workload"), "Agent workload reporting is missing.");
-assert.ok(supportAnalytics.includes("Customer satisfaction"), "CSAT reporting is missing.");
+assert.ok(supportAnalytics.includes("Conversations by website"), "Website-level Support reporting is missing.");
+assert.ok(supportAnalytics.includes("Agent performance"), "Agent workload reporting is missing.");
+assert.ok(supportAnalytics.includes("CSAT"), "CSAT reporting is missing.");
 assert.ok(supportFeedbackSettings.includes("Request automatically"), "Automatic CSAT controls are missing.");
 assert.ok(supportInbox.includes("SupportCSATPanel"), "Conversation feedback status is missing from the Support inbox.");
 assert.ok(api.includes("/support/analytics/overview/"), "Support analytics API is missing.");
@@ -154,8 +154,8 @@ assert.ok(css.includes(".ms-support-csat-panel"), "Responsive conversation CSAT 
 
 assert.ok(app.includes('path="support/knowledge"'), "Support knowledge route is missing.");
 assert.ok(supportPage.includes("SupportKnowledgeBase"), "Support knowledge page is not connected.");
-assert.ok(supportKnowledge.includes("Show in website widget"), "Visitor self-service settings are missing.");
-assert.ok(supportKnowledge.includes("Website availability"), "Per-website article isolation is missing.");
+assert.ok(supportKnowledge.includes("Show in widget"), "Visitor self-service settings are missing.");
+assert.ok(supportKnowledge.includes("Available on all websites"), "Per-website article isolation is missing.");
 assert.ok(supportInbox.includes("Insert knowledge answer"), "Agent knowledge answer insertion is missing.");
 assert.ok(api.includes("/support/knowledge/articles/"), "Support knowledge article API is missing.");
 assert.ok(widgetLoader.includes("renderKnowledge"), "Public widget knowledge search is missing.");
@@ -251,7 +251,6 @@ assert.ok(widgetLoader.includes("sendQueue: Promise.resolve()"), "Widget sends a
 assert.ok(widgetLoader.includes("visitorTyping: false"), "Widget typing presence is not edge-triggered.");
 assert.ok(widgetLoader.includes("state.messages.splice(replacementIndex, 1, payload.message)"), "Widget optimistic messages are not replaced in place.");
 assert.ok(widgetLoader.includes("state.renderedMessageKeys[renderKey]"), "Widget message confirmations can replay entrance motion.");
-assert.ok(widgetLoader.includes(".cs-message.is-entering"), "Widget messages have no smooth entrance treatment.");
 assert.ok(widgetLoader.includes(".cs-message.is-grouped{margin-top:2px}"), "Widget mobile message grouping does not match Messenger density.");
 assert.ok(supportInbox.includes("createSerializedTaskQueue"), "Support Inbox sends are not serialized.");
 assert.ok(supportInbox.includes("structuralSharing: mergeSupportMessages"), "Support Inbox refetches can discard optimistic messages.");

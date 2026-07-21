@@ -31,8 +31,11 @@ const envWsBaseUrl = import.meta.env.VITE_WS_BASE_URL?.trim();
 const envSupportWsUrl = import.meta.env.VITE_SUPPORT_WS_URL?.trim();
 const envSocialBaseUrl = import.meta.env.VITE_SOCIAL_BASE_URL?.trim();
 const envSupportPlansUrl = import.meta.env.VITE_SUPPORT_PLANS_URL?.trim();
+const envChatCommandBackend = import.meta.env.VITE_CHAT_COMMAND_BACKEND?.trim().toLowerCase();
 
 export const API_BASE_URL = trimTrailingSlash(envApiBaseUrl || "/api/v1");
+export const CHAT_COMMAND_BACKEND = envChatCommandBackend === "axum" ? "axum" : "django";
+export const CHAT_COMMAND_URL = "/chat-fast";
 export const AUTH_API_BASE_URL = trimTrailingSlash(envAuthBaseUrl || "https://accounts.crescentsphere.com/api/v1");
 
 const configuredRealtimeWsUrl = envWsBaseUrl || envSupportWsUrl || "";

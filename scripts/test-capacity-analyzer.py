@@ -60,7 +60,7 @@ def record(*, fingerprint: str, connections: int, counters: int) -> dict:
             "cpu_percent": 5.0,
             "memory_percent": 20.0,
         }
-        for service in ("postgres", "redis", "web", "worker", "beat", "realtime", "frontend", "nginx")
+        for service in ("postgres", "pgbouncer", "redis", "nats", "web", "worker", "beat", "realtime", "frontend", "nginx")
     }
     return {
         "deployment": {"fingerprint": fingerprint, "observed_performance_settings": {"REALTIME_MAX_CONNECTIONS": "100"}},
@@ -87,8 +87,16 @@ def record(*, fingerprint: str, connections: int, counters: int) -> dict:
             "stream_errors": 0,
             "malformed_stream_events": 0,
             "stream_ready": True,
+            "ephemeral_ready": True,
+            "ownership_ready": True,
         },
-        "pipeline": {"ok": True, "consumer_pending": 0, "outbox_failed": 0},
+        "nats": {
+            "connections": 3,
+            "slow_consumers": 0,
+            "jetstream": {"storage": 1024, "memory": 1024},
+        },
+        "pgbouncer": {"client_waiting": 0},
+        "pipeline": {"ok": True, "outbox_pending": 0, "outbox_failed": 0},
     }
 
 

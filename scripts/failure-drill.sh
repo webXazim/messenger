@@ -7,30 +7,30 @@ cd "$(dirname "$0")/.."
   exit 1
 }
 service="${1:-}"
-case "$service" in realtime|redis|web) ;; *) echo "Usage: $0 {realtime|redis|web}" >&2; exit 2 ;; esac
+case "$service" in realtime|nats|postgres|pgbouncer|redis|web) ;; *) echo "Usage: $0 {realtime|nats|postgres|pgbouncer|redis|web}" >&2; exit 2 ;; esac
 compose=(docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml)
+wait_realtime() { timeout 120 bash -c 'until docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null 2>&1; do sleep 2; done'; }
+wait_web() { timeout 120 bash -c 'until docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T web python manage.py check --deploy >/dev/null 2>&1; do sleep 2; done'; }
 
 echo "Pre-drill health check..."
 ./scripts/operational-health.sh
 before="$("${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats 2>/dev/null || true)"
 echo "Restarting $service..."
 "${compose[@]}" restart "$service"
-
 case "$service" in
-  realtime)
-    timeout 90 bash -c 'until docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null 2>&1; do sleep 2; done'
-    ;;
+  realtime|nats) wait_realtime ;;
+  postgres) wait_web; wait_realtime ;;
+  pgbouncer) wait_web; wait_realtime ;;
   redis)
-    timeout 120 bash -c 'until docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T redis redis-cli ping 2>/dev/null | grep -q PONG && docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null 2>&1; do sleep 2; done'
+    timeout 120 bash -c 'until docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T redis redis-cli ping 2>/dev/null | grep -q PONG; do sleep 2; done'
+    wait_web
     ;;
-  web)
-    timeout 90 bash -c 'until docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml exec -T web python manage.py check --deploy >/dev/null 2>&1; do sleep 2; done'
-    ;;
+  web) wait_web ;;
 esac
 
-echo "Publishing a durable canary after restart..."
+echo "Publishing a durable JetStream canary after restart..."
 "${compose[@]}" exec -T web python manage.py emit_realtime_canary --timeout 30
 ./scripts/operational-health.sh
 after="$("${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats 2>/dev/null || true)"
 printf 'Before: %s\nAfter:  %s\n' "$before" "$after"
-echo "$service failure drill passed. Run the external reconnect test during a maintenance window for client-visible verification."
+echo "$service failure drill passed. Run the external reconnect test concurrently for client-visible verification."

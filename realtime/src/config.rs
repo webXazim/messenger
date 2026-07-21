@@ -2,13 +2,117 @@ use std::{env, net::SocketAddr, time::Duration};
 
 use anyhow::{anyhow, Context, Result};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RealtimeBackend {
+    LegacyRedis,
+    Nats,
+    Local,
+}
+
+impl RealtimeBackend {
+    fn from_env(name: &str) -> Result<Self> {
+        Self::from_env_with_default(name, "nats")
+    }
+
+    fn from_env_with_default(name: &str, default: &str) -> Result<Self> {
+        match value(name, default).to_ascii_lowercase().as_str() {
+            "legacy_redis" | "redis" => Ok(Self::LegacyRedis),
+            "nats" | "jetstream" => Ok(Self::Nats),
+            "local" | "memory" => Ok(Self::Local),
+            other => Err(anyhow!(
+                "{name}={other} is invalid; expected legacy_redis, nats, or local"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyRedis => "legacy_redis",
+            Self::Nats => "nats",
+            Self::Local => "local",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatCommandBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl ChatCommandBackend {
+    pub fn from_env() -> Result<Self> {
+        let raw = value("CHAT_COMMAND_BACKEND", "django").to_ascii_lowercase();
+        match raw.as_str() {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!("CHAT_COMMAND_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum")),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self { Self::Django => "django", Self::SqlxShadow => "sqlx_shadow", Self::Axum => "axum" }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatReadBackend {
+    Django,
+    SqlxShadow,
+    Sqlx,
+}
+
+impl ChatReadBackend {
+    fn from_env() -> Result<Self> {
+        match value("CHAT_READ_BACKEND", "django").to_ascii_lowercase().as_str() {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "sqlx" => Ok(Self::Sqlx),
+            other => Err(anyhow!("CHAT_READ_BACKEND={other} is invalid; expected django, sqlx_shadow, or sqlx")),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Sqlx => "sqlx",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub durable_backend: RealtimeBackend,
+    pub chat_command_backend: ChatCommandBackend,
+    pub chat_command_jwt_issuer: String,
+    pub chat_command_jwt_audience: String,
+    pub chat_read_backend: ChatReadBackend,
+    pub sqlx_database_url: String,
+    pub sqlx_max_connections: u32,
+    pub sqlx_acquire_timeout: Duration,
+    pub ephemeral_backend: RealtimeBackend,
+    pub presence_backend: RealtimeBackend,
     pub bind_addr: SocketAddr,
-    pub redis_url: String,
-    pub stream_name: String,
-    pub stream_group: String,
-    pub stream_consumer: String,
+    pub nats_probe_enabled: bool,
+    pub nats_url: String,
+    pub nats_connect_timeout: Duration,
+    pub nats_stream_name: String,
+    pub nats_consumer_name: String,
+    pub nats_subject_filter: String,
+    pub nats_ephemeral_subject: String,
+    pub nats_node_id: String,
+    pub connection_ownership_backend: RealtimeBackend,
+    pub nats_ownership_subject: String,
+    pub nats_delivery_subject_prefix: String,
+    pub ownership_announce_interval: Duration,
+    pub ownership_lease_ttl: Duration,
+    pub nats_ack_wait: Duration,
+    pub nats_max_deliver: i64,
+    pub nats_max_ack_pending: i64,
+    pub event_dedupe_capacity: usize,
     pub internal_test_enabled: bool,
     pub internal_test_token: String,
     pub auth_enabled: bool,
@@ -42,8 +146,6 @@ pub struct Config {
     pub max_connection_age: Duration,
     pub connection_refresh_jitter: Duration,
     pub send_timeout: Duration,
-    pub stream_block_ms: usize,
-    pub stream_batch_size: usize,
 }
 
 impl Config {
@@ -60,23 +162,43 @@ impl Config {
         }
 
         let config = Self {
+            durable_backend: RealtimeBackend::from_env_with_default("REALTIME_DURABLE_BACKEND", "nats")?,
+            chat_command_backend: ChatCommandBackend::from_env()?,
+            chat_command_jwt_issuer: value("CHAT_COMMAND_JWT_ISSUER", &value("REALTIME_TOKEN_ISSUER", "crescentsphere-django")),
+            chat_command_jwt_audience: value("CHAT_COMMAND_JWT_AUDIENCE", ""),
+            chat_read_backend: ChatReadBackend::from_env()?,
+            sqlx_database_url: value("SQLX_DATABASE_URL", "postgres://messenger_user:messenger_password@pgbouncer:6432/messenger_api"),
+            sqlx_max_connections: number("SQLX_MAX_CONNECTIONS", 4u32)?,
+            sqlx_acquire_timeout: Duration::from_secs(number("SQLX_ACQUIRE_TIMEOUT_SECONDS", 3u64)?),
+            ephemeral_backend: RealtimeBackend::from_env_with_default("REALTIME_EPHEMERAL_BACKEND", "local")?,
+            presence_backend: RealtimeBackend::from_env_with_default("REALTIME_PRESENCE_BACKEND", "legacy_redis")?,
             bind_addr: value("REALTIME_BIND", "0.0.0.0:9000")
                 .parse()
                 .context("REALTIME_BIND must be a valid socket address")?,
-            redis_url: value("REALTIME_STREAM_URL", "redis://redis:6379/3"),
-            stream_name: value("REALTIME_STREAM_NAME", "realtime:durable:v1"),
-            stream_group: value("REALTIME_STREAM_GROUP", "axum-single-v1"),
-            stream_consumer: value("REALTIME_STREAM_CONSUMER", "axum-1"),
+            nats_probe_enabled: boolean("NATS_PROBE_ENABLED", false)?,
+            nats_url: value("NATS_URL", "nats://nats:4222"),
+            nats_connect_timeout: Duration::from_secs(number("NATS_CONNECT_TIMEOUT_SECONDS", 3u64)?),
+            nats_stream_name: value("NATS_CHAT_STREAM", "CHAT_EVENTS"),
+            nats_consumer_name: value("NATS_DURABLE_CONSUMER", "realtime-axum-v1"),
+            nats_subject_filter: value("NATS_DURABLE_SUBJECT_FILTER", "event.chat.>"),
+            nats_ephemeral_subject: value("NATS_EPHEMERAL_SUBJECT", "rt.ephemeral.v1"),
+            nats_node_id: value("NATS_NODE_ID", "axum-01"),
+            connection_ownership_backend: RealtimeBackend::from_env_with_default("REALTIME_CONNECTION_OWNERSHIP_BACKEND", "local")?,
+            nats_ownership_subject: value("NATS_OWNERSHIP_SUBJECT", "rt.ownership.v1"),
+            nats_delivery_subject_prefix: value("NATS_DELIVERY_SUBJECT_PREFIX", "rt.deliver"),
+            ownership_announce_interval: Duration::from_secs(number("REALTIME_OWNERSHIP_ANNOUNCE_SECONDS", 5u64)?),
+            ownership_lease_ttl: Duration::from_secs(number("REALTIME_OWNERSHIP_LEASE_TTL_SECONDS", 20u64)?),
+            nats_ack_wait: Duration::from_secs(number("NATS_ACK_WAIT_SECONDS", 30u64)?),
+            nats_max_deliver: number("NATS_MAX_DELIVER", 5i64)?,
+            nats_max_ack_pending: number("NATS_MAX_ACK_PENDING", 128i64)?,
+            event_dedupe_capacity: number("REALTIME_EVENT_DEDUPE_CAPACITY", 10_000usize)?,
             internal_test_enabled,
             internal_test_token,
             auth_enabled: boolean("REALTIME_AUTH_ENABLED", true)?,
-            auth_redis_url: value(
-                "REALTIME_AUTH_REDIS_URL",
-                &value("REALTIME_STREAM_URL", "redis://redis:6379/3"),
-            ),
+            auth_redis_url: value("REALTIME_AUTH_REDIS_URL", "redis://redis:6379/3"),
             presence_redis_url: value(
                 "REALTIME_PRESENCE_REDIS_URL",
-                &value("REALTIME_AUTH_REDIS_URL", &value("REALTIME_STREAM_URL", "redis://redis:6379/3")),
+                &value("REALTIME_AUTH_REDIS_URL", "redis://redis:6379/3"),
             ),
             presence_ttl_seconds: number("REALTIME_PRESENCE_TTL_SECONDS", 90u64)?,
             presence_disconnect_grace: Duration::from_secs(number(
@@ -117,28 +239,32 @@ impl Config {
             low_queue_capacity: number("REALTIME_LOW_QUEUE_CAPACITY", 8)?,
             max_message_size: number("REALTIME_MAX_MESSAGE_SIZE", 65_536)?,
             max_frame_size: number("REALTIME_MAX_FRAME_SIZE", 65_536)?,
-            read_buffer_size: number("REALTIME_READ_BUFFER_SIZE", 16_384)?,
-            write_buffer_size: number("REALTIME_WRITE_BUFFER_SIZE", 8_192)?,
+            read_buffer_size: number("REALTIME_READ_BUFFER_SIZE", 4_096)?,
+            write_buffer_size: number("REALTIME_WRITE_BUFFER_SIZE", 4_096)?,
             max_write_buffer_size: number("REALTIME_MAX_WRITE_BUFFER_SIZE", 131_072)?,
             heartbeat_interval: Duration::from_secs(number(
                 "REALTIME_HEARTBEAT_SECONDS",
-                25,
+                30,
             )?),
-            client_timeout: Duration::from_secs(number("REALTIME_CLIENT_TIMEOUT_SECONDS", 75)?),
-            max_connection_age: Duration::from_secs(number("REALTIME_MAX_CONNECTION_AGE_SECONDS", 600)?),
+            client_timeout: Duration::from_secs(number("REALTIME_CLIENT_TIMEOUT_SECONDS", 90)?),
+            max_connection_age: Duration::from_secs(number("REALTIME_MAX_CONNECTION_AGE_SECONDS", 3_600)?),
             connection_refresh_jitter: Duration::from_secs(number(
                 "REALTIME_CONNECTION_REFRESH_JITTER_SECONDS",
-                60,
+                300,
             )?),
             send_timeout: Duration::from_secs(number("REALTIME_SEND_TIMEOUT_SECONDS", 5)?),
-            stream_block_ms: number("REALTIME_STREAM_BLOCK_MS", 5_000)?,
-            stream_batch_size: number("REALTIME_STREAM_BATCH_SIZE", 100)?,
         };
         config.validate()?;
         Ok(config)
     }
 
     fn validate(&self) -> Result<()> {
+        if self.sqlx_max_connections == 0 || self.sqlx_max_connections > 8 {
+            return Err(anyhow!("SQLX_MAX_CONNECTIONS must be between 1 and 8 on this deployment"));
+        }
+        if (self.chat_read_backend != ChatReadBackend::Django || self.chat_command_backend != ChatCommandBackend::Django) && !self.sqlx_database_url.starts_with("postgres") {
+            return Err(anyhow!("SQLX_DATABASE_URL must use PostgreSQL when SQLx reads are enabled"));
+        }
         if self.max_connections == 0
             || self.max_user_connections == 0
             || self.max_widget_connections == 0
@@ -152,10 +278,73 @@ impl Config {
             || self.send_timeout.is_zero()
             || self.max_connection_age.is_zero()
             || self.presence_ttl_seconds == 0
-            || self.stream_block_ms == 0
-            || self.stream_batch_size == 0
+            || self.nats_connect_timeout.is_zero()
+            || self.nats_ack_wait.is_zero()
+            || self.nats_max_deliver <= 0
+            || self.nats_max_ack_pending <= 0
+            || self.event_dedupe_capacity == 0
+            || self.ownership_announce_interval.is_zero()
+            || self.ownership_lease_ttl.is_zero()
         {
             return Err(anyhow!("realtime capacities and limits must be greater than zero"));
+        }
+        if self.nats_probe_enabled && self.nats_url.trim().is_empty() {
+            return Err(anyhow!("NATS_URL is required when NATS_PROBE_ENABLED=true"));
+        }
+        if self.durable_backend != RealtimeBackend::Nats {
+            return Err(anyhow!(
+                "REALTIME_DURABLE_BACKEND must be nats; the retired Redis Streams delivery path is no longer included"
+            ));
+        }
+        if self.durable_backend == RealtimeBackend::Nats {
+            if self.nats_url.trim().is_empty()
+                || self.nats_stream_name.trim().is_empty()
+                || self.nats_consumer_name.trim().is_empty()
+                || self.nats_subject_filter.trim().is_empty()
+            {
+                return Err(anyhow!(
+                    "NATS_URL, NATS_CHAT_STREAM, NATS_DURABLE_CONSUMER and NATS_DURABLE_SUBJECT_FILTER are required when REALTIME_DURABLE_BACKEND=nats"
+                ));
+            }
+        }
+        if self.ephemeral_backend == RealtimeBackend::LegacyRedis {
+            return Err(anyhow!(
+                "REALTIME_EPHEMERAL_BACKEND=legacy_redis is not supported; use local for one Axum node or nats for multiple nodes"
+            ));
+        }
+        if self.ephemeral_backend == RealtimeBackend::Nats
+            && (self.nats_url.trim().is_empty()
+                || self.nats_ephemeral_subject.trim().is_empty()
+                || self.nats_node_id.trim().is_empty())
+        {
+            return Err(anyhow!(
+                "NATS_URL, NATS_EPHEMERAL_SUBJECT and NATS_NODE_ID are required when REALTIME_EPHEMERAL_BACKEND=nats"
+            ));
+        }
+        if self.connection_ownership_backend == RealtimeBackend::Nats
+            && (self.nats_url.trim().is_empty()
+                || self.nats_node_id.trim().is_empty()
+                || self.nats_ownership_subject.trim().is_empty()
+                || self.nats_delivery_subject_prefix.trim().is_empty())
+        {
+            return Err(anyhow!(
+                "NATS_URL, NATS_NODE_ID, NATS_OWNERSHIP_SUBJECT and NATS_DELIVERY_SUBJECT_PREFIX are required when REALTIME_CONNECTION_OWNERSHIP_BACKEND=nats"
+            ));
+        }
+        if self.connection_ownership_backend == RealtimeBackend::LegacyRedis {
+            return Err(anyhow!(
+                "REALTIME_CONNECTION_OWNERSHIP_BACKEND=legacy_redis is not supported; use local or nats"
+            ));
+        }
+        if self.ownership_lease_ttl <= self.ownership_announce_interval {
+            return Err(anyhow!(
+                "REALTIME_OWNERSHIP_LEASE_TTL_SECONDS must exceed REALTIME_OWNERSHIP_ANNOUNCE_SECONDS"
+            ));
+        }
+        if self.presence_backend == RealtimeBackend::Nats {
+            return Err(anyhow!(
+                "REALTIME_PRESENCE_BACKEND=nats is not implemented; use local for Axum-owned leases or legacy_redis for rollback"
+            ));
         }
         if self.max_write_buffer_size <= self.write_buffer_size + self.max_message_size {
             return Err(anyhow!(
@@ -184,7 +373,7 @@ impl Config {
                 ));
             }
             if self.auth_redis_url.trim().is_empty()
-                || self.presence_redis_url.trim().is_empty()
+                || (self.presence_backend == RealtimeBackend::LegacyRedis && self.presence_redis_url.trim().is_empty())
                 || self.token_issuer.trim().is_empty()
                 || self.ticket_audience.trim().is_empty()
                 || self.grant_audience.trim().is_empty()

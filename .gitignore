@@ -77,3 +77,9 @@ loadtests/data/*.json
 !loadtests/data/.gitkeep
 loadtests/results/*
 !loadtests/results/.gitkeep
+
+# Package-manager caches and local runtime snapshots
+frontend/.npm-cache/
+.npm/
+.tmp-*
+_codex_status.sqlite3
