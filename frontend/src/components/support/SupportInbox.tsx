@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -529,6 +530,8 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
   } | null>(null);
   const [typingVisitors, setTypingVisitors] = useState<Record<string, string>>({});
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelineFollowsLatestRef = useRef(true);
+  const timelineRenderStateRef = useRef({ conversationId: "", messageCount: 0 });
   const typingStopTimerRef = useRef<number | null>(null);
   const typingVisitorTimerRef = useRef<number | null>(null);
   const typingVisitorShownAtRef = useRef(0);
@@ -644,15 +647,21 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
     }
   }, [activeCallQuery.data?.call]);
 
-  useEffect(() => {
-    if (!messagesQuery.data?.messages.length) return;
-    const frame = window.requestAnimationFrame(() => {
-      timelineRef.current?.scrollTo({
-        top: timelineRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    });
-    return () => window.cancelAnimationFrame(frame);
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current;
+    const messageCount = messagesQuery.data?.messages.length || 0;
+    if (!timeline || !messageCount) return;
+
+    const previous = timelineRenderStateRef.current;
+    const conversationChanged = previous.conversationId !== selectedId;
+    const receivedNewMessage = !conversationChanged && messageCount > previous.messageCount;
+    if (conversationChanged || receivedNewMessage && timelineFollowsLatestRef.current) {
+      // This runs before paint, so the newest messages are the first visible
+      // state instead of an animated trip through older history.
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+    timelineFollowsLatestRef.current = conversationChanged || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 96;
+    timelineRenderStateRef.current = { conversationId: selectedId, messageCount };
   }, [messagesQuery.data?.messages.length, selectedId]);
 
   useEffect(() => {
@@ -1246,6 +1255,10 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
               ref={timelineRef}
               aria-label="Messages"
               aria-live="polite"
+              onScroll={(event) => {
+                const timeline = event.currentTarget;
+                timelineFollowsLatestRef.current = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 96;
+              }}
             >
               {messagesQuery.isLoading ? (
                 <div className="ms-chat-state">Loading messages…</div>

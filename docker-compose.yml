@@ -181,7 +181,9 @@ services:
       SUPPORT_WIDGET_ENABLED: ${SUPPORT_WIDGET_ENABLED:-true}
       SUPPORT_WIDGET_REQUIRE_ORIGIN: ${SUPPORT_WIDGET_REQUIRE_ORIGIN:-true}
       SUPPORT_CALLS_ENABLED: ${SUPPORT_CALLS_ENABLED:-true}
-      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
+      # The web process is the single migration owner. Do not allow a stale
+      # host .env value to start new application code against an old schema.
+      RUN_MIGRATIONS: "1"
       RUN_COLLECTSTATIC: "1"
     expose:
       - "8000"

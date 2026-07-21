@@ -1164,7 +1164,9 @@
     var body = shadow.querySelector(".cs-body");
     var jump = shadow.querySelector(".cs-jump");
     if (jump) jump.hidden = true;
-    if (body) window.requestAnimationFrame(function () { body.scrollTop = body.scrollHeight; });
+    // Position before the browser paints so opening a conversation shows the
+    // newest messages immediately instead of visibly scrolling through it.
+    if (body) body.scrollTop = body.scrollHeight;
   }
 
   function updateLauncherUnread(hasUnread) {
@@ -1710,15 +1712,14 @@
     }
     shadow.appendChild(wrap);
     if (state.open && state.session && !(state.call && !callTerminal(state.call))) {
-      window.requestAnimationFrame(function () {
-        var nextBody = shadow && shadow.querySelector(".cs-body");
-        var nextJump = shadow && shadow.querySelector(".cs-jump");
-        if (!nextBody) return;
+      var nextBody = shadow && shadow.querySelector(".cs-body");
+      var nextJump = shadow && shadow.querySelector(".cs-jump");
+      if (nextBody) {
         nextBody.scrollTop = followLatest
           ? nextBody.scrollHeight
           : Math.max(0, nextBody.scrollHeight - nextBody.clientHeight - distanceFromBottom);
         if (nextJump) nextJump.hidden = nextBody.scrollHeight - nextBody.scrollTop - nextBody.clientHeight < 96;
-      });
+      }
     }
     if (restoreComposerFocus && state.open && state.session && !(state.call && !callTerminal(state.call))) {
       window.requestAnimationFrame(function () {
