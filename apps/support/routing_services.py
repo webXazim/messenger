@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from django.db import transaction
-from django.db.models import Count, Q, F
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from apps.support.models import (
     SupportAgent, SupportConversation, SupportRoutingCursor, SupportRoutingPolicy,
-    SupportServiceAlert, SupportWebsiteTeam,
+    SupportServiceAlert, SupportTeamMembership, SupportWebsiteAgent, SupportWebsiteTeam,
 )
 from apps.support.workflow_services import person_name, record_audit_event, publish_private_conversation_refresh
 
@@ -42,13 +42,27 @@ def _eligible_agents(*, conversation, team=None, enforce_capacity=True):
         is_active=True,
         user__is_active=True,
         availability=SupportAgent.Availability.AVAILABLE,
-        website_assignments__website=conversation.website,
+    ).filter(
+        Exists(
+            SupportWebsiteAgent.objects.filter(
+                agent_id=OuterRef("pk"), website=conversation.website,
+            )
+        )
     )
     if team is not None:
-        queryset = queryset.filter(team_memberships__team=team)
-    # Lock plain agent rows first. PostgreSQL does not allow FOR UPDATE on the
-    # grouped query produced by Count annotations.
-    candidates = list(queryset.select_for_update().distinct().order_by("joined_at", "id"))
+        queryset = queryset.filter(
+            Exists(
+                SupportTeamMembership.objects.filter(
+                    agent_id=OuterRef("pk"), team=team,
+                )
+            )
+        )
+    # EXISTS avoids duplicate joined rows, allowing PostgreSQL to lock agents
+    # directly without the unsupported FOR UPDATE + DISTINCT combination.
+    candidates = list(
+        queryset.select_for_update(of=("self",))
+        .order_by("joined_at", "id")
+    )
     result = []
     for agent in candidates:
         agent.active_count = active_conversation_count(agent, exclude_id=conversation.id)
@@ -74,7 +88,9 @@ def _choose_agent(policy, candidates):
 
 @transaction.atomic
 def assign_support_conversation(*, conversation, trigger="automatic", actor=None, force=False) -> RoutingResult:
-    conversation = SupportConversation.objects.select_for_update().select_related("website", "website__support_account", "assigned_agent", "assigned_team").get(pk=conversation.pk)
+    # assigned_agent and assigned_team are nullable. Restrict the lock to the
+    # conversation row so PostgreSQL does not apply FOR UPDATE to outer joins.
+    conversation = SupportConversation.objects.select_for_update(of=("self",)).select_related("website", "website__support_account", "assigned_agent", "assigned_team").get(pk=conversation.pk)
     if conversation.assigned_agent_id and not force:
         return RoutingResult(True, str(conversation.assigned_agent_id), str(conversation.assigned_team_id) if conversation.assigned_team_id else None, "already_assigned")
     policy, _ = SupportRoutingPolicy.objects.select_for_update().get_or_create(website=conversation.website)

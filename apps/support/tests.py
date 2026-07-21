@@ -510,6 +510,29 @@ class SupportFoundationTests(APITestCase):
         self.assertEqual(SupportMessageAuthor.objects.filter(message__conversation=support_conversation.conversation).count(), 2)
         self.assertEqual(User.objects.count(), 3)
 
+    def test_widget_routing_locks_only_the_conversation_row(self):
+        account = self.active_account()
+        website = SupportWebsite.objects.create(
+            support_account=account,
+            name="Main",
+            domain="main.example.com",
+            allowed_origins=["https://main.example.com"],
+        )
+        session = self._create_widget_session(website)
+
+        with patch.object(
+            SupportConversation.objects,
+            "select_for_update",
+            wraps=SupportConversation.objects.select_for_update,
+        ) as select_for_update:
+            response = self._visitor_message(website, session, "Hello support")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            any(call.kwargs.get("of") == ("self",) for call in select_for_update.call_args_list),
+            "Routing must lock only SupportConversation; nullable joined rows cannot be locked on PostgreSQL.",
+        )
+
     def test_widget_message_client_temp_id_is_idempotent(self):
         account = self.active_account()
         website = SupportWebsite.objects.create(

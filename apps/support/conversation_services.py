@@ -863,7 +863,7 @@ def update_conversation_workflow(
     follow_up_at=_ASSIGNMENT_UNSET,
     follow_up_note: str = "",
 ) -> SupportConversation:
-    support_conversation = SupportConversation.objects.select_for_update().select_related(
+    support_conversation = SupportConversation.objects.select_for_update(of=("self",)).select_related(
         "website", "assigned_agent", "assigned_agent__user"
     ).get(pk=support_conversation.pk)
     before = {

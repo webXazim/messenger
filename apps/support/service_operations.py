@@ -411,7 +411,7 @@ def recalculate_active_targets(conversation: SupportConversation):
 @transaction.atomic
 def pause_sla(conversation: SupportConversation, *, reason: str, paused_at=None):
     paused_at = paused_at or timezone.now()
-    conversation = SupportConversation.objects.select_for_update().select_related(
+    conversation = SupportConversation.objects.select_for_update(of=("self",)).select_related(
         "website", "website__support_account", "assigned_team"
     ).get(pk=conversation.pk)
     if conversation.sla_paused_at or conversation.status in {
@@ -439,7 +439,7 @@ def pause_sla(conversation: SupportConversation, *, reason: str, paused_at=None)
 @transaction.atomic
 def resume_sla(conversation: SupportConversation, *, resumed_at=None):
     resumed_at = resumed_at or timezone.now()
-    conversation = SupportConversation.objects.select_for_update().select_related(
+    conversation = SupportConversation.objects.select_for_update(of=("self",)).select_related(
         "website", "website__support_account", "assigned_team"
     ).get(pk=conversation.pk)
     if not conversation.sla_paused_at:
@@ -780,7 +780,7 @@ def escalate_sla_breach(conversation: SupportConversation, *, targets: list[str]
 def generate_service_alerts(conversation: SupportConversation, *, now=None) -> int:
     now = now or timezone.now()
     conversation = (
-        SupportConversation.objects.select_for_update()
+        SupportConversation.objects.select_for_update(of=("self",))
         .select_related(
             "website", "website__support_account", "visitor",
             "assigned_agent", "assigned_agent__user",
@@ -886,4 +886,3 @@ def recalculate_account_targets(account) -> int:
         recalculate_active_targets(conversation)
         count += 1
     return count
-

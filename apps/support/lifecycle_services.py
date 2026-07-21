@@ -197,7 +197,7 @@ def set_following(*, context, conversation, user, following):
 def transfer_conversation(*, context, conversation, to_agent=None, to_team=None, note=""):
     if context.role != "owner" and not (context.agent and context.agent.can_assign_conversations):
         raise SupportLifecycleError("You cannot transfer conversations.", code="transfer_denied", status_code=403)
-    conversation = SupportConversation.objects.select_for_update().select_related("website", "assigned_agent", "assigned_team").get(pk=conversation.pk)
+    conversation = SupportConversation.objects.select_for_update(of=("self",)).select_related("website", "assigned_agent", "assigned_team").get(pk=conversation.pk)
     if to_agent and (to_agent.support_account_id != context.account.id or not to_agent.is_active):
         raise SupportLifecycleError("The target agent is unavailable.", code="invalid_transfer_agent")
     if to_team and (to_team.support_account_id != context.account.id or not to_team.is_active):
