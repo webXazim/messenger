@@ -14,7 +14,15 @@ ALLOWED_ATTRIBUTES = {
     "th": ["colspan", "rowspan"],
     "td": ["colspan", "rowspan"],
 }
-ALLOWED_PROTOCOLS = {"http", "https", "mailto"}
+ALLOWED_PROTOCOLS = {"https", "mailto"}
+
+
+def _secure_link(attrs, new=False):
+    href_key = (None, "href")
+    href = attrs.get(href_key, "").strip().lower()
+    if href and not (href.startswith("https://") or href.startswith("mailto:")):
+        return None
+    return attrs
 
 def sanitize_knowledge_html(value: str) -> str:
     cleaned = bleach.clean(
@@ -27,7 +35,7 @@ def sanitize_knowledge_html(value: str) -> str:
     )
     cleaned = bleach.linkify(
         cleaned,
-        callbacks=[bleach.callbacks.nofollow, bleach.callbacks.target_blank],
+        callbacks=[_secure_link, bleach.callbacks.nofollow, bleach.callbacks.target_blank],
         skip_tags={"pre", "code"},
     )
     return cleaned.strip()

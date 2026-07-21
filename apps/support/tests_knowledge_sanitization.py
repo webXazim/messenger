@@ -19,3 +19,11 @@ class SupportKnowledgeSanitizationTests(SimpleTestCase):
         self.assertIn("<h2>Reset access</h2>", cleaned)
         self.assertIn("<ol>", cleaned)
         self.assertIn("<li>Open settings.</li>", cleaned)
+
+    def test_insecure_http_links_are_not_published(self):
+        cleaned = sanitize_knowledge_html(
+            '<a href="http://example.com">insecure</a> '
+            '<a href="https://example.com">secure</a>'
+        )
+        self.assertNotIn('href="http://example.com"', cleaned)
+        self.assertIn('href="https://example.com"', cleaned)

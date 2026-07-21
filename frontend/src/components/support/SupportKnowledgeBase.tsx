@@ -34,7 +34,7 @@ const EMPTY_ARTICLE: SupportKnowledgeArticleInput = {
   change_note: "",
 };
 
-function ArticleEditor({ bootstrap, article, articles, onDone }: { bootstrap: SupportBootstrap; article: SupportKnowledgeArticle | null; articles: SupportKnowledgeArticle[]; onDone: () => void }) {
+function ArticleEditor({ bootstrap, article, articles: _articles, onDone }: { bootstrap: SupportBootstrap; article: SupportKnowledgeArticle | null; articles: SupportKnowledgeArticle[]; onDone: () => void }) {
   const queryClient = useQueryClient();
   const categories = useQuery({ queryKey: ["support-knowledge-categories", true], queryFn: ({ signal }) => supportApi.listKnowledgeCategories(true, signal) });
   const [form, setForm] = useState<SupportKnowledgeArticleInput>(EMPTY_ARTICLE);
@@ -79,54 +79,49 @@ function ArticleEditor({ bootstrap, article, articles, onDone }: { bootstrap: Su
     if (form.title.trim() && bodyText && (form.all_websites || form.website_ids.length)) save.mutate();
   };
   const toggleWebsite = (id: string) => setForm((current) => ({ ...current, website_ids: current.website_ids.includes(id) ? current.website_ids.filter((value) => value !== id) : [...current.website_ids, id] }));
-  const toggleRelated = (id: string) => setForm((current) => ({ ...current, related_article_ids: current.related_article_ids?.includes(id) ? current.related_article_ids.filter((value) => value !== id) : [...(current.related_article_ids || []), id] }));
 
-  return <form className="sc-kb-editor sc-kb-editor--production" onSubmit={submit}>
+  return <form className="sc-kb-editor sc-kb-editor--focused" onSubmit={submit}>
     <main className="sc-kb-editor__main">
-      <section className="sc-kb-editor-section">
-        <div className="sc-kb-editor-section__head"><div><span>Article details</span><h3>Customer-facing information</h3></div><small>Use clear wording that can be published without further rewriting.</small></div>
-        <div className="sc-kb-form-grid sc-kb-form-grid--details">
-          <label className="sc-kb-field sc-kb-field--full"><span>Article title</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} maxLength={180} required placeholder="Enter the question or topic customers will recognize" /><small>{form.title.length}/180</small></label>
-          <label className="sc-kb-field sc-kb-field--full"><span>Summary</span><textarea value={form.summary || ""} onChange={(event) => setForm({ ...form, summary: event.target.value })} maxLength={320} rows={3} placeholder="Briefly explain what this article helps the customer complete or understand." /><small>{(form.summary || "").length}/320</small></label>
-          <label className="sc-kb-field sc-kb-field--full"><span>Search description</span><input value={form.seo_description || ""} onChange={(event) => setForm({ ...form, seo_description: event.target.value })} maxLength={160} placeholder="A concise description for search results and article previews" /><small>{(form.seo_description || "").length}/160</small></label>
+      <section className="sc-kb-article-basics">
+        <label className="sc-kb-field sc-kb-field--title">
+          <span>Article title</span>
+          <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} maxLength={180} required placeholder="Write a clear title customers will recognize" autoFocus />
+          <small>{form.title.length}/180</small>
+        </label>
+        <label className="sc-kb-field sc-kb-field--summary">
+          <span>Summary</span>
+          <textarea value={form.summary || ""} onChange={(event) => setForm({ ...form, summary: event.target.value })} maxLength={320} rows={2} placeholder="Briefly state what the customer will learn or complete." />
+          <small>{(form.summary || "").length}/320</small>
+        </label>
+      </section>
+
+      <section className="sc-kb-editor-section sc-kb-editor-section--content sc-kb-editor-section--wide">
+        <div className="sc-kb-editor-section__head">
+          <div><span>Article content</span><h3>Customer-facing answer</h3></div>
+          <small>{bodyText.split(/\s+/).filter(Boolean).length.toLocaleString()} words · {bodyText.length.toLocaleString()} characters</small>
         </div>
-      </section>
-
-      <section className="sc-kb-editor-section sc-kb-editor-section--content">
-        <div className="sc-kb-editor-section__head"><div><span>Article content</span><h3>Published answer</h3></div><small>{bodyText.length.toLocaleString()} characters</small></div>
         <SupportRichTextEditor value={form.body} onChange={(body) => setForm((current) => ({ ...current, body }))} direction={form.language === "ar" ? "rtl" : "ltr"} />
-        <p className="sc-kb-security-note">Only approved formatting is stored. Scripts, unsafe embeds, inline styles, and unsupported HTML are removed by the server before publication.</p>
-      </section>
-
-      <section className="sc-kb-editor-section">
-        <div className="sc-kb-editor-section__head"><div><span>Internal record</span><h3>Version note</h3></div><small>Visible only to the support team.</small></div>
-        <label className="sc-kb-field"><span>Change summary</span><input value={form.change_note || ""} onChange={(event) => setForm({ ...form, change_note: event.target.value })} maxLength={255} placeholder={article ? "Summarize the changes made in this version" : "Initial article creation"} /></label>
+        <p className="sc-kb-security-note">Formatting is sanitized on the server. Scripts, unsafe embeds, inline styles, and unsupported HTML are removed before the article is stored.</p>
       </section>
     </main>
 
-    <aside className="sc-kb-editor__sidebar">
-      <section className="sc-kb-publish-card">
-        <div className="sc-kb-editor-section__head"><div><span>Publishing</span><h3>Article status</h3></div></div>
-        <label className="sc-kb-field"><span>Status</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as SupportKnowledgeArticleInput["status"] })}><option value="draft">Draft — internal review</option><option value="published">Published — available to customers</option></select></label>
-        <label className="sc-kb-field"><span>Language</span><select value={form.language || "en"} onChange={(event) => setForm({ ...form, language: event.target.value })}><option value="en">English</option><option value="ar">Arabic</option></select></label>
-        <label className="sc-kb-field"><span>Category</span><select value={form.category_id || ""} onChange={(event) => setForm({ ...form, category_id: event.target.value || null })}><option value="">Uncategorized</option>{categories.data?.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <SupportToggle checked={form.is_featured} onChange={(checked) => setForm({ ...form, is_featured: checked })} label="Feature this article" description="Give this answer priority in customer search results." />
-      </section>
-
-      <section className="sc-kb-publish-card">
-        <div className="sc-kb-editor-section__head"><div><span>Availability</span><h3>Websites</h3></div></div>
-        <SupportToggle checked={form.all_websites} onChange={(checked) => setForm({ ...form, all_websites: checked, website_ids: checked ? [] : form.website_ids })} label="All websites" description="Publish this answer across every support website." />
-        {!form.all_websites ? <div className="sc-kb-sidebar-choices">{bootstrap.websites.map((website) => <label key={website.id}><input type="checkbox" checked={form.website_ids.includes(website.id)} onChange={() => toggleWebsite(website.id)} /><span><strong>{website.name}</strong><small>{website.domain}</small></span></label>)}</div> : null}
-      </section>
-
-      <section className="sc-kb-publish-card">
-        <div className="sc-kb-editor-section__head"><div><span>Suggestions</span><h3>Related articles</h3></div></div>
-        <div className="sc-kb-sidebar-choices sc-kb-sidebar-choices--scroll">{articles.filter((item) => item.id !== article?.id && item.status !== "archived").slice(0, 20).map((item) => <label key={item.id}><input type="checkbox" checked={form.related_article_ids?.includes(item.id) || false} onChange={() => toggleRelated(item.id)} /><span><strong>{item.title}</strong><small>{item.category_name || "Uncategorized"}</small></span></label>)}{!articles.filter((item) => item.id !== article?.id && item.status !== "archived").length ? <p>No other active articles are available.</p> : null}</div>
-      </section>
+    <aside className="sc-kb-editor__sidebar sc-kb-editor__sidebar--compact">
+      <div className="sc-kb-sidebar-heading"><span>Article settings</span><p>Publishing, organization, and availability.</p></div>
+      <label className="sc-kb-field"><span>Status</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as SupportKnowledgeArticleInput["status"] })}><option value="draft">Draft</option><option value="published">Published</option></select><small>{form.status === "published" ? "Visible to customers after saving." : "Visible only to the support team."}</small></label>
+      <label className="sc-kb-field"><span>Category</span><select value={form.category_id || ""} onChange={(event) => setForm({ ...form, category_id: event.target.value || null })}><option value="">Uncategorized</option>{categories.data?.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label className="sc-kb-field"><span>Language</span><select value={form.language || "en"} onChange={(event) => setForm({ ...form, language: event.target.value })}><option value="en">English</option><option value="ar">Arabic</option></select></label>
+      <div className="sc-kb-availability-control">
+        <SupportToggle checked={form.all_websites} onChange={(checked) => setForm({ ...form, all_websites: checked, website_ids: checked ? [] : form.website_ids })} label="Available on all websites" description="Turn off to choose specific support websites." />
+        {!form.all_websites ? <div className="sc-kb-sidebar-choices sc-kb-sidebar-choices--compact">{bootstrap.websites.map((website) => <label key={website.id}><input type="checkbox" checked={form.website_ids.includes(website.id)} onChange={() => toggleWebsite(website.id)} /><span><strong>{website.name}</strong><small>{website.domain}</small></span></label>)}</div> : null}
+      </div>
+      {article ? <label className="sc-kb-field sc-kb-field--version-note"><span>Version note</span><textarea value={form.change_note || ""} onChange={(event) => setForm({ ...form, change_note: event.target.value })} maxLength={255} rows={3} placeholder="Briefly record what changed in this version." /><small>Internal only.</small></label> : null}
     </aside>
 
     {error ? <SupportState kind="error" title="Article could not be saved" description={error} /> : null}
-    <footer className="sc-kb-actions sc-kb-actions--sticky"><div><strong>{form.status === "published" ? "Publishing to customers" : "Saving as an internal draft"}</strong><small>{form.all_websites ? "Available on all websites" : `${form.website_ids.length} selected website${form.website_ids.length === 1 ? "" : "s"}`}</small></div><div><SupportButton type="button" variant="secondary" onClick={onDone}>Cancel</SupportButton><SupportButton type="submit" isLoading={save.isPending} disabled={!form.title.trim() || !bodyText || (!form.all_websites && !form.website_ids.length)}>{form.status === "published" ? (article ? "Save and publish" : "Publish article") : (article ? "Save draft" : "Create draft")}</SupportButton></div></footer>
+    <footer className="sc-kb-actions sc-kb-actions--sticky">
+      <div><strong>{form.status === "published" ? "Ready to publish" : "Internal draft"}</strong><small>{form.all_websites ? "Available on all websites" : `${form.website_ids.length} selected website${form.website_ids.length === 1 ? "" : "s"}`}</small></div>
+      <div><SupportButton type="button" variant="secondary" onClick={onDone}>Cancel</SupportButton><SupportButton type="submit" isLoading={save.isPending} disabled={!form.title.trim() || !bodyText || (!form.all_websites && !form.website_ids.length)}>{form.status === "published" ? (article ? "Save and publish" : "Publish article") : (article ? "Save draft" : "Create draft")}</SupportButton></div>
+    </footer>
   </form>;
 }
 
