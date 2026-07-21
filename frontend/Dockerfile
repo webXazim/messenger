@@ -4,7 +4,8 @@ WORKDIR /app
 
 # Keep installs reliable on small VPS hosts. The Debian-based Node image avoids
 # the npm/Alpine crash seen as "Exit handler never called" during npm ci.
-ENV NODE_OPTIONS=--max-old-space-size=384 \
+ENV NODE_ENV=development \
+    NODE_OPTIONS=--max-old-space-size=1024 \
     npm_config_audit=false \
     npm_config_fund=false \
     npm_config_fetch_retries=5 \
@@ -15,7 +16,7 @@ ENV NODE_OPTIONS=--max-old-space-size=384 \
 
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --no-audit --no-fund --prefer-offline
+    npm ci --include=dev --no-audit --no-fund --prefer-offline
 
 COPY index.html vite.config.ts tsconfig.json ./
 COPY public ./public
