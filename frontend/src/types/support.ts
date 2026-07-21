@@ -104,6 +104,9 @@ export type SupportAgentInvitation = {
   expires_at: string;
   last_sent_at: string;
   send_count: number;
+  email_delivery_status: "queued" | "sent" | "failed";
+  email_delivery_error?: string;
+  email_delivered_at?: string | null;
   max_active_conversations: number;
   can_view_all_conversations: boolean;
   can_assign_conversations: boolean;

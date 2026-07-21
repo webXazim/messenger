@@ -12,6 +12,7 @@ from apps.chat.models import Message, MessageAttachment, PendingUpload
 from apps.support.conversation_services import team_unread_count, visitor_unread_count
 from apps.support.realtime import visitor_is_online
 from apps.support.feedback_services import feedback_settings_for, survey_for_conversation
+from apps.support.knowledge_sanitizer import sanitize_knowledge_html, knowledge_plain_text
 from apps.support.service_operations import (
     SupportServiceConfigurationError,
     normalize_service_settings_payload,
@@ -244,6 +245,9 @@ class SupportAgentInvitationSerializer(serializers.ModelSerializer):
             "expires_at",
             "last_sent_at",
             "send_count",
+            "email_delivery_status",
+            "email_delivery_error",
+            "email_delivered_at",
             "max_active_conversations",
             "can_view_all_conversations",
             "can_assign_conversations",
@@ -1276,6 +1280,7 @@ class SupportKnowledgeCategorySerializer(serializers.ModelSerializer):
 
 
 class SupportKnowledgeArticleSerializer(serializers.ModelSerializer):
+    body = serializers.SerializerMethodField()
     category_name = serializers.CharField(source="category.name", read_only=True, allow_null=True)
     website_ids = serializers.SerializerMethodField()
     website_names = serializers.SerializerMethodField()
@@ -1322,6 +1327,9 @@ class SupportKnowledgeArticleSerializer(serializers.ModelSerializer):
         total = obj.helpful_count + obj.not_helpful_count
         return round((obj.helpful_count / total) * 100, 1) if total else None
 
+    def get_body(self, obj):
+        return sanitize_knowledge_html(obj.body)
+
     def get_related_articles(self, obj):
         links = getattr(obj, "_prefetched_objects_cache", {}).get("related_links")
         links = links if links is not None else obj.related_links.select_related("related_article").all()
@@ -1348,9 +1356,10 @@ class SupportKnowledgeArticleWriteSerializer(serializers.Serializer):
         return value.strip()
 
     def validate_body(self, value):
-        if not value.strip():
+        sanitized = sanitize_knowledge_html(value)
+        if not knowledge_plain_text(sanitized):
             raise serializers.ValidationError("Enter the article content.")
-        return value.strip()
+        return sanitized
 
 
 class SupportKnowledgeRevisionSerializer(serializers.ModelSerializer):
@@ -1373,6 +1382,7 @@ class PublicKnowledgeCategorySerializer(serializers.ModelSerializer):
 
 
 class PublicKnowledgeArticleSerializer(serializers.ModelSerializer):
+    body = serializers.SerializerMethodField()
     category = serializers.SerializerMethodField()
     helpful_rate = serializers.SerializerMethodField()
 
@@ -1392,6 +1402,9 @@ class PublicKnowledgeArticleSerializer(serializers.ModelSerializer):
     def get_helpful_rate(self, obj):
         total = obj.helpful_count + obj.not_helpful_count
         return round((obj.helpful_count / total) * 100, 1) if total else None
+
+    def get_body(self, obj):
+        return sanitize_knowledge_html(obj.body)
 
 
 class PublicKnowledgeFeedbackSerializer(serializers.Serializer):
@@ -1521,3 +1534,4 @@ class SupportRoutingPolicyWriteSerializer(serializers.Serializer):
     offline_reassignment_minutes = serializers.IntegerField(min_value=0, max_value=1440, default=15)
     prefer_previous_agent = serializers.BooleanField(default=True)
     enabled = serializers.BooleanField(default=True)
+

@@ -1294,7 +1294,7 @@ export function SupportInbox({ bootstrap }: { bootstrap: SupportBootstrap }) {
                   value=""
                   onChange={(event) => {
                     const article = knowledgeArticlesQuery.data?.find((item) => item.id === event.target.value);
-                    if (article) setComposerInsertion({ id: `${Date.now()}-${article.id}`, text: article.body });
+                    if (article) { const wrapper = document.createElement("div"); wrapper.innerHTML = article.body; setComposerInsertion({ id: `${Date.now()}-${article.id}`, text: (wrapper.textContent || "").trim() }); }
                     event.target.value = "";
                   }}
                   disabled={selectedConversation.status === "closed" || sendMutation.isPending}

@@ -10,6 +10,7 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 
 from apps.common.models import BaseUUIDModel
+from apps.support.knowledge_sanitizer import sanitize_knowledge_html, knowledge_plain_text
 
 
 def default_support_business_hours():
@@ -205,6 +206,11 @@ class SupportAgentInvitation(BaseUUIDModel):
         REVOKED = "revoked", "Revoked"
         EXPIRED = "expired", "Expired"
 
+    class DeliveryStatus(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        SENT = "sent", "Sent"
+        FAILED = "failed", "Failed"
+
     support_account = models.ForeignKey(
         SupportAccount,
         on_delete=models.CASCADE,
@@ -218,6 +224,14 @@ class SupportAgentInvitation(BaseUUIDModel):
     revoked_at = models.DateTimeField(null=True, blank=True)
     last_sent_at = models.DateTimeField(default=timezone.now)
     send_count = models.PositiveSmallIntegerField(default=1)
+    email_delivery_status = models.CharField(
+        max_length=16,
+        choices=DeliveryStatus.choices,
+        default=DeliveryStatus.QUEUED,
+        db_index=True,
+    )
+    email_delivery_error = models.CharField(max_length=1000, blank=True)
+    email_delivered_at = models.DateTimeField(null=True, blank=True)
     max_active_conversations = models.PositiveSmallIntegerField(default=5)
     can_view_all_conversations = models.BooleanField(default=False)
     can_assign_conversations = models.BooleanField(default=False)
@@ -2130,10 +2144,10 @@ class SupportKnowledgeArticle(BaseUUIDModel):
         self.summary = (self.summary or "").strip()
         self.seo_description = (self.seo_description or "").strip()
         self.language = (self.language or "en").strip().lower()[:12]
-        self.body = (self.body or "").strip()
+        self.body = sanitize_knowledge_html(self.body)
         if not self.title:
             raise ValidationError({"title": "Enter an article title."})
-        if not self.body:
+        if not knowledge_plain_text(self.body):
             raise ValidationError({"body": "Enter the article content."})
         if self.category_id and self.category.support_account_id != self.support_account_id:
             raise ValidationError({"category": "The category must belong to the same Support account."})

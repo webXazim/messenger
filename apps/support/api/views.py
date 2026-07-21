@@ -334,6 +334,21 @@ def require_owner(request, view, *, require_access: bool = True):
     return context, None
 
 
+def require_knowledge_manager(request, view, *, require_access: bool = True):
+    context = attach_support_context(request)
+    if not support_chat_enabled() or not context.account:
+        return context, Response({"detail": "Support Chat access is not active."}, status=status.HTTP_403_FORBIDDEN)
+    allowed = context.role == "owner" or bool(getattr(context.agent, "can_manage_knowledge", False))
+    if not allowed:
+        return context, Response(
+            {"detail": "Knowledge management permission is required.", "code": "knowledge_permission_required"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if require_access and not context.account.has_product_access:
+        return context, Response({"detail": "Support Chat access is not active."}, status=status.HTTP_403_FORBIDDEN)
+    return context, None
+
+
 class SupportServiceSettingsView(APIView):
     def get(self, request):
         context, error = require_support_access(request)
@@ -884,10 +899,6 @@ class SupportAgentInvitationDetailView(APIView):
             return error
         invitation = get_object_or_404(
             SupportAgentInvitation,
-    SupportTeam,
-    SupportTeamMembership,
-    SupportRoutingPolicy,
-    SupportWebsiteTeam,
             pk=invitation_id,
             support_account=context.account,
         )
@@ -905,10 +916,6 @@ class SupportAgentInvitationResendView(APIView):
             return error
         invitation = get_object_or_404(
             SupportAgentInvitation,
-    SupportTeam,
-    SupportTeamMembership,
-    SupportRoutingPolicy,
-    SupportWebsiteTeam,
             pk=invitation_id,
             support_account=context.account,
         )
@@ -2628,7 +2635,7 @@ class SupportKnowledgeSettingsView(APIView):
         return Response(SupportKnowledgeSettingsSerializer(knowledge_settings_for(context.account)).data)
 
     def patch(self, request):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         settings_obj = knowledge_settings_for(context.account)
@@ -2658,7 +2665,7 @@ class SupportKnowledgeCategoryListCreateView(APIView):
         if error:
             return error
         queryset = SupportKnowledgeCategory.objects.filter(support_account=context.account)
-        if context.role != "owner" or request.query_params.get("include_inactive") != "1":
+        if not (context.role == "owner" or getattr(context.agent, "can_manage_knowledge", False)) or request.query_params.get("include_inactive") != "1":
             queryset = queryset.filter(is_active=True)
         queryset = queryset.annotate(
             article_count=Count("articles", filter=Q(articles__status=SupportKnowledgeArticle.Status.PUBLISHED))
@@ -2670,7 +2677,7 @@ class SupportKnowledgeCategoryListCreateView(APIView):
         return Response(SupportKnowledgeCategoryReadSerializer(rows, many=True).data)
 
     def post(self, request):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         serializer = SupportKnowledgeCategorySerializer(data=request.data)
@@ -2703,7 +2710,7 @@ class SupportKnowledgeCategoryDetailView(APIView):
         return get_object_or_404(SupportKnowledgeCategory, pk=category_id, support_account=context.account)
 
     def patch(self, request, category_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         category = self._category(context, category_id)
@@ -2728,7 +2735,7 @@ class SupportKnowledgeCategoryDetailView(APIView):
         return Response(SupportKnowledgeCategorySerializer(category).data)
 
     def delete(self, request, category_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         category = self._category(context, category_id)
@@ -2770,7 +2777,7 @@ class SupportKnowledgeArticleListCreateView(APIView):
         return Response(SupportKnowledgeArticleSerializer(queryset.distinct(), many=True).data)
 
     def post(self, request):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         serializer = SupportKnowledgeArticleWriteSerializer(data=request.data)
@@ -2835,7 +2842,7 @@ class SupportKnowledgeArticleDetailView(APIView):
         return Response(SupportKnowledgeArticleSerializer(self._article(context, article_id)).data)
 
     def patch(self, request, article_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)
@@ -2884,7 +2891,7 @@ class SupportKnowledgeArticleDetailView(APIView):
         return Response(SupportKnowledgeArticleSerializer(article).data)
 
     def delete(self, request, article_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)
@@ -2907,7 +2914,7 @@ class SupportKnowledgeArticleDetailView(APIView):
 
 class SupportKnowledgeArticleRevisionListView(APIView):
     def get(self, request, article_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)
@@ -2917,7 +2924,7 @@ class SupportKnowledgeArticleRevisionListView(APIView):
 
 class SupportKnowledgeArticleRevisionRestoreView(APIView):
     def post(self, request, article_id, revision_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         with transaction.atomic():
@@ -2931,7 +2938,7 @@ class SupportKnowledgeArticleRevisionRestoreView(APIView):
 
 class SupportKnowledgeArticleRestoreView(APIView):
     def post(self, request, article_id):
-        context, error = require_owner(request, self)
+        context, error = require_knowledge_manager(request, self)
         if error:
             return error
         article = get_object_or_404(SupportKnowledgeArticle, pk=article_id, support_account=context.account)

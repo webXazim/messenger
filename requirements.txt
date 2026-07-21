@@ -31,3 +31,6 @@ clamd>=1.0.2,<2
 
 # Operational config validation
 PyYAML>=6.0.2,<7
+
+# Sanitizes rich-text knowledge article HTML before storage and rendering
+bleach>=6.2,<7

@@ -140,7 +140,7 @@ def send_agent_invitation_email(invitation: SupportAgentInvitation, raw_token: s
         body,
         getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@localhost"),
         [invitation.email],
-        fail_silently=True,
+        fail_silently=False,
     )
 
 
@@ -270,14 +270,18 @@ def create_agent_invitation(
     invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=invitation.pk)
 
     def queue_delivery():
-        try:
-            from apps.support.tasks import send_support_agent_invitation_email
-            send_support_agent_invitation_email.delay(str(invitation.id), raw_token)
-        except Exception:
-            # Invitation creation must not fail because the broker or SMTP
-            # service is temporarily unavailable. A pending invitation can be
-            # resent from the owner UI after infrastructure recovers.
-            return None
+        from django.conf import settings
+        from apps.support.tasks import send_support_agent_invitation_email
+
+        if getattr(settings, "SUPPORT_INVITATION_EMAIL_ASYNC", False):
+            try:
+                send_support_agent_invitation_email.delay(str(invitation.id), raw_token)
+                return
+            except Exception:
+                pass
+        # Direct delivery is the safe fallback and the default. It avoids a
+        # silently queued invitation when a Celery worker is unavailable.
+        send_support_agent_invitation_email.apply(args=[str(invitation.id), raw_token], throw=False)
 
     transaction.on_commit(queue_delivery)
     return invitation
@@ -314,6 +318,9 @@ def resend_agent_invitation(*, actor, account: SupportAccount, invitation: Suppo
         locked_invitation.expires_at = now + _invitation_ttl()
         locked_invitation.last_sent_at = now
         locked_invitation.send_count += 1
+        locked_invitation.email_delivery_status = SupportAgentInvitation.DeliveryStatus.QUEUED
+        locked_invitation.email_delivery_error = ""
+        locked_invitation.email_delivered_at = None
         locked_invitation.invited_by = actor
         locked_invitation.revoked_at = None
         locked_invitation.save(update_fields=[
@@ -322,6 +329,9 @@ def resend_agent_invitation(*, actor, account: SupportAccount, invitation: Suppo
             "expires_at",
             "last_sent_at",
             "send_count",
+            "email_delivery_status",
+            "email_delivery_error",
+            "email_delivered_at",
             "invited_by",
             "revoked_at",
             "updated_at",
@@ -330,11 +340,16 @@ def resend_agent_invitation(*, actor, account: SupportAccount, invitation: Suppo
     locked_invitation = SupportAgentInvitation.objects.prefetch_related("website_assignments__website", "team_assignments__team").get(pk=locked_invitation.pk)
 
     def queue_delivery():
-        try:
-            from apps.support.tasks import send_support_agent_invitation_email
-            send_support_agent_invitation_email.delay(str(locked_invitation.id), raw_token)
-        except Exception:
-            return None
+        from django.conf import settings
+        from apps.support.tasks import send_support_agent_invitation_email
+
+        if getattr(settings, "SUPPORT_INVITATION_EMAIL_ASYNC", False):
+            try:
+                send_support_agent_invitation_email.delay(str(locked_invitation.id), raw_token)
+                return
+            except Exception:
+                pass
+        send_support_agent_invitation_email.apply(args=[str(locked_invitation.id), raw_token], throw=False)
 
     transaction.on_commit(queue_delivery)
     return locked_invitation

@@ -60,12 +60,7 @@ export function SupportAgentsPage({ bootstrap }: { bootstrap: SupportBootstrap }
 
   return (
     <div className="sc-agents-page">
-      <header className="sc-agents-toolbar">
-        <div>
-          <span className="sc-page-eyebrow">Support Chat</span>
-          <h1>Agents</h1>
-          <p>Manage people, teams, website access, workload, and permissions.</p>
-        </div>
+      <header className="sc-agents-toolbar sc-agents-toolbar--controls">
         <div className="sc-agents-toolbar__actions">
           <label className="sc-search-field">
             <span aria-hidden="true">⌕</span>
@@ -89,6 +84,8 @@ export function SupportAgentsPage({ bootstrap }: { bootstrap: SupportBootstrap }
           <SupportButton onClick={() => setInviteOpen(true)}>＋ Invite agent</SupportButton>
         </div>
       </header>
+
+      <PendingInvitations bootstrap={bootstrap} />
 
       <section className="sc-agents-workspace">
         <div className="sc-agent-table-wrap">
@@ -142,6 +139,86 @@ export function SupportAgentsPage({ bootstrap }: { bootstrap: SupportBootstrap }
       <InviteModal open={inviteOpen} bootstrap={bootstrap} onClose={() => setInviteOpen(false)} />
       <TeamModal open={teamOpen} bootstrap={bootstrap} onClose={() => setTeamOpen(false)} />
     </div>
+  );
+}
+
+function PendingInvitations({ bootstrap }: { bootstrap: SupportBootstrap }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const invitations = bootstrap.invitations ?? [];
+  const resend = useMutation({
+    mutationFn: (invitationId: string) => supportApi.resendAgentInvitation(invitationId),
+    onSuccess: async () => {
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["support-bootstrap"] });
+    },
+    onError: (reason) => setError(parseApiError(reason, "Invitation could not be resent.").message),
+  });
+  const revoke = useMutation({
+    mutationFn: (invitationId: string) => supportApi.revokeAgentInvitation(invitationId),
+    onSuccess: async () => {
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["support-bootstrap"] });
+    },
+    onError: (reason) => setError(parseApiError(reason, "Invitation could not be revoked.").message),
+  });
+
+  if (!invitations.length) return null;
+
+  return (
+    <section className="sc-pending-invitations" aria-labelledby="pending-invitations-title">
+      <header>
+        <div>
+          <span className="sc-page-eyebrow">Pending access</span>
+          <h2 id="pending-invitations-title">Agent invitations</h2>
+          <p>Invitations reserve an agent seat until they are accepted, revoked, or expired.</p>
+        </div>
+        <SupportBadge tone="info">{invitations.length} pending</SupportBadge>
+      </header>
+      {error ? <div className="sc-inline-error" role="alert">{error}</div> : null}
+      <div className="sc-pending-invitations__list">
+        {invitations.map((invitation) => {
+          const deliveryTone = invitation.email_delivery_status === "sent" ? "success" : invitation.email_delivery_status === "failed" ? "danger" : "warning";
+          const deliveryLabel = invitation.email_delivery_status === "sent" ? "Email sent" : invitation.email_delivery_status === "failed" ? "Delivery failed" : "Delivery queued";
+          const websiteNames = invitation.assigned_websites.map((website) => website.name).join(", ");
+          return (
+            <article key={invitation.id}>
+              <div className="sc-pending-invitations__identity">
+                <span>{invitation.email.slice(0, 2).toUpperCase()}</span>
+                <div>
+                  <strong>{invitation.email}</strong>
+                  <small>{websiteNames || "No website access assigned"}</small>
+                </div>
+              </div>
+              <div className="sc-pending-invitations__status">
+                <SupportBadge tone={deliveryTone}>{deliveryLabel}</SupportBadge>
+                <small>
+                  Sent {invitation.send_count} time{invitation.send_count === 1 ? "" : "s"} · expires {new Date(invitation.expires_at).toLocaleDateString()}
+                </small>
+                {invitation.email_delivery_status === "failed" && invitation.email_delivery_error ? (
+                  <small className="is-error">{invitation.email_delivery_error}</small>
+                ) : null}
+              </div>
+              <div className="sc-pending-invitations__actions">
+                <SupportButton size="sm" variant="secondary" isLoading={resend.isPending} onClick={() => resend.mutate(invitation.id)}>
+                  Resend email
+                </SupportButton>
+                <button
+                  type="button"
+                  className="sc-danger-link"
+                  disabled={revoke.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Revoke the invitation for ${invitation.email}?`)) revoke.mutate(invitation.id);
+                  }}
+                >
+                  Revoke
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
