@@ -121,6 +121,20 @@ case "$durable_backend" in
     realtime_password="$(read_env NATS_REALTIME_PASSWORD)"
     [[ "$app_password" != "change-me-nats-app" ]] || failures+=("Replace the example NATS_APP_PASSWORD")
     [[ "$realtime_password" != "change-me-nats-realtime" ]] || failures+=("Replace the example NATS_REALTIME_PASSWORD")
+    [[ "$app_password" =~ ^[A-Za-z0-9._~-]{24,}$ ]] || \
+      failures+=("NATS_APP_PASSWORD must contain at least 24 URL-safe characters (letters, numbers, ., _, ~, or -)")
+    [[ "$realtime_password" =~ ^[A-Za-z0-9._~-]{24,}$ ]] || \
+      failures+=("NATS_REALTIME_PASSWORD must contain at least 24 URL-safe characters (letters, numbers, ., _, ~, or -)")
+    app_user="$(read_env NATS_APP_USER)"
+    realtime_user="$(read_env NATS_REALTIME_USER)"
+    app_url="$(read_env NATS_APP_URL)"
+    realtime_url="$(read_env NATS_REALTIME_URL)"
+    if [[ -n "$app_url" && "$app_url" != "nats://${app_user}:${app_password}@nats:4222" ]]; then
+      failures+=("NATS_APP_URL is stale or custom; leave it blank to derive it from NATS_APP_USER/NATS_APP_PASSWORD")
+    fi
+    if [[ -n "$realtime_url" && "$realtime_url" != "nats://${realtime_user}:${realtime_password}@nats:4222" ]]; then
+      failures+=("NATS_REALTIME_URL is stale or custom; leave it blank to derive it from NATS_REALTIME_USER/NATS_REALTIME_PASSWORD")
+    fi
     ;;
   *) failures+=("REALTIME_DURABLE_BACKEND must be nats") ;;
 esac
