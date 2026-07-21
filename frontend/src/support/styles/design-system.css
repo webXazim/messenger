@@ -399,3 +399,13 @@
 .sc-kb-list-panel{border-radius:0;border:0;border-right:1px solid var(--sc-border)}
 .sc-kb-detail{background:#fff}
 @media(max-width:900px){.sc-kb-commandbar{align-items:flex-start;flex-direction:column}.sc-kb-commandbar .sc-button{width:100%}.sc-websites-toolbar--controls{align-items:stretch}}
+
+
+/* Websites toolbar and widget restoration */
+.sc-websites-toolbar--controls{display:grid;grid-template-columns:minmax(240px,1fr) minmax(0,2fr);gap:22px;align-items:center}
+.sc-websites-toolbar--controls .sc-websites-toolbar__actions{width:100%;display:grid;grid-template-columns:minmax(260px,1fr) minmax(170px,210px) auto;gap:10px;align-items:center;justify-content:end;flex-wrap:nowrap}
+.sc-websites-toolbar--controls .sc-search-field{width:100%;min-width:0}
+.sc-websites-toolbar--controls .sc-control{width:100%;min-width:0}
+.sc-websites-toolbar--controls .sc-button{width:auto;min-width:max-content;white-space:nowrap;justify-self:end}
+@media(max-width:1000px){.sc-websites-toolbar--controls{grid-template-columns:1fr;align-items:stretch}.sc-websites-toolbar--controls .sc-websites-toolbar__actions{grid-template-columns:minmax(0,1fr) minmax(160px,210px) auto}.sc-websites-toolbar--controls .sc-button{justify-self:stretch}}
+@media(max-width:700px){.sc-websites-toolbar--controls .sc-websites-toolbar__actions{grid-template-columns:1fr}.sc-websites-toolbar--controls .sc-button{width:100%}}
