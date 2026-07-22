@@ -3,7 +3,7 @@ import { unwrapCursorPage, unwrapData, unwrapObject } from "../lib/apiResponse";
 import { resolveMediaUrl } from "../lib/mediaUrl";
 import { API_BASE_URL, CHAT_ATTACHMENT_BACKEND, CHAT_CALL_RUNTIME_BACKEND, CHAT_COMMAND_BACKEND, CHAT_COMMAND_URL, CHAT_CONVERSATION_COMMAND_BACKEND, CHAT_INTERACTION_BACKEND, CHAT_MESSAGE_MUTATION_BACKEND, CHAT_READ_BACKEND, CHAT_READ_URL } from "../lib/config";
 import { safeId } from "../lib/safeId";
-import { collectCursorPages, type CursorPage } from "../lib/pagination";
+import { collectCursorPages, resolveApiCursorUrl, type CursorPage } from "../lib/pagination";
 import type { Call, CallConfig, Conversation, ConversationE2EEKeyMaterial, ConversationInviteLink, E2EEDeviceKey, Message, NotificationPreferences, TurnCredentials, UserStatus } from "../types/chat";
 
 export type ConversationNotificationSettings = {
@@ -974,7 +974,8 @@ export const chatApi = {
     return normalizeInviteLink(unwrapData<unknown>(response.data));
   },
   async listMessages(conversationId: string, pageUrl?: string | null, signal?: AbortSignal) {
-    const response = await http.get(pageUrl || readPath(`/chat/conversations/${conversationId}/messages/`, `/conversations/${conversationId}/messages/`), { signal });
+    const initialPath = readPath(`/chat/conversations/${conversationId}/messages/`, `/conversations/${conversationId}/messages/`);
+    const response = await http.get(pageUrl ? resolveApiCursorUrl(pageUrl, API_BASE_URL) : initialPath, { signal });
     return normalizeMessagePage(response.data);
   },
   async sendMessage(conversationId: string, payload: Record<string, unknown>) {

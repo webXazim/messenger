@@ -10,6 +10,7 @@ import { parseApiError } from "../lib/apiErrors";
 import { conversationPath } from "../lib/conversationRoute";
 import { readStoredChatInboxWidth } from "../lib/chatPaneSizing";
 import { prefetchConversationResources } from "../lib/conversationPrefetch";
+import { mergeConversationListsPreservingPresence } from "../lib/realtimeCache";
 import type { UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
 
@@ -39,6 +40,7 @@ export function ConversationsPage() {
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
+    structuralSharing: (current, incoming) => mergeConversationListsPreservingPresence(current as Conversation[] | undefined, incoming as Conversation[]),
   });
   const friendsQuery = useQuery({
     queryKey: ["friend-requests", "friends"],

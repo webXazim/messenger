@@ -117,6 +117,19 @@ impl Database {
             .is_ok()
     }
 
+    pub async fn persist_user_last_seen(&self, user_id: &str) -> Result<()> {
+        let Some(pool) = &self.pool else {
+            return Ok(());
+        };
+        let user_id = user_id.parse::<i64>().context("presence user id is invalid")?;
+        sqlx::query("UPDATE accounts_user SET last_seen_at=NOW() WHERE id=$1")
+            .bind(user_id)
+            .persistent(false)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn is_active_participant(&self, conversation_id: Uuid, user_id: i64) -> Result<bool> {
         let pool = self.pool.as_ref().context("SQLx read backend is disabled")?;
         let exists = sqlx::query_scalar::<_, bool>(

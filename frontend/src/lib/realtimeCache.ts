@@ -182,7 +182,7 @@ function reconcileConversationPresence(queryClient: QueryClient, incoming: Conve
   };
 }
 
-function mergeConversationPreservingPresence(current: Conversation, incoming: Conversation): Conversation {
+export function mergeConversationPreservingPresence(current: Conversation, incoming: Conversation): Conversation {
   const receiptSafeIncoming = mergeConversationReceipts(current, incoming);
   const currentUsers = new Map(
     current.participants.map((participant) => [String(participant.user.id), participant.user]),
@@ -195,6 +195,18 @@ function mergeConversationPreservingPresence(current: Conversation, incoming: Co
       user: preservePresence(currentUsers.get(String(participant.user.id)), participant.user),
     })),
   };
+}
+
+export function mergeConversationListsPreservingPresence(
+  current: Conversation[] | undefined,
+  incoming: Conversation[],
+) {
+  if (!current) return incoming;
+  const currentById = new Map(current.map((conversation) => [String(conversation.id), conversation]));
+  return incoming.map((conversation) => {
+    const existing = currentById.get(String(conversation.id));
+    return existing ? mergeConversationPreservingPresence(existing, conversation) : conversation;
+  });
 }
 
 function patchPresenceUser<T extends PresenceUser>(user: T, userId: string, payload: PresencePayload): T {

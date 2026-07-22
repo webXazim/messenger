@@ -124,6 +124,8 @@ for (const required of [
 }
 assert.ok(serializers.includes("_presence_is_visible"), "Chat participant serializers still expose private presence.");
 assert.ok(cache.includes("mergeConversationPreservingPresence"), "Conversation refreshes can still overwrite newer presence state.");
+assert.ok(conversation.includes("mergeConversationPreservingPresence(current as Conversation"), "Open-chat refetches can still overwrite newer realtime presence.");
+assert.ok(appShell.includes("mergeConversationListsPreservingPresence"), "Conversation-list refetches can still overwrite newer realtime presence.");
 assert.ok(cache.includes("mergeConversationReceipts(current, incoming)"), "Conversation refreshes can still regress delivery and read receipts.");
 assert.ok(cache.includes("reconcileConversationPresence"), "Conversation updates do not reconcile a peer already known to be online.");
 assert.ok(cache.includes('{ queryKey: ["conversation-route"] }'), "Named conversation routes do not receive presence updates.");
@@ -151,6 +153,7 @@ assert.ok(cache.includes("mergeNewestPresence"), "Older API presence can still o
 assert.ok(services.includes("read_many_user_last_seen"), "Conversation serialization does not batch current Axum last-seen timestamps.");
 assert.ok(realtimePresence.includes("LAST_SEEN_KEY_PREFIX"), "Shared presence storage does not retain Axum last-seen timestamps.");
 assert.ok(axumSocket.includes('if !data.contains_key("last_seen_at")'), "Axum presence fanout still discards its current last-seen timestamp.");
+assert.ok(axumSocket.includes("persist_user_last_seen"), "Axum local presence loses durable last-seen state across restarts.");
 assert.ok(views.includes('if getattr(participant, "_read_changed", False)'), "Unchanged read receipts are still broadcast repeatedly.");
 assert.ok(services.includes("effective_read_message"), "Duplicate read acknowledgements do not repair their delivered cursor.");
 assert.ok(views.includes("_broadcast_presence_update(request.user, snapshot)"), "REST presence changes are not propagated to peers.");

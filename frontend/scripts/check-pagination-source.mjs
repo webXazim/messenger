@@ -40,6 +40,8 @@ for (const required of [
 assert.ok(friends.includes("useDebouncedValue"), "Contact search is not debounced.");
 assert.ok(friends.includes("placeholderData: (previous) => previous"), "Search results disappear while the next query loads.");
 assert.ok(conversation.includes("pageParam, signal"), "Message pagination requests are not cancellable.");
+assert.ok(chatApi.includes("resolveApiCursorUrl(pageUrl, API_BASE_URL)"), "Axum message cursors can duplicate the API base path and return 404.");
+assert.ok(conversation.includes("messagesQuery.isError && !messagesQuery.data"), "An older-page failure still hides the messages already loaded.");
 assert.ok(accountsViews.includes("class UserSearchCursorPagination"), "User search has no cursor paginator.");
 assert.ok(accountsViews.includes('request.query_params.get("paginated")'), "User-search pagination is not opt-in for compatibility.");
 assert.ok(accountsViews.includes("users = list(queryset[:30])"), "Legacy user-search array response was not preserved.");

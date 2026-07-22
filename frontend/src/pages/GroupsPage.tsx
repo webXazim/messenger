@@ -8,6 +8,8 @@ import { MessengerPageHeader } from "../components/pages/MessengerPageHeader";
 import { useAuth } from "../contexts/AuthContext";
 import { parseApiError } from "../lib/apiErrors";
 import { conversationPath } from "../lib/conversationRoute";
+import { mergeConversationListsPreservingPresence } from "../lib/realtimeCache";
+import type { Conversation } from "../types/chat";
 
 function initials(value: string) {
   return value.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "G";
@@ -42,6 +44,7 @@ export function GroupsPage() {
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
+    structuralSharing: (current, incoming) => mergeConversationListsPreservingPresence(current as Conversation[] | undefined, incoming as Conversation[]),
   });
   const friendsQuery = useQuery({
     queryKey: ["friend-requests", "friends"],

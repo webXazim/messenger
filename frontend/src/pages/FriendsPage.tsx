@@ -10,6 +10,7 @@ import { MessengerPageHeader } from "../components/pages/MessengerPageHeader";
 import { UserAvatar } from "../components/UserAvatar";
 import { personPresenceText, personPresenceToneClass } from "../lib/personPresentation";
 import { conversationPath } from "../lib/conversationRoute";
+import { mergeConversationListsPreservingPresence } from "../lib/realtimeCache";
 import type { CurrentUser, FriendRequest, UserSearchResult } from "../types/auth";
 import type { Conversation } from "../types/chat";
 
@@ -82,6 +83,7 @@ export function FriendsPage() {
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
+    structuralSharing: (current, incoming) => mergeConversationListsPreservingPresence(current as Conversation[] | undefined, incoming as Conversation[]),
   });
 
   const searchQuery = useQuery({

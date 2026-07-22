@@ -92,6 +92,13 @@ const staleOfflineSnapshot = applyKnownOnlinePresence([freshPresenceConversation
 }]);
 assert.equal(staleOfflineSnapshot[0].participants[1].user.is_online, true, "An older API presence snapshot must not overwrite newer realtime presence.");
 assert.equal(staleOfflineSnapshot[0].participants[1].user.last_seen_at, "2026-07-20T00:48:00Z", "Last seen must move forward monotonically.");
+const equalTimestampOfflineSnapshot = applyKnownOnlinePresence([freshPresenceConversation], [{
+  ...amina,
+  is_online: false,
+  presence_status: "offline",
+  last_seen_at: "2026-07-20T00:48:00Z",
+}]);
+assert.equal(equalTimestampOfflineSnapshot[0].participants[1].user.is_online, true, "An equal-time REST snapshot must not flicker over the realtime presence state.");
 assert.equal(conversationViewerParticipant(pinned, me.id, me)?.is_muted, true);
 assert.equal(conversationMatchesQuery(recent, "amina", me.id, me), true);
 assert.equal(conversationMatchesQuery(recent, "unknown", me.id, me), false);

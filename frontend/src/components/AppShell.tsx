@@ -16,7 +16,7 @@ import { decryptMessageTextResult } from "../lib/e2ee";
 import { isConversationActivelyViewedAtLatest } from "../lib/activeConversationView";
 import { claimCallAction, createCallActionChannel, createCallActionOwnerId, releaseCallAction, type CallCoordinationEvent } from "../lib/callCoordination";
 import { DesktopNavigationRail, MobileBottomNavigation } from "./navigation/MessengerNavigation";
-import { getRealtimeSyncMarker, markConversationReadInCaches, mergeChatSync, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
+import { getRealtimeSyncMarker, markConversationReadInCaches, mergeChatSync, mergeConversationListsPreservingPresence, patchCallCaches, patchConversationCaches, patchConversationReceiptCaches, patchMessageCache, patchUserPresenceAcrossCaches, setRealtimeSyncMarker } from "../lib/realtimeCache";
 import { CallRoomPage } from "../pages/CallRoomPage";
 import { ActiveCallProvider } from "../contexts/ActiveCallContext";
 
@@ -200,6 +200,7 @@ export function AppShell() {
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
+    structuralSharing: (current, incoming) => mergeConversationListsPreservingPresence(current as Conversation[] | undefined, incoming as Conversation[]),
     enabled: Boolean(user?.id),
   });
   const subscribedConversationIds = useMemo(

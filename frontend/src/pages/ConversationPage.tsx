@@ -56,7 +56,7 @@ import { stableMessageRenderKey } from "../hooks/useMessageEntrance";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
-import { markConversationReadInCaches, patchCallCaches } from "../lib/realtimeCache";
+import { markConversationReadInCaches, mergeConversationListsPreservingPresence, mergeConversationPreservingPresence, patchCallCaches } from "../lib/realtimeCache";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "../lib/messageReceipts";
 import { conversationPath, isNamedConversationRoute } from "../lib/conversationRoute";
 import { personPresenceText } from "../lib/personPresentation";
@@ -256,6 +256,9 @@ export function ConversationPage() {
     },
     staleTime: 5 * 60_000,
     retry: 1,
+    structuralSharing: (current, incoming) => current
+      ? mergeConversationPreservingPresence(current as Conversation, incoming as Conversation)
+      : incoming,
   });
   const conversationId = namedRoute ? routeConversationQuery.data?.id || "" : routeConversationKey;
   const notificationReplyRequested = new URLSearchParams(location.search).get("reply") === "1";
@@ -443,7 +446,9 @@ export function ConversationPage() {
     refetchOnWindowFocus: true,
     refetchInterval: () => document.visibilityState === "visible" ? 15_000 : false,
     refetchIntervalInBackground: false,
-    structuralSharing: (current, incoming) => mergeConversationReceipts(current as Conversation | undefined, incoming as Conversation),
+    structuralSharing: (current, incoming) => current
+      ? mergeConversationPreservingPresence(current as Conversation, incoming as Conversation)
+      : incoming,
   });
   useEffect(() => {
     const conversation = conversationQuery.data || routeConversationQuery.data;
@@ -457,6 +462,7 @@ export function ConversationPage() {
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
+    structuralSharing: (current, incoming) => mergeConversationListsPreservingPresence(current as Conversation[] | undefined, incoming as Conversation[]),
     staleTime: 30_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
@@ -1865,7 +1871,9 @@ export function ConversationPage() {
   const conversationError = routeConversationQuery.isError
     ? getErrorMessage(routeConversationQuery.error, "This conversation link is unavailable.")
     : conversationQuery.isError ? getErrorMessage(conversationQuery.error, "Could not load this conversation.") : null;
-  const messagesError = messagesQuery.isError ? getErrorMessage(messagesQuery.error, "Could not load messages.") : null;
+  const messagesError = messagesQuery.isError && !messagesQuery.data
+    ? getErrorMessage(messagesQuery.error, "Could not load messages.")
+    : null;
   const blockingConversationError = conversationError && messages.length === 0 ? conversationError : null;
   const chatError = messagesError || blockingConversationError;
   const isInitialChatLoading = routeConversationQuery.isLoading

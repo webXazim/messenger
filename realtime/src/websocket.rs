@@ -365,6 +365,7 @@ async fn publish_initial_presence(
                 .touch_user(session, connection_id, &session.device_type, "active")
                 .await
             {
+                persist_user_last_seen(state, session, true);
                 fanout_user_presence(state, session, snapshot);
             }
         }
@@ -402,6 +403,7 @@ fn schedule_presence_disconnect(
         match session.actor_type {
             ActorType::User => {
                 if let Ok(snapshot) = state.presence.remove_user(&session, connection_id).await {
+                    persist_user_last_seen(&state, &session, true);
                     fanout_user_presence(&state, &session, snapshot);
                 }
             }
@@ -439,6 +441,21 @@ fn fanout_user_presence(state: &Arc<AppState>, session: &AuthenticatedSession, s
         if let Ok(message) = event_message("presence.updated", Value::Object(data)) {
             state.registry.fanout_low(&audiences, message.clone(), None, None);
             nats_core::publish_after_local(&state, audiences, message, EphemeralPriority::Low, None, None).await;
+        }
+    });
+}
+
+fn persist_user_last_seen(state: &Arc<AppState>, session: &AuthenticatedSession, force: bool) {
+    if session.actor_type != ActorType::User
+        || !state.presence.claim_last_seen_persistence(&session.actor_id, force)
+    {
+        return;
+    }
+    let database = state.database.clone();
+    let user_id = session.actor_id.clone();
+    tokio::spawn(async move {
+        if let Err(error) = database.persist_user_last_seen(&user_id).await {
+            tracing::warn!(error = %error, user_id, "could not persist realtime last-seen timestamp");
         }
     });
 }
@@ -667,6 +684,7 @@ async fn handle_presence_ping(
         .await
     {
         Ok(snapshot) => {
+            persist_user_last_seen(&state, session, false);
             fanout_user_presence(&state, session, snapshot.clone());
             let mut payload = value_object(snapshot);
             payload.insert("user_id".to_owned(), json!(session.actor_id.as_str()));

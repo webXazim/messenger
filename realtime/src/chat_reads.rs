@@ -119,6 +119,66 @@ fn page_response(path: &str, page: ReadPage) -> axum::response::Response {
         .into_response()
 }
 
+fn presence_user_ids(values: &[Value]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| value.get("participants").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|participant| participant.get("user").and_then(Value::as_object))
+        .filter(|user| user.get("presence_visibility").and_then(Value::as_str) != Some("hidden"))
+        .filter_map(|user| user.get("id").and_then(Value::as_str).map(ToOwned::to_owned))
+        .collect()
+}
+
+fn apply_presence_snapshots(values: &mut [Value], snapshots: &std::collections::HashMap<String, Value>) {
+    const FIELDS: [&str; 7] = [
+        "is_online",
+        "active_devices",
+        "last_seen_at",
+        "presence_label",
+        "presence_status",
+        "device_type",
+        "device_types",
+    ];
+    for value in values {
+        let Some(participants) = value.get_mut("participants").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for participant in participants {
+            let Some(user) = participant.get_mut("user").and_then(Value::as_object_mut) else {
+                continue;
+            };
+            if user.get("presence_visibility").and_then(Value::as_str) == Some("hidden") {
+                continue;
+            }
+            let Some(user_id) = user.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(snapshot) = snapshots.get(user_id).and_then(Value::as_object) else {
+                continue;
+            };
+            for field in FIELDS {
+                let Some(incoming) = snapshot.get(field) else {
+                    continue;
+                };
+                if field == "last_seen_at" && incoming.is_null() && user.get(field).is_some_and(|value| !value.is_null()) {
+                    continue;
+                }
+                user.insert(field.to_owned(), incoming.clone());
+            }
+        }
+    }
+}
+
+async fn hydrate_presence(state: &AppState, values: &mut [Value]) {
+    let user_ids = presence_user_ids(values);
+    if user_ids.is_empty() {
+        return;
+    }
+    let snapshots = state.presence.user_snapshots(&user_ids).await;
+    apply_presence_snapshots(values, &snapshots);
+}
+
 fn auth_identity(state: &AppState, headers: &HeaderMap) -> Result<CommandIdentity, axum::response::Response> {
     state.command_auth.authenticate(headers).map_err(|_| {
         error_response(
@@ -178,7 +238,10 @@ pub(crate) async fn list_conversations(
         .list_chat_conversations(user_id, cursor, page_size(params.page_size))
         .await
     {
-        Ok(page) => page_response("/api/v1/chat-fast/conversations/", page),
+        Ok(mut page) => {
+            hydrate_presence(&state, &mut page.results).await;
+            page_response("/api/v1/chat-fast/conversations/", page)
+        }
         Err(error) => database_error(error, "list_conversations"),
     }
 }
@@ -200,7 +263,10 @@ pub(crate) async fn get_conversation(
         Err(error) => return database_error(error, "resolve_user"),
     };
     match state.database.get_chat_conversation(user_id, conversation_id).await {
-        Ok(Some(value)) => (StatusCode::OK, Json(value)).into_response(),
+        Ok(Some(mut value)) => {
+            hydrate_presence(&state, std::slice::from_mut(&mut value)).await;
+            (StatusCode::OK, Json(value)).into_response()
+        }
         Ok(None) => error_response(StatusCode::NOT_FOUND, "conversation_not_found", "Conversation was not found."),
         Err(error) => database_error(error, "get_conversation"),
     }
@@ -343,7 +409,17 @@ jsonb_build_object(
     'username', u.username,
     'email', u.email,
     'display_name', COALESCE(NULLIF(p.display_name, ''), NULLIF(BTRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.username),
-    'avatar', CASE WHEN COALESCE(p.avatar, '') = '' THEN NULL ELSE '/media/' || p.avatar END
+    'avatar', CASE WHEN COALESCE(p.avatar, '') = '' THEN NULL ELSE '/media/' || p.avatar END,
+    'presence_visibility', CASE
+        WHEN u.id = (SELECT id FROM actor) THEN 'public'
+        WHEN NOT COALESCE(p.show_online_status, true) THEN 'hidden'
+        WHEN EXISTS (
+            SELECT 1 FROM chat_userblock ub
+            WHERE (ub.blocker_id = (SELECT id FROM actor) AND ub.blocked_id = u.id)
+               OR (ub.blocker_id = u.id AND ub.blocked_id = (SELECT id FROM actor))
+        ) THEN 'hidden'
+        ELSE 'public'
+    END
 )
 "#;
 

@@ -20,7 +20,7 @@ import {
   isMissedCallForUser,
 } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
-import { patchCallCaches } from "../lib/realtimeCache";
+import { mergeConversationListsPreservingPresence, patchCallCaches } from "../lib/realtimeCache";
 import type { Call, Conversation } from "../types/chat";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -74,6 +74,7 @@ export function CallsPage() {
   const conversationsQuery = useQuery({
     queryKey: ["conversations"],
     queryFn: ({ signal }) => chatApi.listConversations(signal),
+    structuralSharing: (current, incoming) => mergeConversationListsPreservingPresence(current as Conversation[] | undefined, incoming as Conversation[]),
     staleTime: 15_000,
     retry: 1,
     refetchOnWindowFocus: false,

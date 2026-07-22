@@ -32,7 +32,7 @@ export function mergeNewestPresence<T extends PresenceState>(current: T | undefi
 
   const currentTime = presenceTime(current.last_seen_at);
   const incomingTime = presenceTime(incoming.last_seen_at);
-  if (!currentTime || !incomingTime || incomingTime >= currentTime) return incoming;
+  if (!currentTime || (incomingTime && incomingTime > currentTime)) return incoming;
 
   const merged = { ...incoming } as T;
   for (const field of PRESENCE_FIELDS) {

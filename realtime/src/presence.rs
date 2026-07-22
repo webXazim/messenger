@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
+use futures_util::{stream, StreamExt};
 use redis::aio::ConnectionManager;
 use tokio::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ use crate::{
 const USER_KEY_PREFIX: &str = "realtime:presence:user:";
 const LAST_SEEN_KEY_PREFIX: &str = "realtime:presence:last-seen:";
 const SUPPORT_VISITOR_KEY_PREFIX: &str = "realtime:presence:support-visitor:";
+const LAST_SEEN_PERSIST_INTERVAL_SECONDS: f64 = 300.0;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct DeviceRecord {
@@ -41,6 +43,7 @@ pub struct PresenceStore {
     ttl_seconds: u64,
     local_users: DashMap<Uuid, LocalConnectionRecord>,
     local_last_seen: DashMap<String, f64>,
+    persisted_last_seen: DashMap<String, f64>,
     local_support_visitors: DashMap<Uuid, String>,
 }
 
@@ -61,6 +64,7 @@ impl PresenceStore {
             ttl_seconds: config.presence_ttl_seconds,
             local_users: DashMap::new(),
             local_last_seen: DashMap::new(),
+            persisted_last_seen: DashMap::new(),
             local_support_visitors: DashMap::new(),
         })
     }
@@ -116,6 +120,39 @@ impl PresenceStore {
         }
         let mut connection = self.connection().await?;
         self.redis_user_snapshot_with(&mut connection, user_id).await
+    }
+
+    pub async fn user_snapshots(&self, user_ids: &[String]) -> HashMap<String, Value> {
+        let unique: HashSet<String> = user_ids
+            .iter()
+            .filter(|user_id| !user_id.trim().is_empty())
+            .cloned()
+            .collect();
+        let resolved = stream::iter(unique.into_iter().map(|user_id| async move {
+            let snapshot = self.user_snapshot(&user_id).await;
+            (user_id, snapshot)
+        }))
+        .buffer_unordered(16)
+        .collect::<Vec<_>>()
+        .await;
+        resolved
+            .into_iter()
+            .filter_map(|(user_id, snapshot)| snapshot.ok().map(|value| (user_id, value)))
+            .collect()
+    }
+
+    pub fn claim_last_seen_persistence(&self, user_id: &str, force: bool) -> bool {
+        let now = now_seconds();
+        if !force
+            && self
+                .persisted_last_seen
+                .get(user_id)
+                .is_some_and(|last| now - *last < LAST_SEEN_PERSIST_INTERVAL_SECONDS)
+        {
+            return false;
+        }
+        self.persisted_last_seen.insert(user_id.to_owned(), now);
+        true
     }
 
     pub async fn touch_user(
@@ -318,7 +355,8 @@ impl PresenceStore {
     }
 }
 
-fn snapshot(records: Vec<DeviceRecord>, stored_last_seen: Option<f64>) -> Value {
+fn snapshot(mut records: Vec<DeviceRecord>, stored_last_seen: Option<f64>) -> Value {
+    records.sort_by(|left, right| right.last_seen.total_cmp(&left.last_seen));
     let latest_record_seen = records
         .iter()
         .map(|record| record.last_seen)
