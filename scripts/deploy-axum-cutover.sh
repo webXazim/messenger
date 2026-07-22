@@ -213,7 +213,13 @@ if [[ "$expected_read_backend" == "sqlx" ]]; then
     [[ -n "$probe_access_token" ]] || fail "Django did not issue an access token for the Axum authentication probe"
     authenticated_read_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${probe_access_token}" http://127.0.0.1:9000/api/v1/chat-fast/conversations/)"
     unset probe_access_token
-    [[ "$authenticated_read_status" == "200" ]] || fail "Axum rejected a Django-issued access token: expected HTTP 200, got $authenticated_read_status"
+    if [[ "$authenticated_read_status" != "200" ]]; then
+      "${compose[@]}" logs --tail=80 realtime >&2 || true
+      if [[ "$authenticated_read_status" == "401" || "$authenticated_read_status" == "403" ]]; then
+        fail "Axum rejected a Django-issued access token: expected HTTP 200, got $authenticated_read_status"
+      fi
+      fail "Axum conversation read failed after accepting a Django-issued access token: expected HTTP 200, got $authenticated_read_status"
+    fi
   fi
   expected_frontend_read_backend="$(grep -E '^VITE_CHAT_READ_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
   [[ "$expected_frontend_read_backend" == "sqlx" ]] || fail "CHAT_READ_BACKEND=sqlx also requires VITE_CHAT_READ_BACKEND=sqlx and a rebuilt frontend image"

@@ -411,12 +411,12 @@ jsonb_build_object(
     'display_name', COALESCE(NULLIF(p.display_name, ''), NULLIF(BTRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), u.username),
     'avatar', CASE WHEN COALESCE(p.avatar, '') = '' THEN NULL ELSE '/media/' || p.avatar END,
     'presence_visibility', CASE
-        WHEN u.id = (SELECT id FROM actor) THEN 'public'
+        WHEN u.id = viewer.user_id THEN 'public'
         WHEN NOT COALESCE(p.show_online_status, true) THEN 'hidden'
         WHEN EXISTS (
             SELECT 1 FROM chat_userblock ub
-            WHERE (ub.blocker_id = (SELECT id FROM actor) AND ub.blocked_id = u.id)
-               OR (ub.blocker_id = u.id AND ub.blocked_id = (SELECT id FROM actor))
+            WHERE (ub.blocker_id = viewer.user_id AND ub.blocked_id = u.id)
+               OR (ub.blocker_id = u.id AND ub.blocked_id = viewer.user_id)
         ) THEN 'hidden'
         ELSE 'public'
     END

@@ -52,6 +52,7 @@ require realtime/src/message_interactions.rs "COALESCE(target.sequence, 0)" "Axu
 require realtime/src/message_interactions.rs "SAVEPOINT receipt_delivery_history" "Optional delivery history can still roll back authoritative receipt pointers"
 require realtime/src/chat_reads.rs "COALESCE(um.sequence, 0)" "Axum unread counts are not ordered by durable message sequence"
 require realtime/src/chat_reads.rs "hydrate_presence(&state" "Axum chat reads do not hydrate current presence from the active backend"
+require realtime/src/chat_reads.rs "WHEN u.id = viewer.user_id THEN 'public'" "Axum conversation-list presence SQL does not use its viewer scope"
 require realtime/src/presence.rs "buffer_unordered(16)" "Axum presence hydration does not bound concurrent snapshot work"
 require realtime/src/presence.rs "records.sort_by" "Axum multi-device presence can choose an unstable primary device"
 require realtime/src/websocket.rs "persist_user_last_seen" "Axum local presence can lose durable last-seen time during a restart"
@@ -60,6 +61,20 @@ require realtime/src/call_commands.rs "deleted_text_backup,deletion_source,clien
 require docker-compose.yml 'CHAT_COMMAND_JWT_ALGORITHM: ${CHAT_COMMAND_JWT_ALGORITHM:-${AUTH_PAYMENT_JWT_ALGORITHM:-HS256}}' "Compose does not inherit the Django access-token algorithm for Axum"
 require docker-compose.yml 'CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-${AUTH_PAYMENT_JWT_AUDIENCE:-}}' "Compose does not inherit the Django access-token audience for Axum"
 require scripts/deploy-axum-cutover.sh "Axum rejected a Django-issued access token" "Production cutover does not test Django-to-Axum access-token compatibility"
+
+python3 - <<'PY'
+from pathlib import Path
+
+text = Path('realtime/src/chat_reads.rs').read_text(encoding='utf-8')
+start = text.index('const USER_COMPACT_JSON:')
+end = text.index('const USER_LITE_JSON:', start)
+compact = text[start:end]
+if '(SELECT id FROM actor)' in compact:
+    raise SystemExit('Axum conversation-list presence SQL references an actor CTE that does not exist')
+if 'viewer.user_id' not in compact:
+    raise SystemExit('Axum conversation-list presence SQL is missing its correlated viewer scope')
+print('Axum conversation-list presence SQL contract passed.')
+PY
 
 if command -v node >/dev/null 2>&1; then
   node frontend/scripts/check-attachment-backend-source.mjs
