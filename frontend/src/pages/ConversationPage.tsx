@@ -40,8 +40,10 @@ import {
   flattenMessagePages,
   mapMessagePages,
   markMessageDeletedPages,
+  messageLocalStateKeys,
   mergeDeliveryStatus,
   removeMessagePages,
+  resolveMessageLocalState,
   upsertMessagePages,
 } from "../lib/messageTimeline";
 import { createSerializedTaskQueue } from "../lib/serializedTaskQueue";
@@ -923,9 +925,11 @@ export function ConversationPage() {
     setDecryptionStates((current) => {
       const next = { ...current };
       for (const message of encryptedMessages) {
-        if (!next[message.id] || changedMessageIds.includes(message.id)) {
-          next[message.id] = { status: "pending" };
-        }
+        if (next[message.id] && !changedMessageIds.includes(message.id)) continue;
+        const optimisticKey = messageLocalStateKeys(message).find(
+          (key) => key !== message.id && next[key]?.status === "ready",
+        );
+        next[message.id] = optimisticKey ? next[optimisticKey] : { status: "pending" };
       }
       return next;
     });
@@ -985,13 +989,13 @@ export function ConversationPage() {
       return [...pagedMessages]
         .map((message) => {
           if (!message.is_encrypted) return message;
-          const state = decryptionStates[message.id]
+          const state = resolveMessageLocalState(decryptionStates, message)
             ?? (!message.encryption || e2eeIdentityQuery.isError
               ? { status: "error" as const, message: "This encrypted message could not be opened on this device." }
               : { status: "pending" as const });
           return {
             ...message,
-            text: decryptedTexts[message.id] ?? "",
+            text: resolveMessageLocalState(decryptedTexts, message) ?? "",
             decryption_state: state.status,
             decryption_message: state.message,
           };

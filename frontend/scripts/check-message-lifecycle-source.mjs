@@ -34,6 +34,8 @@ for (const required of [
   "useConversationTimeline",
   "_is_retry",
   "previousMessage",
+  "resolveMessageLocalState(decryptionStates, message)",
+  "resolveMessageLocalState(decryptedTexts, message)",
 ]) {
   assert.ok(conversation.includes(required), `Missing conversation lifecycle behavior: ${required}`);
 }

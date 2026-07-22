@@ -343,14 +343,14 @@ async fn upsert_call_timeline(tx: &mut Transaction<'_, Postgres>, call_id: Uuid,
     let existing = sqlx::query_scalar::<_, Uuid>("SELECT id FROM chat_message WHERE conversation_id=$1 AND type='system' AND metadata->>'system_event'='call' AND metadata->>'call_id'=$2 ORDER BY created_at DESC LIMIT 1")
         .bind(conversation_id).bind(call_id.to_string()).persistent(false).fetch_optional(&mut **tx).await?;
     let (message_id, event_name) = if let Some(message_id) = existing {
-        sqlx::query("UPDATE chat_message SET sender_id=$2,text=$3,metadata=$4,is_deleted=FALSE,deleted_at=NULL,updated_at=NOW() WHERE id=$1")
+        sqlx::query("UPDATE chat_message SET sender_id=$2,text=$3,metadata=$4,is_deleted=FALSE,deleted_at=NULL,deleted_text_backup='',deletion_source='',updated_at=NOW() WHERE id=$1")
             .bind(message_id).bind(call.get("initiated_by").and_then(|u|u.get("id")).and_then(Value::as_str).and_then(|v|v.parse::<i64>().ok()).unwrap_or(actor)).bind(&text).bind(&metadata).persistent(false).execute(&mut **tx).await?;
         (message_id, "message.updated")
     } else {
         let sequence = sqlx::query_scalar::<_, i64>("UPDATE chat_conversation SET next_message_sequence=next_message_sequence+1,updated_at=NOW() WHERE id=$1 RETURNING next_message_sequence::bigint")
             .bind(conversation_id).persistent(false).fetch_one(&mut **tx).await?;
         let message_id = Uuid::new_v4();
-        sqlx::query("INSERT INTO chat_message (id,created_at,updated_at,conversation_id,sender_id,type,text,metadata,reply_to_id,forwarded_from_id,is_edited,edited_at,edit_locked_at,edit_locked_reason,is_deleted,deleted_at,client_temp_id,sequence,delivery_status,failed_reason,retry_count) VALUES ($1,NOW(),NOW(),$2,$3,'system',$4,$5,NULL,NULL,FALSE,NULL,NULL,'',FALSE,NULL,'',$6,'sent','',0)")
+        sqlx::query("INSERT INTO chat_message (id,created_at,updated_at,conversation_id,sender_id,type,text,metadata,reply_to_id,forwarded_from_id,is_edited,edited_at,edit_locked_at,edit_locked_reason,is_deleted,deleted_at,deleted_text_backup,deletion_source,client_temp_id,sequence,delivery_status,failed_reason,retry_count) VALUES ($1,NOW(),NOW(),$2,$3,'system',$4,$5,NULL,NULL,FALSE,NULL,NULL,'',FALSE,NULL,'','','',$6,'sent','',0)")
             .bind(message_id).bind(conversation_id).bind(actor).bind(&text).bind(&metadata).bind(sequence).persistent(false).execute(&mut **tx).await?;
         (message_id, "message.created")
     };

@@ -6,8 +6,10 @@ import {
   flattenMessagePages,
   mapMessagePages,
   markMessageDeletedPages,
+  messageLocalStateKeys,
   mergeMessageContextPages,
   removeMessagePages,
+  resolveMessageLocalState,
   upsertMessagePages,
 } from "../.timeline-test-build/lib/messageTimeline.js";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "../.timeline-test-build/lib/messageReceipts.js";
@@ -58,6 +60,16 @@ assert.equal(confirmedData.pages[0].results[0].created_at, optimistic.created_at
 assert.equal(confirmedData.pages[0].results[0].sequence, 3, "Server confirmation must enrich the optimistic message with its durable sequence.");
 assert.equal(confirmedData.pages[1].results[0].id, "oldest");
 assert.equal(flattenMessagePages(confirmedData).filter((message) => message.client_temp_id === "client-1").length, 1);
+assert.deepEqual(
+  messageLocalStateKeys(confirmedData.pages[0].results[0]),
+  ["server-1", "temp-client-1"],
+  "Server-confirmed messages must retain their optimistic local-state identity.",
+);
+assert.equal(
+  resolveMessageLocalState({ "temp-client-1": "plaintext" }, confirmedData.pages[0].results[0]),
+  "plaintext",
+  "Realtime confirmation must not hide an encrypted optimistic message before decryption state transfers.",
+);
 
 const readData = advanceMessageReceiptPages(confirmedData, "server-1", "read", "user-1");
 assert.equal(readData.pages[0].results[0].delivery_status, "read", "A live read receipt must update the message immediately.");

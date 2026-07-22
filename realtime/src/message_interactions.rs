@@ -312,24 +312,24 @@ async fn resolve_receipt_target(
     exclude_actor: bool,
 ) -> Result<Option<Uuid>> {
     if let Some(message_id) = requested_message_id {
-        let target_sequence = sqlx::query_scalar::<_, i64>(
-            "SELECT sequence FROM chat_message WHERE id = $1 AND conversation_id = $2",
+        let target_belongs = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM chat_message WHERE id = $1 AND conversation_id = $2)",
         )
         .bind(message_id)
         .bind(conversation_id)
         .persistent(false)
-        .fetch_optional(&mut **tx)
+        .fetch_one(&mut **tx)
         .await?;
-        let Some(target_sequence) = target_sequence else {
+        if !target_belongs {
             anyhow::bail!("message does not belong to this conversation");
-        };
+        }
         if exclude_actor {
             return Ok(sqlx::query_scalar::<_, Uuid>(
-                "SELECT id FROM chat_message WHERE conversation_id = $1 AND sender_id IS DISTINCT FROM $2 AND sequence <= $3 ORDER BY sequence DESC, id DESC LIMIT 1",
+                "SELECT candidate.id FROM chat_message candidate JOIN chat_message requested ON requested.id = $3 AND requested.conversation_id = $1 WHERE candidate.conversation_id = $1 AND candidate.sender_id IS DISTINCT FROM $2 AND (COALESCE(candidate.sequence, 0), candidate.created_at, candidate.id) <= (COALESCE(requested.sequence, 0), requested.created_at, requested.id) ORDER BY COALESCE(candidate.sequence, 0) DESC, candidate.created_at DESC, candidate.id DESC LIMIT 1",
             )
             .bind(conversation_id)
             .bind(actor_id)
-            .bind(target_sequence)
+            .bind(message_id)
             .persistent(false)
             .fetch_optional(&mut **tx)
             .await?);
@@ -339,7 +339,7 @@ async fn resolve_receipt_target(
 
     if exclude_actor {
         let result = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM chat_message WHERE conversation_id = $1 AND sender_id IS DISTINCT FROM $2 ORDER BY sequence DESC, id DESC LIMIT 1",
+            "SELECT id FROM chat_message WHERE conversation_id = $1 AND sender_id IS DISTINCT FROM $2 ORDER BY COALESCE(sequence, 0) DESC, created_at DESC, id DESC LIMIT 1",
         )
         .bind(conversation_id)
         .bind(actor_id)
@@ -349,7 +349,7 @@ async fn resolve_receipt_target(
         return Ok(result);
     }
     let result = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM chat_message WHERE conversation_id = $1 ORDER BY sequence DESC, id DESC LIMIT 1",
+        "SELECT id FROM chat_message WHERE conversation_id = $1 ORDER BY COALESCE(sequence, 0) DESC, created_at DESC, id DESC LIMIT 1",
     )
     .bind(conversation_id)
     .persistent(false)
@@ -364,7 +364,7 @@ async fn advance_delivery_pointer(
     target_message_id: Uuid,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "UPDATE chat_conversationparticipant cp SET last_delivered_message_id = $2, last_delivered_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_delivered_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_delivered_message_id WHERE target.id = $2 AND target.sequence > current.sequence))",
+        "UPDATE chat_conversationparticipant cp SET last_delivered_message_id = $2, last_delivered_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_delivered_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_delivered_message_id WHERE target.id = $2 AND (COALESCE(target.sequence, 0), target.created_at, target.id) > (COALESCE(current.sequence, 0), current.created_at, current.id)))",
     )
     .bind(participant_id)
     .bind(target_message_id)
@@ -380,7 +380,7 @@ async fn advance_read_pointer(
     target_message_id: Uuid,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "UPDATE chat_conversationparticipant cp SET last_read_message_id = $2, last_read_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_read_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_read_message_id WHERE target.id = $2 AND target.sequence > current.sequence))",
+        "UPDATE chat_conversationparticipant cp SET last_read_message_id = $2, last_read_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_read_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_read_message_id WHERE target.id = $2 AND (COALESCE(target.sequence, 0), target.created_at, target.id) > (COALESCE(current.sequence, 0), current.created_at, current.id)))",
     )
     .bind(participant_id)
     .bind(target_message_id)
@@ -420,7 +420,7 @@ async fn insert_missing_deliveries(
     target_message_id: Uuid,
 ) -> Result<()> {
     let message_ids = sqlx::query_scalar::<_, Uuid>(
-        "SELECT m.id FROM chat_message m JOIN chat_message target ON target.id = $3 WHERE m.conversation_id = $1 AND m.sender_id IS DISTINCT FROM $2 AND m.sequence <= target.sequence AND NOT EXISTS (SELECT 1 FROM chat_messagedelivery d WHERE d.message_id = m.id AND d.user_id = $2) ORDER BY m.sequence, m.id",
+        "SELECT m.id FROM chat_message m JOIN chat_message target ON target.id = $3 WHERE m.conversation_id = $1 AND m.sender_id IS DISTINCT FROM $2 AND (COALESCE(m.sequence, 0), m.created_at, m.id) <= (COALESCE(target.sequence, 0), target.created_at, target.id) AND NOT EXISTS (SELECT 1 FROM chat_messagedelivery d WHERE d.message_id = m.id AND d.user_id = $2) ORDER BY COALESCE(m.sequence, 0), m.created_at, m.id",
     )
     .bind(conversation_id)
     .bind(actor_id)
@@ -447,6 +447,44 @@ async fn insert_missing_deliveries(
             .persistent(false)
             .execute(&mut **tx)
             .await?;
+    }
+    Ok(())
+}
+
+async fn preserve_delivery_history(
+    tx: &mut Transaction<'_, Postgres>,
+    conversation_id: Uuid,
+    actor_id: i64,
+    target_message_id: Uuid,
+) -> Result<()> {
+    sqlx::query("SAVEPOINT receipt_delivery_history")
+        .persistent(false)
+        .execute(&mut **tx)
+        .await?;
+    match insert_missing_deliveries(tx, conversation_id, actor_id, target_message_id).await {
+        Ok(()) => {
+            sqlx::query("RELEASE SAVEPOINT receipt_delivery_history")
+                .persistent(false)
+                .execute(&mut **tx)
+                .await?;
+        }
+        Err(error) => {
+            sqlx::query("ROLLBACK TO SAVEPOINT receipt_delivery_history")
+                .persistent(false)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query("RELEASE SAVEPOINT receipt_delivery_history")
+                .persistent(false)
+                .execute(&mut **tx)
+                .await?;
+            tracing::warn!(
+                error = %error,
+                conversation_id = %conversation_id,
+                actor_id,
+                target_message_id = %target_message_id,
+                "Receipt pointer committed without optional per-message delivery history"
+            );
+        }
     }
     Ok(())
 }
@@ -558,7 +596,7 @@ impl Database {
         let (effective_delivery, _, state) = receipt_state(&mut tx, participant_id).await?;
         if changed {
             if let Some(message_id) = effective_delivery {
-                insert_missing_deliveries(&mut tx, conversation_id, actor_id, message_id).await?;
+                preserve_delivery_history(&mut tx, conversation_id, actor_id, message_id).await?;
             }
         }
 
@@ -619,7 +657,7 @@ impl Database {
         let (effective_delivery, effective_read, payload) = receipt_state(&mut tx, participant_id).await?;
         if delivery_changed {
             if let Some(message_id) = effective_delivery {
-                insert_missing_deliveries(&mut tx, conversation_id, actor_id, message_id).await?;
+                preserve_delivery_history(&mut tx, conversation_id, actor_id, message_id).await?;
             }
         }
 

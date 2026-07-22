@@ -12,6 +12,22 @@ function matchesMessage(left: Message, right: Message) {
   return Boolean(left.client_temp_id && right.client_temp_id && left.client_temp_id === right.client_temp_id);
 }
 
+export function messageLocalStateKeys(message: Pick<Message, "id" | "client_temp_id">) {
+  const keys = [message.id];
+  if (message.client_temp_id) keys.push(`temp-${message.client_temp_id}`);
+  return [...new Set(keys.filter(Boolean))];
+}
+
+export function resolveMessageLocalState<T>(
+  state: Record<string, T>,
+  message: Pick<Message, "id" | "client_temp_id">,
+) {
+  for (const key of messageLocalStateKeys(message)) {
+    if (state[key] !== undefined) return state[key];
+  }
+  return undefined;
+}
+
 const DELIVERY_STATUS_RANK: Record<string, number> = {
   pending: 0,
   sending: 0,

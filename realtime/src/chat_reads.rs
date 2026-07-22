@@ -760,7 +760,7 @@ impl Database {
         builder.push("'_last_message_id', c.last_message_id::text, 'last_message_at', c.last_message_at, 'active_participant_count', (SELECT COUNT(*)::bigint FROM chat_conversationparticipant ap WHERE ap.conversation_id = c.id AND ap.left_at IS NULL AND ap.banned_at IS NULL), ");
         builder.push("'unread_count', (SELECT COUNT(*)::bigint FROM chat_message um LEFT JOIN chat_message rm ON rm.id = viewer.last_read_message_id WHERE um.conversation_id = c.id AND NOT um.is_deleted AND um.sender_id IS DISTINCT FROM ");
         builder.push_bind(user_id);
-        builder.push(" AND (rm.id IS NULL OR (um.created_at, um.id) > (rm.created_at, rm.id))), ");
+        builder.push(" AND (rm.id IS NULL OR (COALESCE(um.sequence, 0), um.created_at, um.id) > (COALESCE(rm.sequence, 0), rm.created_at, rm.id))), ");
         builder.push("'participants', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', cp.id::text, 'user', ");
         builder.push(USER_COMPACT_JSON);
         builder.push(", 'role', cp.role, 'joined_at', cp.joined_at, 'left_at', cp.left_at, 'is_muted', cp.is_muted, 'is_archived', cp.is_archived, 'is_pinned', cp.is_pinned, 'is_blocked', cp.is_blocked, 'last_read_message', cp.last_read_message_id::text, 'last_read_at', cp.last_read_at, 'last_delivered_message', cp.last_delivered_message_id::text, 'last_delivered_at', cp.last_delivered_at) ORDER BY cp.joined_at, cp.id) FROM chat_conversationparticipant cp JOIN accounts_user u ON u.id = cp.user_id LEFT JOIN accounts_profile p ON p.user_id = u.id WHERE cp.conversation_id = c.id), '[]'::jsonb), ");
@@ -813,7 +813,7 @@ impl Database {
         builder.push("'e2ee_key_version', c.e2ee_key_version, 'e2ee_rekey_required', c.e2ee_rekey_required, 'e2ee_last_key_rotation_at', c.e2ee_last_key_rotation_at, 'e2ee_last_security_event_at', c.e2ee_last_security_event_at, '_last_message_id', c.last_message_id::text, 'last_message_at', c.last_message_at, ");
         builder.push("'active_participant_count', (SELECT COUNT(*)::bigint FROM chat_conversationparticipant ap WHERE ap.conversation_id = c.id AND ap.left_at IS NULL AND ap.banned_at IS NULL), 'unread_count', (SELECT COUNT(*)::bigint FROM chat_message um LEFT JOIN chat_message rm ON rm.id = viewer.last_read_message_id WHERE um.conversation_id = c.id AND NOT um.is_deleted AND um.sender_id IS DISTINCT FROM ");
         builder.push_bind(user_id);
-        builder.push(" AND (rm.id IS NULL OR (um.created_at, um.id) > (rm.created_at, rm.id))), ");
+        builder.push(" AND (rm.id IS NULL OR (COALESCE(um.sequence, 0), um.created_at, um.id) > (COALESCE(rm.sequence, 0), rm.created_at, rm.id))), ");
         builder.push("'participants', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', cp.id::text, 'user', ");
         builder.push(USER_LITE_JSON);
         builder.push(", 'role', cp.role, 'joined_at', cp.joined_at, 'left_at', cp.left_at, 'is_muted', cp.is_muted, 'is_archived', cp.is_archived, 'is_pinned', cp.is_pinned, 'is_blocked', cp.is_blocked, 'last_read_message', cp.last_read_message_id::text, 'last_read_at', cp.last_read_at, 'last_delivered_message', cp.last_delivered_message_id::text, 'last_delivered_at', cp.last_delivered_at, 'moderation_muted_until', cp.moderation_muted_until, 'banned_at', cp.banned_at, 'ban_reason', cp.ban_reason) ORDER BY cp.joined_at, cp.id) FROM chat_conversationparticipant cp JOIN accounts_user u ON u.id = cp.user_id LEFT JOIN accounts_profile p ON p.user_id = u.id WHERE cp.conversation_id = c.id), '[]'::jsonb), ");
