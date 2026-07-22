@@ -78,7 +78,7 @@ pub async fn run(state: Arc<AppState>) {
 async fn connect_and_consume(state: Arc<AppState>) -> Result<()> {
     let client = time::timeout(
         state.config.nats_connect_timeout,
-        async_nats::connect(state.config.nats_url.clone()),
+        crate::nats_connection::connect(&state.config),
     )
     .await
     .context("Core NATS connection timed out")?

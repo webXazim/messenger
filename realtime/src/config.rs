@@ -98,6 +98,8 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     pub nats_probe_enabled: bool,
     pub nats_url: String,
+    pub nats_user: String,
+    pub nats_password: String,
     pub nats_connect_timeout: Duration,
     pub nats_stream_name: String,
     pub nats_consumer_name: String,
@@ -177,6 +179,8 @@ impl Config {
                 .context("REALTIME_BIND must be a valid socket address")?,
             nats_probe_enabled: boolean("NATS_PROBE_ENABLED", false)?,
             nats_url: value("NATS_URL", "nats://nats:4222"),
+            nats_user: value("NATS_USER", "realtime"),
+            nats_password: value("NATS_PASSWORD", ""),
             nats_connect_timeout: Duration::from_secs(number("NATS_CONNECT_TIMEOUT_SECONDS", 3u64)?),
             nats_stream_name: value("NATS_CHAT_STREAM", "CHAT_EVENTS"),
             nats_consumer_name: value("NATS_DURABLE_CONSUMER", "realtime-axum-v1"),
@@ -298,12 +302,14 @@ impl Config {
         }
         if self.durable_backend == RealtimeBackend::Nats {
             if self.nats_url.trim().is_empty()
+                || self.nats_user.trim().is_empty()
+                || self.nats_password.is_empty()
                 || self.nats_stream_name.trim().is_empty()
                 || self.nats_consumer_name.trim().is_empty()
                 || self.nats_subject_filter.trim().is_empty()
             {
                 return Err(anyhow!(
-                    "NATS_URL, NATS_CHAT_STREAM, NATS_DURABLE_CONSUMER and NATS_DURABLE_SUBJECT_FILTER are required when REALTIME_DURABLE_BACKEND=nats"
+                    "NATS_URL, NATS_USER, NATS_PASSWORD, NATS_CHAT_STREAM, NATS_DURABLE_CONSUMER and NATS_DURABLE_SUBJECT_FILTER are required when REALTIME_DURABLE_BACKEND=nats"
                 ));
             }
         }

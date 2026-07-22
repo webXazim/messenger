@@ -92,7 +92,7 @@ pub async fn run(state: Arc<AppState>) {
 async fn consume(state: Arc<AppState>) -> Result<()> {
     let client = tokio::time::timeout(
         state.config.nats_connect_timeout,
-        async_nats::connect(state.config.nats_url.clone()),
+        crate::nats_connection::connect(&state.config),
     )
     .await
     .context("NATS connection timed out")?

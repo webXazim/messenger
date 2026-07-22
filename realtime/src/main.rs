@@ -3,6 +3,7 @@ mod command_auth;
 mod commands;
 mod config;
 mod database;
+mod nats_connection;
 mod nats_jetstream;
 mod nats_core;
 mod nats_probe;

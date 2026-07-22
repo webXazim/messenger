@@ -132,8 +132,8 @@ case "$durable_backend" in
     if [[ -n "$app_url" && "$app_url" != "nats://${app_user}:${app_password}@nats:4222" ]]; then
       failures+=("NATS_APP_URL is stale or custom; leave it blank to derive it from NATS_APP_USER/NATS_APP_PASSWORD")
     fi
-    if [[ -n "$realtime_url" && "$realtime_url" != "nats://${realtime_user}:${realtime_password}@nats:4222" ]]; then
-      failures+=("NATS_REALTIME_URL is stale or custom; leave it blank to derive it from NATS_REALTIME_USER/NATS_REALTIME_PASSWORD")
+    if [[ -n "$realtime_url" && "$realtime_url" != "nats://nats:4222" ]]; then
+      failures+=("NATS_REALTIME_URL must not contain credentials; leave it blank or set it to nats://nats:4222")
     fi
     ;;
   *) failures+=("REALTIME_DURABLE_BACKEND must be nats") ;;

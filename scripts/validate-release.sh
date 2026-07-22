@@ -56,6 +56,20 @@ for required in ('/etc/nats/render-config.sh', '/etc/nats/nats.conf.template'):
 nats_renderer = Path('deploy/nats/render-config.sh').read_text()
 if 'command -v nats-server' not in nats_renderer or 'exec /nats-server' in nats_renderer:
     raise SystemExit('NATS renderer must resolve nats-server from the image PATH')
+for required in (
+    'NATS_URL: ${NATS_REALTIME_URL:-nats://nats:4222}',
+    'NATS_USER: ${NATS_REALTIME_USER:-realtime}',
+    'NATS_PASSWORD: ${NATS_REALTIME_PASSWORD:-change-me-nats-realtime}',
+):
+    if required not in compose_text:
+        raise SystemExit(f'Realtime NATS authentication is not separated correctly: {required}')
+connection_source = Path('realtime/src/nats_connection.rs').read_text()
+if 'ConnectOptions::with_user_and_password' not in connection_source:
+    raise SystemExit('Realtime must authenticate with explicit NATS user/password options')
+realtime_dockerfile = Path('realtime/Dockerfile').read_text()
+for cache_target in ('/usr/local/cargo/registry', '/usr/local/cargo/git', '/app/target'):
+    if f'target={cache_target}' not in realtime_dockerfile:
+        raise SystemExit(f'Realtime Docker build is missing persistent Cargo cache: {cache_target}')
 print('Python, JSON, and YAML validation passed.')
 PY
 

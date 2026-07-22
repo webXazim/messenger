@@ -16,7 +16,7 @@ pub async fn run(state: Arc<AppState>) {
 
         let connect = tokio::time::timeout(
             state.config.nats_connect_timeout,
-            async_nats::connect(state.config.nats_url.clone()),
+            crate::nats_connection::connect(&state.config),
         ).await;
 
         match connect {
