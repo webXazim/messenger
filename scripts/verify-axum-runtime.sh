@@ -25,12 +25,12 @@ if [[ -f .env ]]; then
   media_backend="$(grep -E '^MEDIA_PROCESSING_BACKEND=' .env | tail -1 | cut -d= -f2-)"
 fi
 if [[ "$media_backend" == "rust" || "$media_backend" == "rust_shadow" ]]; then
-  ./scripts/generate-media-worker-lockfile.sh
+  bash ./scripts/generate-media-worker-lockfile.sh
   COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" --profile rust-media build media-worker
 fi
 "${compose[@]}" up -d postgres redis nats pgbouncer
-"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate
-"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
+"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 -e DATABASE_MAINTENANCE_MODE=True -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate
+"${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 -e DATABASE_MAINTENANCE_MODE=True -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
 "${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 web python manage.py check
 "${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0 web python manage.py ensure_nats_stream
 "${compose[@]}" up -d postgres pgbouncer redis nats realtime web worker beat frontend nginx

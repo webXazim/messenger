@@ -109,9 +109,9 @@ bash ./scripts/backup-postgres.sh
 
 run_web=("${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0)
 info "Checking model and migration consistency"
-"${run_web[@]}" -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py makemigrations --check --dry-run
-"${run_web[@]}" -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --noinput
-"${run_web[@]}" -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
+"${run_web[@]}" -e DATABASE_MAINTENANCE_MODE=True -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py makemigrations --check --dry-run
+"${run_web[@]}" -e DATABASE_MAINTENANCE_MODE=True -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --noinput
+"${run_web[@]}" -e DATABASE_MAINTENANCE_MODE=True -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
 "${run_web[@]}" web python manage.py check --deploy
 
 info "Ensuring the NATS JetStream resources exist"
@@ -119,7 +119,8 @@ info "Ensuring the NATS JetStream resources exist"
 
 info "Replacing the complete production stack"
 if ! "${compose[@]}" up -d --remove-orphans "${all_services[@]}"; then
-  "${compose[@]}" logs --tail=150 nats realtime >&2 || true
+  "${compose[@]}" ps -a >&2 || true
+  "${compose[@]}" logs --tail=100 web worker beat realtime media-worker frontend nginx >&2 || true
   fail "production stack replacement failed"
 fi
 

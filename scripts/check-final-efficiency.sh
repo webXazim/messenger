@@ -16,6 +16,8 @@ require realtime/src/database.rs '.max_connections(config.sqlx_max_connections)'
 require realtime/src/database.rs '.idle_timeout(Some(config.sqlx_idle_timeout))' 'SQLx idle timeout is missing'
 require realtime/src/registry.rs 'pub fn queue_snapshot' 'WebSocket queue-pressure snapshot is missing'
 require config/settings.py 'AXUM_DATA_PLANE_REQUIRED' 'Strict final data-plane gate is missing'
+require config/settings.py 'DATABASE_MAINTENANCE_MODE' 'Explicit database maintenance mode is missing'
+require entrypoint.sh 'DATABASE_MAINTENANCE_MODE=True' 'Startup migrations do not use explicit database maintenance mode'
 require apps/chat/checks.py 'chat.E030' 'Django deployment check for final Axum plane is missing'
 require scripts/stack-profile.sh 'final|efficient)' 'Final efficient rollout profile is missing'
 require scripts/stack-profile.sh './scripts/generate-realtime-lockfile.sh' 'Final rollout does not prepare the Axum lockfile'
@@ -28,6 +30,12 @@ require scripts/run-load-test.sh 'overload)' 'Overload test runner mode is missi
 require scripts/run-load-test.sh 'soak)' 'Soak test runner mode is missing'
 require nginx/snm.production.conf 'limit_conn realtime_per_ip 50;' 'WebSocket connection protection is missing'
 require nginx/snm.production.conf 'proxy_buffering on;' 'Fast API response buffering is missing'
+
+if grep -Eq 'AXUM_DATA_PLANE_REQUIRED=False' \
+  entrypoint.sh scripts/deploy-axum-cutover.sh scripts/production-readiness.sh \
+  scripts/verify-axum-runtime.sh scripts/verify-axum-feature-parity.sh; then
+  fail 'Production maintenance paths must not disable the strict Axum data-plane gate'
+fi
 
 for obsolete in \
   realtime/src/redis_stream.rs \
@@ -51,7 +59,8 @@ for name in ('docker-compose.yml', 'docker-compose.local.yml', 'docker-compose.p
         yaml.safe_load(handle)
 prod=Path('.env.production.example').read_text(encoding='utf-8')
 required={
-    'AXUM_DATA_PLANE_REQUIRED':'True', 'CHAT_READ_BACKEND':'sqlx',
+    'AXUM_DATA_PLANE_REQUIRED':'True', 'DATABASE_MAINTENANCE_MODE':'False',
+    'CHAT_READ_BACKEND':'sqlx',
     'CHAT_COMMAND_BACKEND':'axum', 'CHAT_INTERACTION_BACKEND':'axum',
     'CHAT_MESSAGE_MUTATION_BACKEND':'axum', 'CHAT_CALL_RUNTIME_BACKEND':'axum',
     'CHAT_ATTACHMENT_BACKEND':'axum', 'CHAT_CONVERSATION_COMMAND_BACKEND':'axum',

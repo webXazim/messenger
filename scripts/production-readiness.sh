@@ -40,6 +40,7 @@ require_value() {
 
 for name in APP_DOMAIN SITE_URL FRONTEND_BASE_URL ALLOWED_HOSTS CORS_ALLOWED_ORIGINS \
   CSRF_TRUSTED_ORIGINS SECRET_KEY DB_NAME DB_USER DB_PASSWORD DROPLET_PUBLIC_IP \
+  MEDIA_TOKEN_SHARED_SECRET \
   CLOUDFLARE_TURN_KEY_ID CLOUDFLARE_TURN_API_TOKEN CLOUDFLARE_R2_ACCOUNT_ID \
   CLOUDFLARE_R2_BUCKET_NAME CLOUDFLARE_R2_ACCESS_KEY_ID \
   CLOUDFLARE_R2_SECRET_ACCESS_KEY; do
@@ -50,17 +51,53 @@ app_domain="$(read_env APP_DOMAIN)"
 site_url="$(read_env SITE_URL)"
 frontend_url="$(read_env FRONTEND_BASE_URL)"
 secret="$(read_env SECRET_KEY)"
+media_token_secret="$(read_env MEDIA_TOKEN_SHARED_SECRET)"
 
 [[ "$site_url" == "https://${app_domain}" ]] || failures+=("SITE_URL must equal https://APP_DOMAIN")
 [[ "$frontend_url" == "https://${app_domain}" ]] || failures+=("FRONTEND_BASE_URL must equal https://APP_DOMAIN")
 [[ "$(read_env ALLOWED_HOSTS)" == "$app_domain" ]] || warnings+=("ALLOWED_HOSTS should contain only APP_DOMAIN")
 (( ${#secret} >= 50 )) || failures+=("SECRET_KEY must contain at least 50 characters")
+(( ${#media_token_secret} >= 32 )) || failures+=("MEDIA_TOKEN_SHARED_SECRET must contain at least 32 characters")
 
 for pair in   "DEBUG:False"   "MESSENGER_ENVIRONMENT:production"   "MESSENGER_REQUIRE_SECURE_SETTINGS:True"   "SECURE_SSL_REDIRECT:True"   "SESSION_COOKIE_SECURE:True"   "CSRF_COOKIE_SECURE:True"   "SECURE_PROXY_SSL_HEADER_ENABLED:True"   "USE_X_FORWARDED_HOST:True"   "CHAT_USE_R2_STORAGE:True"   "AUTH_REQUIRE_EMAIL_VERIFICATION:True"; do
   name="${pair%%:*}"
   expected="${pair#*:}"
   actual="$(read_env "$name")"
   [[ "${actual,,}" == "${expected,,}" ]] || failures+=("$name must be $expected in production")
+done
+
+for pair in \
+  "AXUM_DATA_PLANE_REQUIRED:True" \
+  "DATABASE_MAINTENANCE_MODE:False" \
+  "DATABASE_RUNTIME_ENDPOINT:pgbouncer" \
+  "REALTIME_TRANSPORT:axum" \
+  "REALTIME_DURABLE_BACKEND:nats" \
+  "REALTIME_OUTBOX_PUBLISHER:axum" \
+  "REALTIME_EPHEMERAL_BACKEND:nats" \
+  "REALTIME_PRESENCE_BACKEND:local" \
+  "REALTIME_CONNECTION_OWNERSHIP_BACKEND:local" \
+  "CHAT_READ_BACKEND:sqlx" \
+  "CHAT_COMMAND_BACKEND:axum" \
+  "CHAT_INTERACTION_BACKEND:axum" \
+  "CHAT_MESSAGE_MUTATION_BACKEND:axum" \
+  "CHAT_CALL_RUNTIME_BACKEND:axum" \
+  "CHAT_ATTACHMENT_BACKEND:axum" \
+  "CHAT_CONVERSATION_COMMAND_BACKEND:axum" \
+  "SUPPORT_DATA_BACKEND:axum" \
+  "MEDIA_PROCESSING_BACKEND:rust" \
+  "MEDIA_WORKER_DJANGO_FALLBACK_ENABLED:False" \
+  "VITE_CHAT_READ_BACKEND:sqlx" \
+  "VITE_CHAT_COMMAND_BACKEND:axum" \
+  "VITE_CHAT_INTERACTION_BACKEND:axum" \
+  "VITE_CHAT_MESSAGE_MUTATION_BACKEND:axum" \
+  "VITE_CHAT_CALL_RUNTIME_BACKEND:axum" \
+  "VITE_CHAT_ATTACHMENT_BACKEND:axum" \
+  "VITE_CHAT_CONVERSATION_COMMAND_BACKEND:axum" \
+  "VITE_SUPPORT_DATA_BACKEND:axum"; do
+  name="${pair%%:*}"
+  expected="${pair#*:}"
+  actual="$(read_env "$name")"
+  [[ "${actual,,}" == "${expected,,}" ]] || failures+=("$name must be $expected for the final Axum production plane")
 done
 
 [[ "$(read_env NGINX_CONF_PATH)" == "./nginx/snm.production.conf" ]] ||   failures+=("NGINX_CONF_PATH must be ./nginx/snm.production.conf")
@@ -231,7 +268,7 @@ done
 "${compose[@]}" ps
 "${compose[@]}" exec -T nginx nginx -t
 "${compose[@]}" exec -T web python manage.py check --deploy
-"${compose[@]}" exec -T -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
+"${compose[@]}" exec -T -e DATABASE_MAINTENANCE_MODE=True -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
 "${compose[@]}" exec -T web python manage.py check_chat_readiness
 "${compose[@]}" exec -T web python manage.py check_support_readiness --fail-on-warning
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null

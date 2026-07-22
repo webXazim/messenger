@@ -27,6 +27,7 @@ fi
 if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
   # Schema changes bypass transaction-pooled PgBouncer. Runtime traffic can be
   # switched independently through DATABASE_RUNTIME_ENDPOINT.
+  DATABASE_MAINTENANCE_MODE=True \
   DATABASE_RUNTIME_ENDPOINT=postgres \
   DB_HOST="${DB_MIGRATION_HOST:-${DB_HOST:-postgres}}" \
   DB_PORT="${DB_MIGRATION_PORT:-${DB_PORT:-5432}}" \

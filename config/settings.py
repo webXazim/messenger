@@ -158,6 +158,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 DB_ENGINE = env_str("DB_ENGINE", "sqlite").lower()
 DATABASE_RUNTIME_ENDPOINT = env_str("DATABASE_RUNTIME_ENDPOINT", "postgres").strip().lower()
+DATABASE_MAINTENANCE_MODE = env_bool("DATABASE_MAINTENANCE_MODE", False)
 if DATABASE_RUNTIME_ENDPOINT not in {"postgres", "pgbouncer"}:
     raise ImproperlyConfigured(
         "DATABASE_RUNTIME_ENDPOINT must be either 'postgres' or 'pgbouncer'."
@@ -888,11 +889,17 @@ def _validate_axum_data_plane():
         "CHAT_CONVERSATION_COMMAND_BACKEND": (CHAT_CONVERSATION_COMMAND_BACKEND, "axum"),
         "SUPPORT_DATA_BACKEND": (SUPPORT_DATA_BACKEND, "axum"),
         "MEDIA_PROCESSING_BACKEND": (MEDIA_PROCESSING_BACKEND, "rust"),
-        "DATABASE_RUNTIME_ENDPOINT": (DATABASE_RUNTIME_ENDPOINT, "pgbouncer"),
     }
     invalid = [f"{name}={actual!r} (expected {wanted!r})" for name, (actual, wanted) in expected.items() if actual != wanted]
     if REALTIME_DURABLE_BACKEND not in {"nats", "jetstream"}:
         invalid.append(f"REALTIME_DURABLE_BACKEND={REALTIME_DURABLE_BACKEND!r} (expected 'nats')")
+    if DATABASE_RUNTIME_ENDPOINT != "pgbouncer" and not (
+        DATABASE_MAINTENANCE_MODE and DATABASE_RUNTIME_ENDPOINT == "postgres"
+    ):
+        invalid.append(
+            f"DATABASE_RUNTIME_ENDPOINT={DATABASE_RUNTIME_ENDPOINT!r} "
+            "(expected 'pgbouncer' outside explicit database maintenance)"
+        )
     if MEDIA_WORKER_DJANGO_FALLBACK_ENABLED:
         invalid.append("MEDIA_WORKER_DJANGO_FALLBACK_ENABLED=True (expected False)")
     if invalid:
