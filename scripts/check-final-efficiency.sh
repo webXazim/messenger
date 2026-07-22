@@ -36,11 +36,11 @@ for obsolete in \
   reject_file "$obsolete" "Obsolete realtime file remains: $obsolete"
 done
 
-./scripts/check-axum-hot-paths.sh
-./scripts/check-axum-support-data.sh
-./scripts/check-axum-direct-outbox.sh
-./scripts/check-axum-call-runtime.sh
-./scripts/check-rust-media-worker.sh
+bash ./scripts/check-axum-hot-paths.sh
+bash ./scripts/check-axum-support-data.sh
+bash ./scripts/check-axum-direct-outbox.sh
+bash ./scripts/check-axum-call-runtime.sh
+bash ./scripts/check-rust-media-worker.sh
 
 python3 -m py_compile config/settings.py apps/chat/checks.py scripts/analyze-load-test.py scripts/capture_load_test_metrics.py
 python3 - <<'PY'
@@ -74,6 +74,10 @@ for script in scripts/*.sh; do
     *) sh -n "$script" ;;
   esac
 done
-for file in loadtests/k6/*.js loadtests/k6/lib/*.js; do node --check "$file"; done
+if command -v node >/dev/null 2>&1; then
+  for file in loadtests/k6/*.js loadtests/k6/lib/*.js; do node --check "$file"; done
+else
+  echo 'Node.js is not installed; skipping optional load-test JavaScript syntax checks.'
+fi
 
 echo 'Final efficiency hardening source contracts passed.'
