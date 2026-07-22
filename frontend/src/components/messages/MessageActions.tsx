@@ -28,6 +28,7 @@ export function MessageActions({
   onForward,
   onEdit,
   onDelete,
+  onRestore,
   onReport,
   disabled = false,
 }: {
@@ -42,6 +43,7 @@ export function MessageActions({
   onForward: (message: Message) => void;
   onEdit: (message: Message) => void;
   onDelete: (message: Message) => void;
+  onRestore: (message: Message) => void;
   onReport?: (message: Message) => void;
   disabled?: boolean;
 }) {
@@ -166,7 +168,8 @@ export function MessageActions({
             {canInteract && message.text ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => { void navigator.clipboard.writeText(message.text); })}>Copy</button> : null}
             {canForward ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onForward(message))}>Forward</button> : null}
             {own && canInteract && canEdit ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onEdit(message))}>Edit</button> : null}
-            {own ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onDelete(message))}>Delete</button> : null}
+            {own && !message.is_deleted ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onDelete(message))}>Delete</button> : null}
+            {own && message.is_deleted && message.can_restore !== false ? <button type="button" role="menuitem" disabled={disabled} onClick={() => run(() => onRestore(message))}>Restore</button> : null}
             {!own && onReport ? <button type="button" role="menuitem" className="is-danger" disabled={disabled} onClick={() => run(() => onReport(message))}>Report</button> : null}
           </div>
           </div>

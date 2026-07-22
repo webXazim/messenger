@@ -124,7 +124,15 @@ class ConversationParticipant(BaseUUIDModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["conversation", "user"], name="uniq_conversation_user_participant")]
-        indexes = [models.Index(fields=["user", "conversation"]), models.Index(fields=["conversation", "joined_at"])]
+        indexes = [
+            models.Index(fields=["user", "conversation"]),
+            models.Index(fields=["conversation", "joined_at"]),
+            models.Index(
+                fields=["user", "conversation"],
+                condition=models.Q(left_at__isnull=True, banned_at__isnull=True),
+                name="chat_part_active_user_idx",
+            ),
+        ]
 
 
 class PendingUpload(BaseUUIDModel):
@@ -188,6 +196,37 @@ class PendingUpload(BaseUUIDModel):
                 condition=models.Q(purpose="support") | models.Q(user__isnull=False),
                 name="chat_pending_messenger_user_required",
             ),
+        ]
+
+
+class MediaProcessingJob(BaseUUIDModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    upload = models.OneToOneField(
+        PendingUpload,
+        on_delete=models.CASCADE,
+        related_name="media_processing_job",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    attempts = models.PositiveIntegerField(default=0)
+    available_at = models.DateTimeField(default=timezone.now, db_index=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    lease_token = models.UUIDField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    worker_name = models.CharField(max_length=120, blank=True)
+    processing_version = models.PositiveSmallIntegerField(default=1)
+    result = models.JSONField(default=dict, blank=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["available_at", "created_at", "id"]
+        indexes = [
+            models.Index(fields=["status", "available_at"], name="chat_media_job_status_due_idx"),
+            models.Index(fields=["locked_at"], name="chat_media_job_locked_idx"),
         ]
 
 
@@ -263,6 +302,10 @@ class Message(BaseUUIDModel):
         FILE = "file", "File"
         SYSTEM = "system", "System"
 
+    class DeletionSource(models.TextChoices):
+        SENDER = "sender", "Sender"
+        MODERATION = "moderation", "Moderation"
+
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name="sent_messages")
     type = models.CharField(max_length=20, choices=MessageType.choices, default="text")
@@ -276,6 +319,9 @@ class Message(BaseUUIDModel):
     edit_locked_reason = models.CharField(max_length=32, blank=True)
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_text_backup = models.TextField(blank=True)
+    deletion_source = models.CharField(max_length=16, choices=DeletionSource.choices, blank=True)
+
     class DeliveryStatus(models.TextChoices):
         PENDING = "pending", "Pending"
         SENT = "sent", "Sent"
@@ -293,6 +339,7 @@ class Message(BaseUUIDModel):
             models.Index(fields=["conversation", "-created_at"]),
             models.Index(fields=["sender", "-created_at"]),
             models.Index(fields=["conversation", "-sequence"], name="chat_msg_conv_seq_idx"),
+            models.Index(fields=["conversation", "-created_at", "-id"], name="chat_msg_conv_time_id_idx"),
             models.Index(
                 fields=["conversation", "created_at", "id"],
                 condition=models.Q(is_deleted=False),
@@ -387,6 +434,12 @@ class MessageAttachment(BaseUUIDModel):
     scanned_at = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     view_once = models.BooleanField(default=False, db_index=True)
+
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["message", "-created_at"], name="chat_attach_msg_time_idx"),
+        ]
 
 
 class MessageAttachmentViewReceipt(BaseUUIDModel):
@@ -714,3 +767,45 @@ class ChatAuditLog(BaseUUIDModel):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["event_type", "created_at"]), models.Index(fields=["conversation", "created_at"])]
+
+
+class ChatDataPlaneJob(BaseUUIDModel):
+    class Kind(models.TextChoices):
+        MESSAGE_CREATED = "message_created", "Message created"
+        CONVERSATION_CLEANUP = "conversation_cleanup", "Conversation cleanup"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    kind = models.CharField(max_length=40, choices=Kind.choices)
+    dedupe_key = models.CharField(max_length=180, unique=True)
+    conversation = models.ForeignKey(
+        Conversation,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="data_plane_jobs",
+    )
+    message = models.ForeignKey(
+        Message,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="data_plane_jobs",
+    )
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    attempts = models.PositiveIntegerField(default=0)
+    available_at = models.DateTimeField(default=timezone.now, db_index=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["available_at", "created_at", "id"]
+        indexes = [
+            models.Index(fields=["status", "available_at"], name="chat_dp_job_status_due_idx"),
+            models.Index(fields=["conversation", "created_at"], name="chat_dp_job_conv_time_idx"),
+        ]

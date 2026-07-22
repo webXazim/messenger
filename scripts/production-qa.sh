@@ -18,6 +18,8 @@ Next, from an external load generator set LOADTEST_BASE_URL, LOADTEST_WS_URL and
   ./scripts/run-load-test.sh capacity $users
   ./scripts/run-load-test.sh mixed $(( users < 250 ? users : 250 ))
   ./scripts/run-load-test.sh reconnect $(( users < 250 ? users : 250 ))
+  ./scripts/run-load-test.sh overload $(( users < 300 ? users : 300 ))
+  ./scripts/run-load-test.sh soak $(( users < 150 ? users : 150 ))
 Capture VPS metrics concurrently with scripts/capture-load-test-metrics.sh.
 TXT
     ;;

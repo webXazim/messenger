@@ -701,6 +701,32 @@ async fn handle_messenger_typing(
         send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "conversation_not_subscribed"}));
         return;
     }
+    let conversation_uuid = match Uuid::parse_str(conversation_id) {
+        Ok(value) => value,
+        Err(_) => {
+            send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "invalid_conversation"}));
+            return;
+        }
+    };
+    let actor_id = match session.actor_id.parse::<i64>() {
+        Ok(value) => value,
+        Err(_) => {
+            send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "invalid_actor"}));
+            return;
+        }
+    };
+    match state.database.can_emit_messenger_ephemeral(conversation_uuid, actor_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "conversation_forbidden"}));
+            return;
+        }
+        Err(error) => {
+            tracing::warn!(error=%error, %conversation_uuid, actor_id, "typing authorization check failed");
+            send_control(high_tx, "error", command.request_id.as_deref(), json!({"code": "authorization_unavailable"}));
+            return;
+        }
+    }
     let started = command.event.ends_with("start");
     if let Ok(message) = event_message(
         if started { "typing.started" } else { "typing.stopped" },

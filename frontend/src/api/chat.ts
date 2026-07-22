@@ -1,7 +1,7 @@
 import { http } from "../lib/http";
 import { unwrapCursorPage, unwrapData, unwrapObject } from "../lib/apiResponse";
 import { resolveMediaUrl } from "../lib/mediaUrl";
-import { API_BASE_URL, CHAT_COMMAND_BACKEND, CHAT_COMMAND_URL } from "../lib/config";
+import { API_BASE_URL, CHAT_ATTACHMENT_BACKEND, CHAT_CALL_RUNTIME_BACKEND, CHAT_COMMAND_BACKEND, CHAT_COMMAND_URL, CHAT_CONVERSATION_COMMAND_BACKEND, CHAT_INTERACTION_BACKEND, CHAT_MESSAGE_MUTATION_BACKEND, CHAT_READ_BACKEND, CHAT_READ_URL } from "../lib/config";
 import { safeId } from "../lib/safeId";
 import { collectCursorPages, type CursorPage } from "../lib/pagination";
 import type { Call, CallConfig, Conversation, ConversationE2EEKeyMaterial, ConversationInviteLink, E2EEDeviceKey, Message, NotificationPreferences, TurnCredentials, UserStatus } from "../types/chat";
@@ -432,6 +432,8 @@ export function normalizeMessage(value: unknown): Message {
     can_edit: typeof item.can_edit === "boolean" ? item.can_edit : undefined,
     edit_locked_reason: firstString(item.edit_locked_reason) || undefined,
     edit_deadline: firstString(item.edit_deadline) || undefined,
+    can_restore: typeof item.can_restore === "boolean" ? item.can_restore : undefined,
+    restore_locked_reason: firstString(item.restore_locked_reason) || undefined,
     transcript: Object.keys(transcript).length ? { text: firstString(transcript.text, transcript.content) || undefined } : null,
     voice_note: Object.keys(voiceNote).length
       ? {
@@ -786,6 +788,22 @@ function normalizeMessagePage(value: unknown): MessagePage {
   };
 }
 
+function readPath(djangoPath: string, sqlxPath: string) {
+  return CHAT_READ_BACKEND === "sqlx" ? `${CHAT_READ_URL}${sqlxPath}` : djangoPath;
+}
+
+
+function conversationCommandPath(djangoPath: string, axumPath: string) {
+  return CHAT_CONVERSATION_COMMAND_BACKEND === "axum" ? `${CHAT_COMMAND_URL}${axumPath}` : djangoPath;
+}
+
+function isDjangoFallback(error: any) {
+  return error?.response?.status === 422 && error?.response?.data?.code === "django_fallback_required";
+}
+function messageMutationPath(djangoPath: string, axumPath: string) {
+  return CHAT_MESSAGE_MUTATION_BACKEND === "axum" ? `${CHAT_COMMAND_URL}${axumPath}` : djangoPath;
+}
+
 export const chatApi = {
   async getCapabilities() {
     const response = await http.get("/chat/capabilities/");
@@ -796,26 +814,40 @@ export const chatApi = {
     return unwrapObject<IntegrationHealth>(response.data, {});
   },
   async listConversations(signal?: AbortSignal) {
-    const items = await collectChatPages("/chat/conversations/", normalizeConversation, {
+    const items = await collectChatPages(readPath("/chat/conversations/", "/conversations/"), normalizeConversation, {
       signal,
       getKey: (item) => item.id,
     });
     return items.filter((item) => Boolean(item.id));
   },
   async createDirectConversation(userId: string) {
-    const response = await http.post("/chat/conversations/", {
+    const payload = {
       type: "direct",
       participant_ids: [Number.isFinite(Number(userId)) ? Number(userId) : userId],
-    });
+    };
+    if (CHAT_CONVERSATION_COMMAND_BACKEND === "axum") {
+      const response = await http.post(`${CHAT_COMMAND_URL}/conversations/`, payload);
+      return normalizeConversation(unwrapData<unknown>(response.data));
+    }
+    const response = await http.post("/chat/conversations/", payload);
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
   async createGroupConversation(title: string, uniqueName: string, participantIds: string[]) {
-    const response = await http.post("/chat/conversations/", {
+    const payload = {
       type: "group",
       title,
       slug: uniqueName,
       participant_ids: participantIds.map((id) => (Number.isFinite(Number(id)) ? Number(id) : id)),
-    });
+    };
+    if (CHAT_CONVERSATION_COMMAND_BACKEND === "axum") {
+      try {
+        const response = await http.post(`${CHAT_COMMAND_URL}/conversations/`, payload);
+        return normalizeConversation(unwrapData<unknown>(response.data));
+      } catch (error: any) {
+        if (!isDjangoFallback(error)) throw error;
+      }
+    }
+    const response = await http.post("/chat/conversations/", payload);
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
   async checkGroupNameAvailability(name: string, signal?: AbortSignal) {
@@ -824,7 +856,7 @@ export const chatApi = {
     return { available: Boolean(payload.available), normalized: String(payload.normalized || ""), message: String(payload.message || "") };
   },
   async getConversation(id: string) {
-    const response = await http.get(`/chat/conversations/${id}/`);
+    const response = await http.get(readPath(`/chat/conversations/${id}/`, `/conversations/${id}/`));
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
   async getDirectConversationByUsername(username: string) {
@@ -848,49 +880,61 @@ export const chatApi = {
     return items.filter((item) => Boolean(item.id));
   },
   async toggleConversationMute(conversationId: string) {
-    const response = await http.post(`/chat/conversations/${conversationId}/mute/`);
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/mute/`, `/conversations/${conversationId}/mute/`));
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async toggleConversationArchive(conversationId: string) {
-    const response = await http.post(`/chat/conversations/${conversationId}/archive/`);
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/archive/`, `/conversations/${conversationId}/archive/`));
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async toggleConversationPin(conversationId: string) {
-    const response = await http.post(`/chat/conversations/${conversationId}/pin/`);
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/pin/`, `/conversations/${conversationId}/pin/`));
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async addGroupParticipants(conversationId: string, participantIds: string[]) {
-    const response = await http.post(`/chat/conversations/${conversationId}/participants/`, {
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/participants/`, `/conversations/${conversationId}/participants/`), {
       participant_ids: participantIds.map((id) => (Number.isFinite(Number(id)) ? Number(id) : id)),
     });
     return normalizeConversation(unwrapData<unknown>(response.data));
   },
   async removeGroupParticipant(conversationId: string, userId: string) {
-    const response = await http.delete(`/chat/conversations/${conversationId}/participants/${userId}/`);
+    const response = await http.delete(conversationCommandPath(`/chat/conversations/${conversationId}/participants/${userId}/`, `/conversations/${conversationId}/participants/${userId}/`));
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async updateGroupParticipantRole(conversationId: string, userId: string, role: "member" | "admin") {
-    const response = await http.patch(`/chat/conversations/${conversationId}/participants/${userId}/role/`, { role });
+    const response = await http.patch(conversationCommandPath(`/chat/conversations/${conversationId}/participants/${userId}/role/`, `/conversations/${conversationId}/participants/${userId}/role/`), { role });
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async muteGroupParticipant(conversationId: string, userId: string, minutes: number) {
-    const response = await http.post(`/chat/conversations/${conversationId}/participants/${userId}/mute/`, { minutes });
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/participants/${userId}/mute/`, `/conversations/${conversationId}/participants/${userId}/mute/`), { minutes });
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async banGroupParticipant(conversationId: string, userId: string, reason?: string) {
-    const response = await http.post(`/chat/conversations/${conversationId}/participants/${userId}/ban/`, { reason: reason ?? "" });
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/participants/${userId}/ban/`, `/conversations/${conversationId}/participants/${userId}/ban/`), { reason: reason ?? "" });
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async unbanGroupParticipant(conversationId: string, userId: string) {
-    const response = await http.delete(`/chat/conversations/${conversationId}/participants/${userId}/ban/`);
+    const response = await http.delete(conversationCommandPath(`/chat/conversations/${conversationId}/participants/${userId}/ban/`, `/conversations/${conversationId}/participants/${userId}/ban/`));
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async transferGroupOwnership(conversationId: string, targetUserId: string) {
-    const response = await http.post(`/chat/conversations/${conversationId}/transfer-ownership/`, { target_user_id: targetUserId });
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/transfer-ownership/`, `/conversations/${conversationId}/transfer-ownership/`), { target_user_id: targetUserId });
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async leaveConversation(conversationId: string) {
-    const response = await http.post(`/chat/conversations/${conversationId}/leave/`);
+    const response = await http.post(conversationCommandPath(`/chat/conversations/${conversationId}/leave/`, `/conversations/${conversationId}/leave/`));
+    return unwrapObject<Record<string, unknown>>(response.data, {});
+  },
+  async getConversationDraft(conversationId: string) {
+    const response = await http.get(conversationCommandPath(`/chat/conversations/${conversationId}/draft/`, `/conversations/${conversationId}/draft/`));
+    return unwrapObject<Record<string, unknown>>(response.data, {});
+  },
+  async saveConversationDraft(conversationId: string, payload: { text?: string; reply_to_id?: string | null; metadata?: Record<string, unknown> }) {
+    const response = await http.patch(conversationCommandPath(`/chat/conversations/${conversationId}/draft/`, `/conversations/${conversationId}/draft/`), payload);
+    return unwrapObject<Record<string, unknown>>(response.data, {});
+  },
+  async deleteConversationDraft(conversationId: string) {
+    const response = await http.delete(conversationCommandPath(`/chat/conversations/${conversationId}/draft/`, `/conversations/${conversationId}/draft/`));
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async listInviteLinks(conversationId: string, signal?: AbortSignal) {
@@ -909,23 +953,29 @@ export const chatApi = {
     return normalizeInviteLink(unwrapData<unknown>(response.data));
   },
   async listMessages(conversationId: string, pageUrl?: string | null, signal?: AbortSignal) {
-    const response = await http.get(pageUrl || `/chat/conversations/${conversationId}/messages/`, { signal });
+    const response = await http.get(pageUrl || readPath(`/chat/conversations/${conversationId}/messages/`, `/conversations/${conversationId}/messages/`), { signal });
     return normalizeMessagePage(response.data);
   },
   async sendMessage(conversationId: string, payload: Record<string, unknown>) {
     const requestPayload = Object.fromEntries(
       Object.entries(payload).filter(([key]) => !key.startsWith("_")),
     );
-    if (CHAT_COMMAND_BACKEND === "axum") {
-      try {
-        const response = await http.post(`${CHAT_COMMAND_URL}/conversations/${conversationId}/messages/`, requestPayload);
-        return normalizeMessage(unwrapData<unknown>(response.data));
-      } catch (error: any) {
-        if (error?.response?.status !== 422 || error?.response?.data?.code !== "django_fallback_required") throw error;
-      }
+    const attachmentIds = Array.isArray(requestPayload.attachment_ids) ? requestPayload.attachment_ids : [];
+    if (attachmentIds.length && CHAT_ATTACHMENT_BACKEND === "axum") {
+      const response = await http.post(`${CHAT_COMMAND_URL}/conversations/${conversationId}/attachment-messages/`, requestPayload);
+      return normalizeMessage(unwrapData<unknown>(response.data));
+    }
+    if (!attachmentIds.length && CHAT_COMMAND_BACKEND === "axum") {
+      const response = await http.post(`${CHAT_COMMAND_URL}/conversations/${conversationId}/messages/`, requestPayload);
+      return normalizeMessage(unwrapData<unknown>(response.data));
     }
     const response = await http.post(`/chat/conversations/${conversationId}/messages/`, requestPayload);
     return normalizeMessage(unwrapData<unknown>(response.data));
+  },
+  async getAttachment(attachmentId: string) {
+    const prefix = CHAT_ATTACHMENT_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.get(`${prefix}/attachments/${attachmentId}/`);
+    return normalizeAttachment(unwrapData<unknown>(response.data));
   },
   async openViewOnceAttachment(attachmentId: string) {
     const response = await http.post(`/chat/attachments/${attachmentId}/view-once/open/`);
@@ -935,19 +985,19 @@ export const chatApi = {
     return url;
   },
   async editMessage(messageId: string, payload: Record<string, unknown>) {
-    const response = await http.patch(`/chat/messages/${messageId}/manage/`, payload);
+    const response = await http.patch(messageMutationPath(`/chat/messages/${messageId}/manage/`, `/messages/${messageId}/manage/`), payload);
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async deleteMessage(messageId: string) {
-    const response = await http.delete(`/chat/messages/${messageId}/manage/`);
+    const response = await http.delete(messageMutationPath(`/chat/messages/${messageId}/manage/`, `/messages/${messageId}/manage/`));
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async getMessage(messageId: string) {
-    const response = await http.get(`/chat/messages/${messageId}/`);
+    const response = await http.get(readPath(`/chat/messages/${messageId}/`, `/messages/${messageId}/`));
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async getMessageContext(messageId: string, signal?: AbortSignal): Promise<MessageContext> {
-    const response = await http.get(`/chat/messages/${messageId}/context/`, { signal });
+    const response = await http.get(readPath(`/chat/messages/${messageId}/context/`, `/messages/${messageId}/context/`), { signal });
     const payload = asRecord(unwrapData<unknown>(response.data));
     const results = Array.isArray(payload.results) ? payload.results.map(normalizeMessage).filter((message) => Boolean(message.id)) : [];
     return {
@@ -964,23 +1014,31 @@ export const chatApi = {
     return items.filter((item) => Boolean(item.id));
   },
   async markConversationDelivered(conversationId: string, payload: Record<string, unknown> = {}) {
-    const response = await http.post(`/chat/conversations/${conversationId}/mark-delivered/`, payload);
+    const prefix = CHAT_INTERACTION_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/conversations/${conversationId}/mark-delivered/`, payload);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async markConversationRead(conversationId: string, payload: Record<string, unknown> = {}) {
-    const response = await http.post(`/chat/conversations/${conversationId}/mark-read/`, payload);
+    const prefix = CHAT_INTERACTION_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/conversations/${conversationId}/mark-read/`, payload);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async retryMessage(messageId: string) {
-    const response = await http.post(`/chat/messages/${messageId}/retry/`);
+    const response = await http.post(messageMutationPath(`/chat/messages/${messageId}/retry/`, `/messages/${messageId}/retry/`));
+    return normalizeMessage(unwrapData<unknown>(response.data));
+  },
+  async restoreMessage(messageId: string) {
+    const response = await http.post(messageMutationPath(`/chat/messages/${messageId}/restore/`, `/messages/${messageId}/restore/`));
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async reactToMessage(messageId: string, emoji: string) {
-    const response = await http.post(`/chat/messages/${messageId}/reactions/`, { emoji }, { timeout: 12000 });
+    const prefix = CHAT_INTERACTION_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/messages/${messageId}/reactions/`, { emoji }, { timeout: 12000 });
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async removeReaction(messageId: string, emoji: string) {
-    const response = await http.delete(`/chat/messages/${messageId}/reactions/`, { data: { emoji }, timeout: 12000 });
+    const prefix = CHAT_INTERACTION_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.delete(`${prefix}/messages/${messageId}/reactions/`, { data: { emoji }, timeout: 12000 });
     return normalizeMessage(unwrapData<unknown>(response.data));
   },
   async forwardMessage(messageId: string, conversationId: string) {
@@ -1063,7 +1121,7 @@ export const chatApi = {
     await http.delete(`/chat/statuses/${statusId}/`);
   },
   async listCalls(status?: string, signal?: AbortSignal) {
-    const callsBase = CHAT_COMMAND_BACKEND === "axum" ? `${CHAT_COMMAND_URL}/calls` : "/chat/calls";
+    const callsBase = CHAT_CALL_RUNTIME_BACKEND === "axum" ? `${CHAT_COMMAND_URL}/calls` : "/chat/calls";
     const items = await collectChatPages(`${callsBase}/recent/`, normalizeCall, {
       params: status ? { status } : undefined,
       signal,
@@ -1072,56 +1130,63 @@ export const chatApi = {
     return items.filter((item) => Boolean(item.id));
   },
   async startCall(conversationId: string, payload: { call_type: "voice" | "video"; metadata?: Record<string, unknown> }) {
-    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
     const response = await http.post(`${prefix}/conversations/${conversationId}/calls/start/`, payload);
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async getCall(callId: string) {
-    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
     const response = await http.get(`${prefix}/calls/${callId}/`);
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async acceptCall(callId: string) {
-    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
     const response = await http.post(`${prefix}/calls/${callId}/accept/`, {});
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async declineCall(callId: string, reason?: string) {
-    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
     const response = await http.post(`${prefix}/calls/${callId}/decline/`, reason ? { reason } : {});
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async endCall(callId: string, reason?: string) {
-    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
     const response = await http.post(`${prefix}/calls/${callId}/end/`, reason ? { reason } : {});
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async sendCallSignal(callId: string, signal_type: string, payload?: Record<string, unknown>) {
-    const response = await http.post(`/chat/calls/${callId}/signal/`, { signal_type, payload: payload ?? {} });
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/signal/`, { signal_type, payload: payload ?? {} });
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async updateCallMediaState(callId: string, payload: Record<string, unknown>) {
-    const response = await http.post(`/chat/calls/${callId}/media-state/`, payload);
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/media-state/`, payload);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async sendCallHeartbeat(callId: string, payload?: Record<string, unknown>) {
-    const response = await http.post(`/chat/calls/${callId}/heartbeat/`, payload ?? {});
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/heartbeat/`, payload ?? {});
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async getCallOrchestration(callId: string) {
-    const response = await http.get(`/chat/calls/${callId}/orchestration/`);
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.get(`${prefix}/calls/${callId}/orchestration/`);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async getCallDiagnostics(callId: string) {
-    const response = await http.get(`/chat/calls/${callId}/diagnostics/`);
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.get(`${prefix}/calls/${callId}/diagnostics/`);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async sendCallQualityReport(callId: string, payload: Record<string, unknown>) {
-    const response = await http.post(`/chat/calls/${callId}/quality-report/`, payload);
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/quality-report/`, payload);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async updateCallSpeakerState(callId: string, payload: Record<string, unknown>) {
-    const response = await http.post(`/chat/calls/${callId}/speaker-state/`, payload);
+    const prefix = CHAT_CALL_RUNTIME_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/speaker-state/`, payload);
     return unwrapObject<Record<string, unknown>>(response.data, {});
   },
   async getNotificationPreferences() {
@@ -1157,7 +1222,7 @@ export const chatApi = {
     kind: "all" | "image" | "video" | "audio" | "file" = "all",
     signal?: AbortSignal,
   ) {
-    const items = await collectChatPages(`/chat/conversations/${conversationId}/media/`, normalizeConversationMediaItem, {
+    const items = await collectChatPages(readPath(`/chat/conversations/${conversationId}/media/`, `/conversations/${conversationId}/media/`), normalizeConversationMediaItem, {
       params: { kind },
       signal,
       getKey: (item) => `${item.message_id}:${item.attachment?.id || ""}`,
@@ -1214,11 +1279,13 @@ export const chatApi = {
     return items.filter((item) => item.id);
   },
   async blockUser(userId: string, reason?: string) {
-    const response = await http.post("/chat/blocks/", { blocked_user_id: Number.isFinite(Number(userId)) ? Number(userId) : userId, reason: reason ?? "" });
+    const prefix = CHAT_CONVERSATION_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/blocks/`, { blocked_user_id: Number.isFinite(Number(userId)) ? Number(userId) : userId, reason: reason ?? "" });
     return normalizeUserBlock(unwrapData<unknown>(response.data));
   },
   async unblockUser(userId: string) {
-    await http.delete(`/chat/blocks/${userId}/`);
+    const prefix = CHAT_CONVERSATION_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    await http.delete(`${prefix}/blocks/${userId}/`);
   },
   async listDevices(signal?: AbortSignal) {
     const items = await collectChatPages("/chat/devices/", normalizeUserDevice, {

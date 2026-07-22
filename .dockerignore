@@ -32,6 +32,7 @@ yarn-error.log*
 secrets/
 backups/
 realtime/target/
+media-worker/target/
 
 logs/
 

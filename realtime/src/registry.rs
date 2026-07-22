@@ -6,6 +6,7 @@ use std::sync::{
 use dashmap::{DashMap, DashSet};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::sync::CancellationToken;
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::protocol::{AudienceKey, OutboundMessage, TextFrame};
@@ -17,6 +18,14 @@ pub struct ConnectionHandle {
     pub low_tx: mpsc::Sender<OutboundMessage>,
     pub cancellation: CancellationToken,
     pub subscriptions: Arc<DashSet<AudienceKey>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QueueSnapshot {
+    pub high_queued: usize,
+    pub high_capacity: usize,
+    pub low_queued: usize,
+    pub low_capacity: usize,
 }
 
 #[derive(Default)]
@@ -49,6 +58,27 @@ impl Registry {
 
     pub fn connection_count(&self) -> usize { self.connections.len() }
     pub fn audience_count(&self) -> usize { self.audiences.len() }
+
+    pub fn queue_snapshot(&self) -> QueueSnapshot {
+        let mut high_queued = 0usize;
+        let mut high_capacity = 0usize;
+        let mut low_queued = 0usize;
+        let mut low_capacity = 0usize;
+        for connection in self.connections.iter() {
+            let high_max = connection.high_tx.max_capacity();
+            let low_max = connection.low_tx.max_capacity();
+            high_capacity = high_capacity.saturating_add(high_max);
+            low_capacity = low_capacity.saturating_add(low_max);
+            high_queued = high_queued.saturating_add(high_max.saturating_sub(connection.high_tx.capacity()));
+            low_queued = low_queued.saturating_add(low_max.saturating_sub(connection.low_tx.capacity()));
+        }
+        QueueSnapshot {
+            high_queued,
+            high_capacity,
+            low_queued,
+            low_capacity,
+        }
+    }
 
     pub fn audience_snapshot(&self) -> Vec<AudienceKey> {
         self.audiences.iter().map(|entry| entry.key().clone()).collect()

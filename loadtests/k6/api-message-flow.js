@@ -47,7 +47,7 @@ export function sendMessage() {
   const clientTempId = `loadtest-${runId}-${exec.vu.idInTest}-${exec.scenario.iterationInTest}-${Date.now()}`;
   const started = Date.now();
   const response = http.post(
-    `${baseUrl}/api/v1/chat/conversations/${user.conversation_id}/messages/`,
+    `${baseUrl}/api/v1/chat-fast/conversations/${user.conversation_id}/messages/`,
     JSON.stringify({
       type: 'text',
       text: `Load test ${runId} ${clientTempId}`,

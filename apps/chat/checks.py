@@ -79,6 +79,38 @@ def enterprise_deploy_checks(app_configs, **kwargs):
     if not bool(getattr(settings, "REALTIME_AUTH_ENABLED", False)):
         issues.append(Error("REALTIME_AUTH_ENABLED must be enabled in production.", id="chat.E018"))
 
+    if bool(getattr(settings, "AXUM_DATA_PLANE_REQUIRED", False)):
+        expected_backends = {
+            "REALTIME_EPHEMERAL_BACKEND": "nats",
+            "REALTIME_PRESENCE_BACKEND": "local",
+            "REALTIME_OUTBOX_PUBLISHER": "axum",
+            "CHAT_READ_BACKEND": "sqlx",
+            "CHAT_COMMAND_BACKEND": "axum",
+            "CHAT_INTERACTION_BACKEND": "axum",
+            "CHAT_MESSAGE_MUTATION_BACKEND": "axum",
+            "CHAT_CALL_RUNTIME_BACKEND": "axum",
+            "CHAT_ATTACHMENT_BACKEND": "axum",
+            "CHAT_CONVERSATION_COMMAND_BACKEND": "axum",
+            "SUPPORT_DATA_BACKEND": "axum",
+            "MEDIA_PROCESSING_BACKEND": "rust",
+            "DATABASE_RUNTIME_ENDPOINT": "pgbouncer",
+        }
+        mismatches = [
+            f"{name}={getattr(settings, name, None)!r}"
+            for name, expected in expected_backends.items()
+            if str(getattr(settings, name, "") or "").strip().lower() != expected
+        ]
+        if mismatches:
+            issues.append(Error(
+                "The required Axum data plane is incomplete: " + ", ".join(mismatches),
+                id="chat.E030",
+            ))
+        if bool(getattr(settings, "MEDIA_WORKER_DJANGO_FALLBACK_ENABLED", True)):
+            issues.append(Error(
+                "MEDIA_WORKER_DJANGO_FALLBACK_ENABLED must be false when AXUM_DATA_PLANE_REQUIRED is enabled.",
+                id="chat.E031",
+            ))
+
     cache_backend = str(settings.CACHES.get("default", {}).get("BACKEND", "") or "")
     if cache_backend.endswith("LocMemCache"):
         issues.append(Error("CACHES['default'] must use a shared cache backend in production.", id="chat.E014"))

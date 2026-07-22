@@ -9,6 +9,31 @@ pub enum RealtimeBackend {
     Local,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutboxPublisherBackend {
+    Celery,
+    Axum,
+}
+
+impl OutboxPublisherBackend {
+    pub fn from_env() -> Result<Self> {
+        match value("REALTIME_OUTBOX_PUBLISHER", "celery").to_ascii_lowercase().as_str() {
+            "celery" | "worker" | "recovery" => Ok(Self::Celery),
+            "axum" | "direct" | "rust" => Ok(Self::Axum),
+            other => Err(anyhow!(
+                "REALTIME_OUTBOX_PUBLISHER={other} is invalid; expected celery or axum"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Celery => "celery",
+            Self::Axum => "axum",
+        }
+    }
+}
+
 impl RealtimeBackend {
     fn from_env(name: &str) -> Result<Self> {
         Self::from_env_with_default(name, "nats")
@@ -57,6 +82,190 @@ impl ChatCommandBackend {
     }
 }
 
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatInteractionBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl ChatInteractionBackend {
+    fn from_env() -> Result<Self> {
+        match value("CHAT_INTERACTION_BACKEND", "django")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!(
+                "CHAT_INTERACTION_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Axum => "axum",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatMessageMutationBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl ChatMessageMutationBackend {
+    fn from_env() -> Result<Self> {
+        match value("CHAT_MESSAGE_MUTATION_BACKEND", "django")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!(
+                "CHAT_MESSAGE_MUTATION_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Axum => "axum",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatCallRuntimeBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl ChatCallRuntimeBackend {
+    fn from_env() -> Result<Self> {
+        match value("CHAT_CALL_RUNTIME_BACKEND", "django")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!(
+                "CHAT_CALL_RUNTIME_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Axum => "axum",
+        }
+    }
+}
+
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatAttachmentBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl ChatAttachmentBackend {
+    fn from_env() -> Result<Self> {
+        match value("CHAT_ATTACHMENT_BACKEND", "django")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!(
+                "CHAT_ATTACHMENT_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Axum => "axum",
+        }
+    }
+}
+
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChatConversationCommandBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl ChatConversationCommandBackend {
+    fn from_env() -> Result<Self> {
+        match value("CHAT_CONVERSATION_COMMAND_BACKEND", "django")
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!(
+                "CHAT_CONVERSATION_COMMAND_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum"
+            )),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Axum => "axum",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SupportDataBackend {
+    Django,
+    SqlxShadow,
+    Axum,
+}
+
+impl SupportDataBackend {
+    fn from_env() -> Result<Self> {
+        match value("SUPPORT_DATA_BACKEND", "django").to_ascii_lowercase().as_str() {
+            "django" => Ok(Self::Django),
+            "sqlx_shadow" | "shadow" => Ok(Self::SqlxShadow),
+            "axum" | "sqlx" => Ok(Self::Axum),
+            other => Err(anyhow!("SUPPORT_DATA_BACKEND={other} is invalid; expected django, sqlx_shadow, or axum")),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Django => "django",
+            Self::SqlxShadow => "sqlx_shadow",
+            Self::Axum => "axum",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChatReadBackend {
     Django,
@@ -86,13 +295,46 @@ impl ChatReadBackend {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub durable_backend: RealtimeBackend,
+    pub outbox_publisher_backend: OutboxPublisherBackend,
     pub chat_command_backend: ChatCommandBackend,
+    pub chat_interaction_backend: ChatInteractionBackend,
+    pub chat_message_mutation_backend: ChatMessageMutationBackend,
+    pub chat_call_runtime_backend: ChatCallRuntimeBackend,
+    pub chat_attachment_backend: ChatAttachmentBackend,
+    pub chat_conversation_command_backend: ChatConversationCommandBackend,
+    pub support_data_backend: SupportDataBackend,
+    pub central_payments_enabled: bool,
     pub chat_command_jwt_issuer: String,
     pub chat_command_jwt_audience: String,
     pub chat_read_backend: ChatReadBackend,
+    pub media_token_signing_key: String,
+    pub media_token_issuer: String,
+    pub media_token_audience: String,
+    pub media_token_ttl_seconds: u64,
     pub sqlx_database_url: String,
+    pub sqlx_min_connections: u32,
     pub sqlx_max_connections: u32,
     pub sqlx_acquire_timeout: Duration,
+    pub sqlx_idle_timeout: Duration,
+    pub sqlx_max_lifetime: Duration,
+    pub http_read_concurrency: usize,
+    pub http_write_concurrency: usize,
+    pub http_request_timeout: Duration,
+    pub http_max_body_bytes: usize,
+    pub message_edit_window_seconds: i64,
+    pub call_reconnect_grace_seconds: i64,
+    pub call_speaker_level_threshold: i32,
+    pub call_grid_layout_threshold: i64,
+    pub call_stale_participant_seconds: i64,
+    pub call_signal_queue_capacity: usize,
+    pub call_signal_ttl: Duration,
+    pub support_signal_queue_capacity: usize,
+    pub support_signal_ttl: Duration,
+    pub support_calls_enabled: bool,
+    pub support_call_ring_timeout: Duration,
+    pub support_call_signal_max_bytes: usize,
+    pub support_widget_message_rate_per_minute: i64,
+    pub support_signal_rate_per_second: u32,
     pub ephemeral_backend: RealtimeBackend,
     pub presence_backend: RealtimeBackend,
     pub bind_addr: SocketAddr,
@@ -104,6 +346,9 @@ pub struct Config {
     pub nats_stream_name: String,
     pub nats_consumer_name: String,
     pub nats_subject_filter: String,
+    pub nats_durable_subject_prefix: String,
+    pub outbox_publish_timeout: Duration,
+    pub outbox_mark_attempts: usize,
     pub nats_ephemeral_subject: String,
     pub nats_node_id: String,
     pub connection_ownership_backend: RealtimeBackend,
@@ -165,13 +410,46 @@ impl Config {
 
         let config = Self {
             durable_backend: RealtimeBackend::from_env_with_default("REALTIME_DURABLE_BACKEND", "nats")?,
+            outbox_publisher_backend: OutboxPublisherBackend::from_env()?,
             chat_command_backend: ChatCommandBackend::from_env()?,
+            chat_interaction_backend: ChatInteractionBackend::from_env()?,
+            chat_message_mutation_backend: ChatMessageMutationBackend::from_env()?,
+            chat_call_runtime_backend: ChatCallRuntimeBackend::from_env()?,
+            chat_attachment_backend: ChatAttachmentBackend::from_env()?,
+            chat_conversation_command_backend: ChatConversationCommandBackend::from_env()?,
+            support_data_backend: SupportDataBackend::from_env()?,
+            central_payments_enabled: boolean("CENTRAL_PAYMENTS_ENABLED", true)?,
             chat_command_jwt_issuer: value("CHAT_COMMAND_JWT_ISSUER", &value("REALTIME_TOKEN_ISSUER", "crescentsphere-django")),
             chat_command_jwt_audience: value("CHAT_COMMAND_JWT_AUDIENCE", ""),
             chat_read_backend: ChatReadBackend::from_env()?,
+            media_token_signing_key: value("MEDIA_TOKEN_SHARED_SECRET", ""),
+            media_token_issuer: value("MEDIA_TOKEN_ISSUER", "crescentsphere-media"),
+            media_token_audience: value("MEDIA_TOKEN_AUDIENCE", "crescentsphere-private-media"),
+            media_token_ttl_seconds: number("MEDIA_TOKEN_TTL_SECONDS", 300u64)?.clamp(30, 3600),
             sqlx_database_url: value("SQLX_DATABASE_URL", "postgres://messenger_user:messenger_password@pgbouncer:6432/messenger_api"),
+            sqlx_min_connections: number("SQLX_MIN_CONNECTIONS", 1u32)?,
             sqlx_max_connections: number("SQLX_MAX_CONNECTIONS", 4u32)?,
-            sqlx_acquire_timeout: Duration::from_secs(number("SQLX_ACQUIRE_TIMEOUT_SECONDS", 3u64)?),
+            sqlx_acquire_timeout: Duration::from_millis(number("SQLX_ACQUIRE_TIMEOUT_MS", number("SQLX_ACQUIRE_TIMEOUT_SECONDS", 3u64)?.saturating_mul(1_000))?.clamp(100, 10_000)),
+            sqlx_idle_timeout: Duration::from_secs(number("SQLX_IDLE_TIMEOUT_SECONDS", 60u64)?.clamp(15, 600)),
+            sqlx_max_lifetime: Duration::from_secs(number("SQLX_MAX_LIFETIME_SECONDS", 900u64)?.clamp(60, 3_600)),
+            http_read_concurrency: number("REALTIME_HTTP_READ_CONCURRENCY", 24usize)?.clamp(1, 256),
+            http_write_concurrency: number("REALTIME_HTTP_WRITE_CONCURRENCY", 12usize)?.clamp(1, 128),
+            http_request_timeout: Duration::from_millis(number("REALTIME_HTTP_REQUEST_TIMEOUT_MS", 10_000u64)?.clamp(500, 60_000)),
+            http_max_body_bytes: number("REALTIME_HTTP_MAX_BODY_BYTES", 1_048_576usize)?.clamp(16_384, 8_388_608),
+            message_edit_window_seconds: number("MESSAGE_EDIT_WINDOW_SECONDS", 900i64)?.max(0),
+            call_reconnect_grace_seconds: number("CALL_RECONNECT_GRACE_SECONDS", 20i64)?.clamp(5, 120),
+            call_speaker_level_threshold: number("CALL_SPEAKER_LEVEL_THRESHOLD", 35i32)?.clamp(1, 100),
+            call_grid_layout_threshold: number("CALL_GRID_LAYOUT_THRESHOLD", 4i64)?.clamp(2, 16),
+            call_stale_participant_seconds: number("CALL_STALE_PARTICIPANT_SECONDS", 35i64)?.clamp(10, 300),
+            call_signal_queue_capacity: number("CALL_SIGNAL_QUEUE_CAPACITY", 256usize)?.clamp(16, 2048),
+            call_signal_ttl: Duration::from_secs(number("CALL_SIGNAL_QUEUE_TTL_SECONDS", 180u64)?.clamp(5, 600)),
+            support_signal_queue_capacity: number("SUPPORT_SIGNAL_QUEUE_CAPACITY", 256usize)?.clamp(16, 2048),
+            support_signal_ttl: Duration::from_secs(number("SUPPORT_SIGNAL_QUEUE_TTL_SECONDS", 180u64)?.clamp(5, 600)),
+            support_calls_enabled: boolean("SUPPORT_CALLS_ENABLED", false)?,
+            support_call_ring_timeout: Duration::from_secs(number("SUPPORT_CALL_RING_TIMEOUT_SECONDS", 45u64)?.clamp(15, 300)),
+            support_call_signal_max_bytes: number("SUPPORT_CALL_SIGNAL_MAX_BYTES", 131_072usize)?.clamp(16_384, 1_048_576),
+            support_widget_message_rate_per_minute: number("SUPPORT_WIDGET_MESSAGE_RATE_PER_MINUTE", 30i64)?.clamp(5, 300),
+            support_signal_rate_per_second: number("SUPPORT_SIGNAL_RATE_PER_SECOND", 30u32)?.clamp(5, 200),
             ephemeral_backend: RealtimeBackend::from_env_with_default("REALTIME_EPHEMERAL_BACKEND", "local")?,
             presence_backend: RealtimeBackend::from_env_with_default("REALTIME_PRESENCE_BACKEND", "legacy_redis")?,
             bind_addr: value("REALTIME_BIND", "0.0.0.0:9000")
@@ -185,6 +463,9 @@ impl Config {
             nats_stream_name: value("NATS_CHAT_STREAM", "CHAT_EVENTS"),
             nats_consumer_name: value("NATS_DURABLE_CONSUMER", "realtime-axum-v1"),
             nats_subject_filter: value("NATS_DURABLE_SUBJECT_FILTER", "event.chat.>"),
+            nats_durable_subject_prefix: value("NATS_DURABLE_SUBJECT_PREFIX", "event.chat"),
+            outbox_publish_timeout: Duration::from_millis(number("REALTIME_OUTBOX_PUBLISH_TIMEOUT_MS", 1500u64)?.clamp(250, 10_000)),
+            outbox_mark_attempts: number("REALTIME_OUTBOX_MARK_ATTEMPTS", 3usize)?.clamp(1, 5),
             nats_ephemeral_subject: value("NATS_EPHEMERAL_SUBJECT", "rt.ephemeral.v1"),
             nats_node_id: value("NATS_NODE_ID", "axum-01"),
             connection_ownership_backend: RealtimeBackend::from_env_with_default("REALTIME_CONNECTION_OWNERSHIP_BACKEND", "local")?,
@@ -266,8 +547,40 @@ impl Config {
         if self.sqlx_max_connections == 0 || self.sqlx_max_connections > 8 {
             return Err(anyhow!("SQLX_MAX_CONNECTIONS must be between 1 and 8 on this deployment"));
         }
-        if (self.chat_read_backend != ChatReadBackend::Django || self.chat_command_backend != ChatCommandBackend::Django) && !self.sqlx_database_url.starts_with("postgres") {
-            return Err(anyhow!("SQLX_DATABASE_URL must use PostgreSQL when SQLx reads are enabled"));
+        if self.sqlx_min_connections > self.sqlx_max_connections {
+            return Err(anyhow!("SQLX_MIN_CONNECTIONS cannot exceed SQLX_MAX_CONNECTIONS"));
+        }
+        if self.http_read_concurrency + self.http_write_concurrency > 384 {
+            return Err(anyhow!("combined realtime HTTP concurrency is too high for this deployment"));
+        }
+        if (self.chat_read_backend != ChatReadBackend::Django
+            || self.chat_command_backend != ChatCommandBackend::Django
+            || self.chat_interaction_backend != ChatInteractionBackend::Django
+            || self.chat_message_mutation_backend != ChatMessageMutationBackend::Django
+            || self.chat_call_runtime_backend != ChatCallRuntimeBackend::Django
+            || self.chat_attachment_backend != ChatAttachmentBackend::Django
+            || self.chat_conversation_command_backend != ChatConversationCommandBackend::Django
+            || self.support_data_backend != SupportDataBackend::Django
+            || self.outbox_publisher_backend == OutboxPublisherBackend::Axum)
+            && !self.sqlx_database_url.starts_with("postgres")
+        {
+            return Err(anyhow!(
+                "SQLX_DATABASE_URL must use PostgreSQL when SQLx chat paths or direct Axum outbox publishing are enabled"
+            ));
+        }
+        if self.chat_attachment_backend != ChatAttachmentBackend::Django {
+            if self.media_token_signing_key.len() < 32
+                || self.media_token_signing_key == "replace-with-at-least-32-random-characters"
+            {
+                return Err(anyhow!(
+                    "MEDIA_TOKEN_SHARED_SECRET must contain at least 32 random characters when Axum attachment paths are enabled"
+                ));
+            }
+            if self.media_token_issuer.trim().is_empty() || self.media_token_audience.trim().is_empty() {
+                return Err(anyhow!(
+                    "MEDIA_TOKEN_ISSUER and MEDIA_TOKEN_AUDIENCE are required when Axum attachment paths are enabled"
+                ));
+            }
         }
         if self.max_connections == 0
             || self.max_user_connections == 0
@@ -287,6 +600,8 @@ impl Config {
             || self.nats_max_deliver <= 0
             || self.nats_max_ack_pending <= 0
             || self.event_dedupe_capacity == 0
+            || self.outbox_publish_timeout.is_zero()
+            || self.outbox_mark_attempts == 0
             || self.ownership_announce_interval.is_zero()
             || self.ownership_lease_ttl.is_zero()
         {
@@ -307,15 +622,23 @@ impl Config {
                 || self.nats_stream_name.trim().is_empty()
                 || self.nats_consumer_name.trim().is_empty()
                 || self.nats_subject_filter.trim().is_empty()
+                || self.nats_durable_subject_prefix.trim().is_empty()
             {
                 return Err(anyhow!(
-                    "NATS_URL, NATS_USER, NATS_PASSWORD, NATS_CHAT_STREAM, NATS_DURABLE_CONSUMER and NATS_DURABLE_SUBJECT_FILTER are required when REALTIME_DURABLE_BACKEND=nats"
+                    "NATS_URL, NATS_USER, NATS_PASSWORD, NATS_CHAT_STREAM, NATS_DURABLE_CONSUMER, NATS_DURABLE_SUBJECT_FILTER and NATS_DURABLE_SUBJECT_PREFIX are required when REALTIME_DURABLE_BACKEND=nats"
                 ));
             }
         }
         if self.ephemeral_backend == RealtimeBackend::LegacyRedis {
             return Err(anyhow!(
                 "REALTIME_EPHEMERAL_BACKEND=legacy_redis is not supported; use local for one Axum node or nats for multiple nodes"
+            ));
+        }
+        if self.support_data_backend == SupportDataBackend::Axum
+            && self.ephemeral_backend != RealtimeBackend::Nats
+        {
+            return Err(anyhow!(
+                "REALTIME_EPHEMERAL_BACKEND must be nats when SUPPORT_DATA_BACKEND=axum so visitor/team call signaling works across Axum nodes"
             ));
         }
         if self.ephemeral_backend == RealtimeBackend::Nats

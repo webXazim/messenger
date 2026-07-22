@@ -1,7 +1,15 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  readonly VITE_CHAT_CONVERSATION_COMMAND_BACKEND?: string;
+  readonly VITE_SUPPORT_DATA_BACKEND?: string;
   readonly VITE_API_BASE_URL?: string;
+  readonly VITE_CHAT_COMMAND_BACKEND?: string;
+  readonly VITE_CHAT_INTERACTION_BACKEND?: string;
+  readonly VITE_CHAT_MESSAGE_MUTATION_BACKEND?: string;
+  readonly VITE_CHAT_CALL_RUNTIME_BACKEND?: string;
+  readonly VITE_CHAT_READ_BACKEND?: string;
+  readonly VITE_CHAT_ATTACHMENT_BACKEND?: string;
   readonly VITE_WS_BASE_URL?: string;
   readonly VITE_SUPPORT_WS_URL?: string;
   readonly VITE_AUTH_BASE_URL?: string;

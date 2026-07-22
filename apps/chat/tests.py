@@ -4,9 +4,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 import json
+import jwt
 from PIL import Image
 
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -2524,6 +2526,61 @@ class ChatApiTests(TestCase):
         self.assertEqual(token_response.status_code, 200)
         token = token_response.data["token"]
         download = self.client.get(reverse("attachment-download", kwargs={"attachment_id": attachment_id}), {"token": token})
+        self.assertEqual(download.status_code, 200)
+
+    @override_settings(
+        MEDIA_TOKEN_SHARED_SECRET="test-shared-media-secret-with-at-least-32-characters",
+        MEDIA_TOKEN_ISSUER="test-media-issuer",
+        MEDIA_TOKEN_AUDIENCE="test-media-audience",
+    )
+    def test_shared_media_token_uses_cross_service_jwt_claims(self):
+        good_file = SimpleUploadedFile("shared.txt", b"shared token", content_type="text/plain")
+        upload_response = self.client.post(reverse("upload-create"), {"file": good_file}, format="multipart")
+        conversation = self.create_direct_conversation()
+        message_response = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"attachment_ids": [str(upload_response.data["id"])]},
+            format="json",
+        )
+        attachment_id = message_response.data["attachments"][0]["id"]
+        token_response = self.client.post(reverse("attachment-media-token", kwargs={"resource_id": attachment_id}), format="json")
+        self.assertEqual(token_response.status_code, 200)
+        token = token_response.data["token"]
+        claims = jwt.decode(
+            token,
+            "test-shared-media-secret-with-at-least-32-characters",
+            algorithms=["HS256"],
+            issuer="test-media-issuer",
+            audience="test-media-audience",
+        )
+        self.assertEqual(claims["token_type"], "media_access")
+        self.assertEqual(claims["resource_type"], "attachment")
+        self.assertEqual(claims["resource_id"], str(attachment_id))
+        self.assertEqual(claims["sub"], str(self.user.id))
+        download = self.client.get(reverse("attachment-download", kwargs={"attachment_id": attachment_id}), {"token": token})
+        self.assertEqual(download.status_code, 200)
+
+    @override_settings(MEDIA_TOKEN_SHARED_SECRET="test-shared-media-secret-with-at-least-32-characters")
+    def test_shared_token_rollout_still_accepts_legacy_django_tokens(self):
+        good_file = SimpleUploadedFile("legacy.txt", b"legacy token", content_type="text/plain")
+        upload_response = self.client.post(reverse("upload-create"), {"file": good_file}, format="multipart")
+        conversation = self.create_direct_conversation()
+        message_response = self.client.post(
+            reverse("message-list-create", kwargs={"conversation_id": conversation["id"]}),
+            {"attachment_ids": [str(upload_response.data["id"])]},
+            format="json",
+        )
+        attachment_id = message_response.data["attachments"][0]["id"]
+        legacy_token = signing.dumps(
+            {
+                "resource_type": "attachment",
+                "resource_id": str(attachment_id),
+                "user_id": str(self.user.id),
+                "purpose": "standard",
+            },
+            salt="chat-media-access",
+        )
+        download = self.client.get(reverse("attachment-download", kwargs={"attachment_id": attachment_id}), {"token": legacy_token})
         self.assertEqual(download.status_code, 200)
 
     def test_view_once_media_grants_exactly_one_recipient_session(self):

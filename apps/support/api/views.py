@@ -1113,6 +1113,8 @@ class SupportWidgetConfigView(APIView):
             "knowledge_enabled": bool(knowledge_settings.enabled and knowledge_settings.show_in_widget),
             "knowledge_suggestions_enabled": bool(knowledge_settings.suggestions_enabled),
             "visitor_deletion_enabled": bool(privacy_settings.allow_visitor_deletion_requests),
+            "data_plane_backend": "axum" if getattr(settings, "SUPPORT_DATA_BACKEND", "django") == "axum" else "django",
+            "data_plane_base_url": "/api/v1/support-fast/widget/" + str(website.site_key) if getattr(settings, "SUPPORT_DATA_BACKEND", "django") == "axum" else "/api/v1/support/widget/" + str(website.site_key),
         }).data
         return public_widget_response(payload)
 

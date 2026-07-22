@@ -17,12 +17,110 @@ production and Docker with the Compose plugin.
 - SMTP credentials
 - A Cloudflare Realtime TURN key and API token
 
+## Final production efficiency profile
+
+The high-frequency Messenger and Support Chat data planes now run in Axum/SQLx, with direct JetStream publishing and a separate Rust media worker. Activate the complete bounded 2 GB VPS profile with:
+
+```bash
+./scripts/stack-profile.sh final
+```
+
+See `docs/FINAL_EFFICIENCY_HARDENING.md` for ownership boundaries, overload behavior, monitoring, and the required capacity/overload/soak tests.
+
 ## Django efficiency profile
 
 Axum owns long-lived realtime connections. Django is configured as a small
-Granian ASGI HTTP service, fixed-query Support Inbox
-serialization, batched Redis presence reads, asynchronous Celery work, and a
-partial live-message index. See `docs/DJANGO_EFFICIENCY.md`.
+Granian ASGI HTTP service for the control plane, asynchronous Celery work, and
+small compatibility endpoints. The final profile keeps realtime presence inside
+Axum rather than using Django or Redis as the presence transport. See `docs/DJANGO_EFFICIENCY.md`.
+
+## SQLx chat rollout
+
+The high-frequency chat read plane, receipt/reaction interaction plane, and
+message-mutation plane can be enabled independently. Keep Django selected until each Axum path has been
+verified against production-like data:
+
+```env
+CHAT_READ_BACKEND=django
+CHAT_COMMAND_BACKEND=django
+CHAT_INTERACTION_BACKEND=django
+CHAT_MESSAGE_MUTATION_BACKEND=django
+CHAT_CALL_RUNTIME_BACKEND=django
+CHAT_ATTACHMENT_BACKEND=django
+CHAT_CONVERSATION_COMMAND_BACKEND=django
+VITE_CHAT_READ_BACKEND=django
+VITE_CHAT_COMMAND_BACKEND=django
+VITE_CHAT_INTERACTION_BACKEND=django
+VITE_CHAT_MESSAGE_MUTATION_BACKEND=django
+VITE_CHAT_CALL_RUNTIME_BACKEND=django
+VITE_CHAT_ATTACHMENT_BACKEND=django
+VITE_CHAT_CONVERSATION_COMMAND_BACKEND=django
+```
+
+Expose authenticated SQLx receipt and reaction routes without changing frontend
+traffic:
+
+```bash
+./scripts/stack-profile.sh interactions-shadow
+./scripts/check-axum-interactions.sh
+```
+
+After verifying delivered/read cursors, reaction replacement/removal, block
+enforcement, audit rows, and outbox rows, move only receipts and reactions:
+
+```bash
+./scripts/stack-profile.sh interactions
+```
+
+This profile intentionally leaves `CHAT_COMMAND_BACKEND=django`; message creation,
+message management, and call commands therefore remain on Django. Restore the
+automatically created `.env` snapshot to roll back.
+
+Apply the sender-restore migration before exposing the message-mutation routes:
+
+```bash
+docker compose exec -T web python manage.py migrate --noinput
+./scripts/check-axum-message-mutations.sh
+```
+
+Expose Axum edit, delete, restore, and retry endpoints while the frontend remains
+on Django:
+
+```bash
+./scripts/stack-profile.sh mutations-shadow
+```
+
+After verifying edit policy, sender-only restore, failed-message retry, audit rows,
+and outbox rows, move only message mutations:
+
+```bash
+./scripts/stack-profile.sh mutations
+```
+
+`CHAT_MESSAGE_MUTATION_BACKEND` is independent from message creation, receipts,
+reactions, reads, and call runtime commands.
+
+Approved attachments have a separate staged selector. Configure a random shared
+media-token secret, then expose the SQLx routes without moving frontend traffic:
+
+```bash
+./scripts/check-axum-attachments.sh
+./scripts/stack-profile.sh attachments-shadow
+```
+
+After verifying clean-upload attachment, metadata authorization, short-lived
+media tokens, encrypted attachments, replies, voice metadata, and transcripts,
+cut over only approved attachments:
+
+```bash
+./scripts/stack-profile.sh attachments
+```
+
+Rollback only this phase with `./scripts/stack-profile.sh attachments-rollback`.
+The profile applies the additive chat data-plane job migration before exposing
+Axum. Upload authorization, antivirus, object storage, media processing,
+private-file serving, and view-once consumption remain in Django/Celery. See
+`docs/AXUM_APPROVED_ATTACHMENTS.md`.
 
 ## Local development
 
@@ -432,3 +530,39 @@ The release includes authenticated k6 WebSocket/API scenarios, VPS-side resource
 ## Support Release 11 — Final production handoff
 
 ## Release 15
+
+## Axum call runtime rollout
+
+High-frequency call lifecycle and runtime operations can now run through Axum/SQLx independently of general message commands. Browser WebRTC and Cloudflare TURN remain responsible for media transport; Axum coordinates state and signaling only.
+
+```bash
+./scripts/check-axum-call-runtime.sh
+./scripts/stack-profile.sh calls-shadow
+# Verify call start/accept/end, heartbeat, media state, quality, speaker and HTTP fallback.
+./scripts/stack-profile.sh calls
+```
+
+See `docs/AXUM_CALL_RUNTIME.md` for ownership boundaries, environment selectors and rollback instructions.
+
+## Axum Support Chat data plane
+
+High-frequency Support Chat inbox reads, visitor/agent messages, receipts, assignment routing, and call coordination can run through Axum/SQLx while Django retains settings, billing, uploads, knowledge, workflows, and administration.
+
+```bash
+./scripts/check-axum-support-data.sh
+./scripts/stack-profile.sh support-shadow
+./scripts/stack-profile.sh support
+```
+
+See `docs/AXUM_SUPPORT_DATA_PLANE.md` for migration, rollout, rollback, and ownership boundaries.
+
+## Axum hot-path consolidation
+
+Normal Messenger sends now use one SQLx transaction for text, replies, entities, E2EE, approved attachments, voice metadata, transcripts, audit, outbox, and durable Django-owned follow-up jobs. Automatic Django retry has been removed from the message path and from routine conversation cleanup operations.
+
+```bash
+./scripts/check-axum-hot-paths.sh
+./scripts/stack-profile.sh hot-paths
+```
+
+See `docs/AXUM_HOT_PATH_CONSOLIDATION.md` for migration, staged cutover, centralized billing boundary, monitoring, and rollback guidance.

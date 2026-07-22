@@ -83,3 +83,5 @@ frontend/.npm-cache/
 .npm/
 .tmp-*
 _codex_status.sqlite3
+
+media-worker/target/

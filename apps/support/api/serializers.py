@@ -414,6 +414,8 @@ class PublicWidgetConfigSerializer(serializers.Serializer):
     knowledge_enabled = serializers.BooleanField()
     knowledge_suggestions_enabled = serializers.BooleanField()
     visitor_deletion_enabled = serializers.BooleanField()
+    data_plane_backend = serializers.ChoiceField(choices=("django", "axum"))
+    data_plane_base_url = serializers.CharField()
 
 
 class SupportWidgetSessionCreateSerializer(serializers.Serializer):

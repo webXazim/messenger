@@ -751,7 +751,7 @@ export function ConversationPage() {
         return;
       }
 
-      if (payload.event === "message.created" || payload.event === "message.updated") {
+      if (["message.created", "message.updated", "message.restored", "message.retried"].includes(payload.event)) {
         const normalized = normalizeMessage(data);
         queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => {
           const next = upsertMessagePages(current, normalized);
@@ -1319,6 +1319,28 @@ export function ConversationPage() {
       const reason = getE2EEErrorMessage(error, "This message could not be retried.");
       setLocalMessageFailure(message, reason);
       setMessageActionError(message.id, reason);
+    } finally {
+      setMessagePending(message.id, false);
+    }
+  };
+
+  const handleRestore = async (message: Message) => {
+    if (messageActionPending[message.id]) return;
+    setMessageActionError(message.id, null);
+    setMessagePending(message.id, true);
+    try {
+      const restored = await chatApi.restoreMessage(message.id);
+      if (restored.encryption?.ciphertext) {
+        decryptionCiphertextRef.current[restored.id] = restored.encryption.ciphertext;
+      }
+      queryClient.setQueryData<InfiniteData<MessagePage>>(
+        ["messages", conversationId],
+        (current) => upsertMessagePages(current, restored, { insertWhenMissing: false }),
+      );
+      setTimelineNotice({ tone: "success", message: "Message restored." });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    } catch (error) {
+      setMessageActionError(message.id, getErrorMessage(error, "This message could not be restored."));
     } finally {
       setMessagePending(message.id, false);
     }
@@ -2021,6 +2043,7 @@ export function ConversationPage() {
                     setConfirmationError(null);
                     setConfirmation({ kind: "delete-message", message: target });
                   }}
+                  onRestore={handleRestore}
                   onRetry={handleRetry}
                   onReport={(target) => {
                     setConfirmationError(null);

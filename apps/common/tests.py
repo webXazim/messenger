@@ -11,7 +11,7 @@ from apps.common.realtime import (
     support_website_audience,
     user_audience,
 )
-from apps.common.tasks import publish_realtime_outbox_events
+from apps.common.tasks import publish_realtime_outbox_events, schedule_realtime_outbox_publish
 
 
 class RealtimeEnvelopeTests(TestCase):
@@ -46,6 +46,21 @@ class RealtimePublisherTests(TestCase):
         self.assertEqual(row.delivery_target, "nats_jetstream")
         self.assertEqual(row.audiences, [{"kind": "conversation", "id": "conversation-1"}])
 
+
+    @override_settings(REALTIME_OUTBOX_ENABLED=True, REALTIME_OUTBOX_PUBLISHER="axum")
+    @patch("apps.common.tasks.schedule_realtime_outbox_publish", return_value=True)
+    def test_axum_primary_records_row_without_request_side_celery_wakeup(self, schedule):
+        event = publish_realtime_event(
+            event_name="message.created",
+            data={"message_id": "message-direct"},
+            audiences=[conversation_audience("conversation-1")],
+            defer_until_commit=False,
+        )
+
+        schedule.assert_not_called()
+        row = RealtimeOutboxEvent.objects.get(event_id=event["event_id"])
+        self.assertEqual(row.status, RealtimeOutboxEvent.Status.PENDING)
+
     @patch("apps.common.tasks.schedule_realtime_outbox_publish", return_value=True)
     def test_disposable_event_skips_database_and_worker_wakeup(self, schedule):
         event = publish_realtime_event(
@@ -61,6 +76,11 @@ class RealtimePublisherTests(TestCase):
 
 
 class RealtimeOutboxTaskTests(TestCase):
+
+    @override_settings(REALTIME_OUTBOX_PUBLISHER="axum")
+    def test_request_side_wakeup_is_disabled_for_axum_primary(self):
+        self.assertFalse(schedule_realtime_outbox_publish())
+
     @override_settings(REALTIME_OUTBOX_BATCH_SIZE=10)
     @patch("apps.common.tasks.schedule_realtime_outbox_publish", return_value=False)
     @patch("apps.common.tasks.publish_rows_sync")
@@ -83,6 +103,34 @@ class RealtimeOutboxTaskTests(TestCase):
         self.assertEqual(row.status, RealtimeOutboxEvent.Status.PUBLISHED)
         self.assertEqual(row.published_transport, "nats_jetstream")
         self.assertEqual(row.stream_entry_id, "2")
+
+    @override_settings(REALTIME_OUTBOX_BATCH_SIZE=10, REALTIME_OUTBOX_PUBLISHER="axum")
+    @patch("apps.common.tasks.publish_rows_sync")
+    def test_recovery_cannot_downgrade_row_published_by_axum(self, publish):
+        row = RealtimeOutboxEvent.objects.create(
+            event_name="message.created",
+            payload={"event": "message.created"},
+            audiences=[{"kind": "conversation", "id": "conversation-1"}],
+            delivery_target="nats_jetstream",
+        )
+
+        def publish_after_axum_wins(claimed_rows):
+            RealtimeOutboxEvent.objects.filter(pk=claimed_rows[0].pk).update(
+                status=RealtimeOutboxEvent.Status.PUBLISHED,
+                published_transport="nats_jetstream_axum",
+                stream_entry_id="41",
+                last_error="",
+            )
+            return []
+
+        publish.side_effect = publish_after_axum_wins
+        result = publish_realtime_outbox_events.run()
+
+        row.refresh_from_db()
+        self.assertEqual(result, {"published": 0, "failed": 0, "disabled": 0})
+        self.assertEqual(row.status, RealtimeOutboxEvent.Status.PUBLISHED)
+        self.assertEqual(row.published_transport, "nats_jetstream_axum")
+        self.assertEqual(row.stream_entry_id, "41")
 
 
 class QueryMetricsMiddlewareTests(TestCase):

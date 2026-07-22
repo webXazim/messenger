@@ -244,7 +244,7 @@ def pgbouncer_snapshot() -> dict:
 def sample(deployment: dict) -> dict:
     compose = compose_base()
     containers = {service: container_snapshot(service) for service in (
-        "postgres", "pgbouncer", "redis", "nats", "web", "worker", "beat", "realtime", "frontend", "nginx"
+        "postgres", "pgbouncer", "redis", "nats", "web", "worker", "beat", "realtime", "media-worker", "frontend", "nginx"
     )}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),

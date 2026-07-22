@@ -80,7 +80,7 @@ assert.ok(supportInbox.includes("ms-conversation-view"), "Support inbox does not
 assert.ok(supportInbox.includes("ChatHeader"), "Support inbox does not use the Messenger chat header.");
 assert.ok(supportInbox.includes("MessengerMessageBubble"), "Support inbox does not use Messenger message bubbles.");
 assert.ok(supportInbox.includes("MessageComposer"), "Support inbox does not use the Messenger composer.");
-assert.ok(widgetLoader.includes("/conversation/messages/"), "Widget conversation messaging endpoint is missing.");
+assert.ok(widgetLoader.includes("/conversation/messages/") || widgetLoader.includes('dataSessionPath("/messages/")'), "Widget conversation messaging endpoint is missing.");
 assert.ok(widgetLoader.includes("cs-panel"), "Functional public widget panel is missing.");
 assert.ok(css.includes(".ms-support-conversation-view.has-selection"), "Mobile queue-to-conversation switching is missing.");
 
@@ -171,18 +171,26 @@ assert.ok(supportCall.includes("getCallTurnCredentials"), "Support calls do not 
 assert.ok(supportCall.includes("RTCPeerConnection"), "Support WebRTC orchestration is missing.");
 assert.ok(supportCall.includes("playsInline"), "Responsive Support inline video playback is missing.");
 assert.ok(supportCallSettings.includes("Maximum call duration"), "Owner Support call limits are missing.");
-assert.ok(api.includes("/support/calls/"), "Support call APIs are missing.");
-assert.ok(api.includes("/support/calls/active/"), "Global Support call recovery is missing.");
+assert.ok(api.includes("/support/calls/") || api.includes("supportDataPath(`/conversations/${conversationId}/calls/`)"), "Support call APIs are missing.");
+assert.ok(api.includes("/support/calls/active/") || api.includes('supportDataPath("/calls/active/")'), "Global Support call recovery is missing.");
 assert.ok(widgetLoader.includes("function renderCall"), "Widget incoming-call experience is missing.");
 assert.ok(widgetLoader.includes("RTCPeerConnection"), "Widget WebRTC guest calling is missing.");
 assert.ok(widgetLoader.includes("/calls/turn-credentials/"), "Widget TURN credential retrieval is missing.");
 assert.ok(widgetLoader.includes("function acquireCallMedia"), "Widget calls must acquire browser media before ringing support.");
-assert.ok(
-  widgetLoader.indexOf("acquireCallMedia(callType)") < widgetLoader.indexOf('request(sessionPath("/calls/")'),
-  "Visitor calls must obtain camera or microphone access before creating a ringing call.",
+const visitorCallCreateIndex = Math.max(
+  widgetLoader.indexOf('request(sessionPath("/calls/")'),
+  widgetLoader.indexOf('dataRequest(sessionPath("/calls/")'),
 );
 assert.ok(
-  widgetLoader.indexOf("acquireCallMedia(incomingCall.call_type)") < widgetLoader.indexOf('request(callPath(incomingCall.id, "/accept/")'),
+  visitorCallCreateIndex >= 0 && widgetLoader.indexOf("acquireCallMedia(callType)") < visitorCallCreateIndex,
+  "Visitor calls must obtain camera or microphone access before creating a ringing call.",
+);
+const visitorCallAcceptIndex = Math.max(
+  widgetLoader.indexOf('request(callPath(incomingCall.id, "/accept/")'),
+  widgetLoader.indexOf('dataRequest(callPath(incomingCall.id, "/accept/")'),
+);
+assert.ok(
+  visitorCallAcceptIndex >= 0 && widgetLoader.indexOf("acquireCallMedia(incomingCall.call_type)") < visitorCallAcceptIndex,
   "Incoming calls must obtain camera or microphone access before being accepted.",
 );
 assert.ok(widgetLoader.includes("lastReceiptAckStatus"), "Widget receipt acknowledgement deduplication is missing.");

@@ -52,6 +52,30 @@ app.conf.beat_schedule = {
         "task": "apps.support.tasks.scan_support_service_operations",
         "schedule": crontab(minute="*"),
     },
+    "process-chat-data-plane-jobs": {
+        "task": "apps.chat.tasks.process_chat_data_plane_jobs",
+        "schedule": 5.0,
+    },
+    "cleanup-chat-data-plane-jobs-daily": {
+        "task": "apps.chat.tasks.cleanup_chat_data_plane_jobs",
+        "schedule": crontab(minute=20, hour=4),
+    },
+    "recover-missing-rust-media-jobs-every-minute": {
+        "task": "apps.chat.tasks.enqueue_missing_media_processing_jobs",
+        "schedule": 60.0,
+    },
+    "optional-django-media-worker-fallback-every-five-minutes": {
+        "task": "apps.chat.tasks.recover_media_processing_with_django",
+        "schedule": 300.0,
+    },
+    "process-support-data-plane-jobs": {
+        "task": "apps.support.tasks.process_support_data_plane_jobs",
+        "schedule": 10.0,
+    },
+    "cleanup-support-data-plane-jobs-daily": {
+        "task": "apps.support.tasks.cleanup_support_data_plane_jobs",
+        "schedule": crontab(minute=25, hour=4),
+    },
     "retry-pending-support-webhooks-every-minute": {
         "task": "apps.support.tasks.retry_pending_support_webhooks",
         "schedule": crontab(minute="*"),

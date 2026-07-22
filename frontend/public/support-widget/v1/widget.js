@@ -10,6 +10,7 @@
   var scriptUrl;
   try { scriptUrl = new URL(script.src, window.location.href); } catch (_) { return; }
   var apiBase = scriptUrl.origin + "/api/v1/support/widget/" + encodeURIComponent(siteKey);
+  var dataApiBase = apiBase;
   var wsProtocol = scriptUrl.protocol === "https:" ? "wss:" : "ws:";
   var wsBase = wsProtocol + "//" + scriptUrl.host + "/ws";
   var storageKey = "crescentsupport.session." + siteKey;
@@ -17,7 +18,7 @@
   var host = null;
   var shadow = null;
 
-  function request(path, options) {
+  function requestAt(base, path, options) {
     var init = Object.assign({}, options || {});
     var timeoutMs = Math.max(1000, Number(init.timeoutMs || 12000));
     delete init.timeoutMs;
@@ -26,7 +27,7 @@
     var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timeout = controller ? window.setTimeout(function () { controller.abort(); }, timeoutMs) : 0;
     if (controller) init.signal = controller.signal;
-    return fetch(apiBase + path, Object.assign({}, init, { mode: "cors", credentials: "omit", cache: "no-store", headers: headers }))
+    return fetch(base + path, Object.assign({}, init, { mode: "cors", credentials: "omit", cache: "no-store", headers: headers }))
       .then(function (response) {
         if (response.status === 204) return {};
         return response.json().catch(function () { return {}; }).then(function (payload) {
@@ -55,12 +56,15 @@
       });
   }
 
+  function request(path, options) { return requestAt(apiBase, path, options); }
+  function dataRequest(path, options) { return requestAt(dataApiBase, path, options); }
+
   function wait(milliseconds) {
     return new Promise(function (resolve) { window.setTimeout(resolve, milliseconds); });
   }
 
   function sendMessageRequest(payload, attempt) {
-    return request(sessionPath("/conversation/messages/"), {
+    return dataRequest(dataSessionPath("/messages/"), {
       method: "POST",
       body: JSON.stringify(payload),
       timeoutMs: 10000
@@ -179,6 +183,11 @@
     return "/sessions/" + encodeURIComponent(state.session.id) + (suffix || "");
   }
 
+  function dataSessionPath(suffix) {
+    if (!state.session) throw new Error("No active Support Chat visitor session.");
+    return "/sessions/" + encodeURIComponent(state.session.id) + (suffix || "");
+  }
+
   function resumeSession() {
     var saved = savedSession();
     if (!saved) return Promise.resolve(null);
@@ -190,7 +199,7 @@
 
   function loadMessages() {
     if (!state.session) return Promise.resolve([]);
-    return request(sessionPath("/conversation/messages/"), { method: "GET" }).then(function (payload) {
+    return dataRequest(dataSessionPath("/messages/"), { method: "GET" }).then(function (payload) {
       var nextMessages = Array.isArray(payload.messages) ? payload.messages : [];
       var authoritativeTempIds = {};
       nextMessages.forEach(function (message) {
@@ -236,8 +245,8 @@
     var rank = { pending: 0, sent: 1, delivered: 2, read: 3 };
     if ((rank[currentStatus] || 0) >= rank[targetStatus]) return;
     if (state.lastReceiptAckId === String(message.id) && (rank[state.lastReceiptAckStatus] || 0) >= rank[targetStatus]) return;
-    var endpoint = targetStatus === "read" ? "/conversation/read/" : "/conversation/delivered/";
-    request(sessionPath(endpoint), { method: "POST", body: JSON.stringify({ message_id: message.id }) })
+    var endpoint = targetStatus === "read" ? "/read/" : "/delivered/";
+    dataRequest(dataSessionPath(endpoint), { method: "POST", body: JSON.stringify({ message_id: message.id }) })
       .then(function () {
         state.lastReceiptAckId = String(message.id);
         state.lastReceiptAckStatus = targetStatus;
@@ -581,12 +590,12 @@
   }
 
   function callPath(callId, suffix) {
-    return sessionPath("/calls/" + encodeURIComponent(callId) + (suffix || "/"));
+    return dataSessionPath("/calls/" + encodeURIComponent(callId) + (suffix || "/"));
   }
 
   function sendCallSignal(type, payload) {
     if (!state.call) return Promise.reject(new Error("No active call."));
-    return request(callPath(state.call.id, "/signals/"), { method: "POST", body: JSON.stringify({ signal_type: type, payload: payload || {} }) });
+    return dataRequest(callPath(state.call.id, "/signals/"), { method: "POST", body: JSON.stringify({ signal_type: type, payload: payload || {} }) });
   }
 
   function processCallSignal(signal) {
@@ -619,7 +628,7 @@
 
   function pollCallSignals() {
     if (state.socketState === "open" || !state.call || !state.callPeer || callTerminal(state.call)) return;
-    request(callPath(state.call.id, "/signals/"), { method: "GET" }).then(function (payload) {
+    dataRequest(callPath(state.call.id, "/signals/"), { method: "GET" }).then(function (payload) {
       (payload.signals || []).forEach(function (signal) { processCallSignal(signal).catch(function () {}); });
     }).catch(function () {});
   }
@@ -694,7 +703,7 @@
 
   function loadActiveCall() {
     if (!state.session || !state.config || !state.config.calls_enabled) return Promise.resolve(null);
-    return request(sessionPath("/calls/active/"), { method: "GET" }).then(function (payload) {
+    return dataRequest(sessionPath("/calls/active/"), { method: "GET" }).then(function (payload) {
       var next = payload.call || null;
       if (!next) {
         if (state.call && callTerminal(state.call)) cleanupCall(true);
@@ -716,7 +725,7 @@
     render();
     acquireCallMedia(incomingCall.call_type).then(function (stream) {
       state.callLocalStream = stream;
-      return request(callPath(incomingCall.id, "/accept/"), { method: "POST" });
+      return dataRequest(callPath(incomingCall.id, "/accept/"), { method: "POST" });
     }).then(function (payload) {
       state.call = payload;
       state.callStarting = false;
@@ -725,7 +734,7 @@
       state.callStarting = false;
       state.error = "The call could not be accepted. " + (error.message || "Please try again.");
       var activeCallId = state.call && state.call.id;
-      var finish = activeCallId ? request(callPath(activeCallId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {}) : Promise.resolve();
+      var finish = activeCallId ? dataRequest(callPath(activeCallId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {}) : Promise.resolve();
       finish.then(function () { cleanupCall(true); render(); });
     });
   }
@@ -738,7 +747,7 @@
     render();
     acquireCallMedia(callType).then(function (stream) {
       state.callLocalStream = stream;
-      return request(sessionPath("/calls/"), {
+      return dataRequest(sessionPath("/calls/"), {
         method: "POST",
         body: JSON.stringify({ call_type: callType }),
       });
@@ -753,7 +762,7 @@
       state.callStarting = false;
       state.error = "The " + callType + " call could not be started. " + (error.message || "Please try again.");
       var cleanup = createdCallId
-        ? request(callPath(createdCallId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {})
+        ? dataRequest(callPath(createdCallId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "media_unavailable" }) }).catch(function () {})
         : Promise.resolve();
       cleanup.then(function () { cleanupCall(true); render(); });
     });
@@ -761,14 +770,14 @@
 
   function declineIncomingCall() {
     if (!state.call) return;
-    request(callPath(state.call.id, "/decline/"), { method: "POST", body: JSON.stringify({ reason: "declined" }) }).catch(function () {}).then(function () { cleanupCall(true); render(); });
+    dataRequest(callPath(state.call.id, "/decline/"), { method: "POST", body: JSON.stringify({ reason: "declined" }) }).catch(function () {}).then(function () { cleanupCall(true); render(); });
   }
 
   function endVisitorCall() {
     if (!state.call) return;
     var callId = state.call.id;
     sendCallSignal("hangup", { reason: "ended" }).catch(function () {});
-    request(callPath(callId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "ended" }) }).catch(function () {}).then(function () { cleanupCall(true); render(); });
+    dataRequest(callPath(callId, "/end/"), { method: "POST", body: JSON.stringify({ reason: "ended" }) }).catch(function () {}).then(function () { cleanupCall(true); render(); });
   }
 
   function renderCall(body) {
@@ -800,9 +809,9 @@
       var remoteAudio = node("audio", "cs-call-remote"); remoteAudio.autoplay = true; stage.appendChild(remoteAudio);
     }
     var controls = node("div", "cs-call-controls");
-    var mute = node("button", "", "Mute"); mute.type = "button"; mute.onclick = function () { var track = state.callLocalStream && state.callLocalStream.getAudioTracks()[0]; if (track) { track.enabled = !track.enabled; mute.textContent = track.enabled ? "Mute" : "Unmute"; request(callPath(state.call.id, "/media-state/"), { method: "PATCH", body: JSON.stringify({ audio_enabled: track.enabled }) }).catch(function () {}); } };
+    var mute = node("button", "", "Mute"); mute.type = "button"; mute.onclick = function () { var track = state.callLocalStream && state.callLocalStream.getAudioTracks()[0]; if (track) { track.enabled = !track.enabled; mute.textContent = track.enabled ? "Mute" : "Unmute"; dataRequest(callPath(state.call.id, "/media-state/"), { method: "PATCH", body: JSON.stringify({ audio_enabled: track.enabled }) }).catch(function () {}); } };
     controls.appendChild(mute);
-    if (state.call.call_type === "video") { var camera = node("button", "", "Camera off"); camera.type = "button"; camera.onclick = function () { var track = state.callLocalStream && state.callLocalStream.getVideoTracks()[0]; if (track) { track.enabled = !track.enabled; camera.textContent = track.enabled ? "Camera off" : "Camera on"; request(callPath(state.call.id, "/media-state/"), { method: "PATCH", body: JSON.stringify({ video_enabled: track.enabled }) }).catch(function () {}); } }; controls.appendChild(camera); }
+    if (state.call.call_type === "video") { var camera = node("button", "", "Camera off"); camera.type = "button"; camera.onclick = function () { var track = state.callLocalStream && state.callLocalStream.getVideoTracks()[0]; if (track) { track.enabled = !track.enabled; camera.textContent = track.enabled ? "Camera off" : "Camera on"; dataRequest(callPath(state.call.id, "/media-state/"), { method: "PATCH", body: JSON.stringify({ video_enabled: track.enabled }) }).catch(function () {}); } }; controls.appendChild(camera); }
     var end = node("button", "cs-call-end", "End"); end.type = "button"; end.onclick = endVisitorCall; controls.appendChild(end); stage.appendChild(controls); body.appendChild(stage); window.requestAnimationFrame(bindCallStreams); return true;
   }
 
@@ -884,8 +893,8 @@
           var senderKind = payload.data && payload.data.sender ? payload.data.sender.kind : "";
           var incomingMessageId = payload.data ? (payload.data.message_id || payload.data.id || "") : "";
           if (senderKind !== "visitor" && incomingMessageId) {
-            var receiptEndpoint = state.open && document.visibilityState === "visible" ? "/conversation/read/" : "/conversation/delivered/";
-            request(sessionPath(receiptEndpoint), { method: "POST", body: JSON.stringify({ message_id: incomingMessageId }) }).catch(function () {});
+            var receiptEndpoint = state.open && document.visibilityState === "visible" ? "/read/" : "/delivered/";
+            dataRequest(dataSessionPath(receiptEndpoint), { method: "POST", body: JSON.stringify({ message_id: incomingMessageId }) }).catch(function () {});
           }
           if (!state.open && senderKind !== "visitor") { updateLauncherUnread(true); return; }
           if (state.open) loadMessages().catch(function () {});
@@ -995,7 +1004,7 @@
     requestDataDeletion: requestVisitorDeletion,
     sendMessage: sendMessage,
     uploadFile: uploadConversationFile,
-    markRead: function () { return state.session ? request(sessionPath("/conversation/read/"), { method: "POST" }) : Promise.resolve(); },
+    markRead: function () { return state.session ? dataRequest(dataSessionPath("/read/"), { method: "POST" }) : Promise.resolve(); },
     open: function () {
       if (state.closeTimer) window.clearTimeout(state.closeTimer);
       state.closeTimer = 0; state.closing = false; state.open = true; state.hasUnread = false;
@@ -1760,6 +1769,11 @@
 
   api.ready = request("/config/", { method: "GET" }).then(function (config) {
     state.config = config;
+    if (config && config.data_plane_backend === "axum" && config.data_plane_base_url) {
+      dataApiBase = scriptUrl.origin + String(config.data_plane_base_url).replace(/\/+$/, "");
+    } else {
+      dataApiBase = apiBase;
+    }
     return Promise.all([resumeSession(), config.knowledge_enabled ? loadKnowledge("", "") : Promise.resolve(null)]).then(function () {
       render();
       if (state.session) { loadMessages().catch(function () {}); loadCSAT().catch(function () {}); loadActiveCall().catch(function () {}); }

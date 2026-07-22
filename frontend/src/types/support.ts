@@ -302,7 +302,7 @@ export type SupportVisitor = {
 };
 
 export type SupportServiceSnapshot = {
-  state: "on_track" | "due_soon" | "overdue" | "complete" | "none";
+  state: "on_track" | "due_soon" | "overdue" | "paused" | "complete" | "none";
   active_target?: "first_response" | "next_response" | "resolution" | null;
   active_due_at?: string | null;
   is_overdue: boolean;
@@ -331,6 +331,7 @@ export type SupportConversation = {
     | "open"
     | "waiting_customer"
     | "waiting_team"
+    | "snoozed"
     | "resolved"
     | "closed";
   priority: "low" | "normal" | "high" | "urgent";

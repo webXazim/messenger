@@ -1,5 +1,6 @@
 import { http } from "../lib/http";
 import { unwrapData } from "../lib/apiResponse";
+import { SUPPORT_DATA_BACKEND, SUPPORT_DATA_URL } from "../lib/config";
 import type {
   SupportAgent,
   SupportAgentInvitation,
@@ -68,6 +69,10 @@ import type {
   SupportTurnCredentials,
 } from "../types/support";
 
+function supportDataPath(path: string) {
+  return SUPPORT_DATA_BACKEND === "axum" ? `${SUPPORT_DATA_URL}${path}` : `/support${path}`;
+}
+
 export const supportApi = {
 
   async activatePlan(planCode: string) {
@@ -86,52 +91,52 @@ export const supportApi = {
   },
 
   async getActiveCall(signal?: AbortSignal) {
-    const response = await http.get("/support/calls/active/", { signal });
+    const response = await http.get(supportDataPath("/calls/active/"), { signal });
     return unwrapData<{ call: SupportCall | null }>(response.data);
   },
 
   async getActiveConversationCall(conversationId: string, signal?: AbortSignal) {
-    const response = await http.get(`/support/conversations/${conversationId}/calls/`, { signal });
+    const response = await http.get(supportDataPath(`/conversations/${conversationId}/calls/`), { signal });
     return unwrapData<{ call: SupportCall | null }>(response.data);
   },
 
   async startConversationCall(conversationId: string, callType: "voice" | "video") {
-    const response = await http.post(`/support/conversations/${conversationId}/calls/`, { call_type: callType });
+    const response = await http.post(supportDataPath(`/conversations/${conversationId}/calls/`), { call_type: callType });
     return unwrapData<SupportCall>(response.data);
   },
 
   async getCall(callId: string, signal?: AbortSignal) {
-    const response = await http.get(`/support/calls/${callId}/`, { signal });
+    const response = await http.get(supportDataPath(`/calls/${callId}/`), { signal });
     return unwrapData<SupportCall>(response.data);
   },
 
   async endCall(callId: string, reason = "ended") {
-    const response = await http.post(`/support/calls/${callId}/end/`, { reason });
+    const response = await http.post(supportDataPath(`/calls/${callId}/end/`), { reason });
     return unwrapData<SupportCall>(response.data);
   },
 
   async acceptCall(callId: string) {
-    const response = await http.post(`/support/calls/${callId}/accept/`);
+    const response = await http.post(supportDataPath(`/calls/${callId}/accept/`));
     return unwrapData<SupportCall>(response.data);
   },
 
   async declineCall(callId: string, reason = "declined") {
-    const response = await http.post(`/support/calls/${callId}/decline/`, { reason });
+    const response = await http.post(supportDataPath(`/calls/${callId}/decline/`), { reason });
     return unwrapData<SupportCall>(response.data);
   },
 
   async listCallSignals(callId: string, signal?: AbortSignal) {
-    const response = await http.get(`/support/calls/${callId}/signals/`, { signal });
+    const response = await http.get(supportDataPath(`/calls/${callId}/signals/`), { signal });
     return unwrapData<{ signals: SupportCallSignal[] }>(response.data);
   },
 
   async sendCallSignal(callId: string, signalType: SupportCallSignal["signal_type"], payload: Record<string, unknown>) {
-    const response = await http.post(`/support/calls/${callId}/signals/`, { signal_type: signalType, payload });
+    const response = await http.post(supportDataPath(`/calls/${callId}/signals/`), { signal_type: signalType, payload });
     return unwrapData<SupportCallSignal>(response.data);
   },
 
   async updateCallMedia(callId: string, payload: { audio_enabled?: boolean; video_enabled?: boolean }) {
-    const response = await http.patch(`/support/calls/${callId}/media-state/`, payload);
+    const response = await http.patch(supportDataPath(`/calls/${callId}/media-state/`), payload);
     return unwrapData<SupportCall>(response.data);
   },
 
@@ -537,7 +542,7 @@ export const supportApi = {
   },
 
   async unreadSummary(signal?: AbortSignal) {
-    const response = await http.get("/support/unread-summary/", { signal });
+    const response = await http.get(supportDataPath("/unread-summary/"), { signal });
     return unwrapData<SupportUnreadSummary>(response.data);
   },
 
@@ -545,7 +550,7 @@ export const supportApi = {
     filters: SupportConversationFilters = {},
     signal?: AbortSignal,
   ) {
-    const response = await http.get("/support/conversations/", {
+    const response = await http.get(supportDataPath("/conversations/"), {
       params: filters,
       signal,
     });
@@ -554,7 +559,7 @@ export const supportApi = {
 
   async getConversationMessages(conversationId: string, signal?: AbortSignal) {
     const response = await http.get(
-      `/support/conversations/${conversationId}/messages/`,
+      supportDataPath(`/conversations/${conversationId}/messages/`),
       { signal },
     );
     return unwrapData<SupportConversationMessagesResponse>(response.data);
@@ -565,7 +570,7 @@ export const supportApi = {
     payload: SupportMessageSendInput,
   ) {
     const response = await http.post(
-      `/support/conversations/${conversationId}/messages/`,
+      supportDataPath(`/conversations/${conversationId}/messages/`),
       payload,
     );
     return unwrapData<SupportMessage>(response.data);
@@ -613,17 +618,17 @@ export const supportApi = {
 
   async claimConversation(conversationId: string) {
     const response = await http.post(
-      `/support/conversations/${conversationId}/claim/`,
+      supportDataPath(`/conversations/${conversationId}/claim/`),
     );
     return unwrapData<SupportConversation>(response.data);
   },
 
   async markConversationDelivered(conversationId: string, messageId?: string) {
-    await http.post(`/support/conversations/${conversationId}/delivered/`, messageId ? { message_id: messageId } : {});
+    await http.post(supportDataPath(`/conversations/${conversationId}/delivered/`), messageId ? { message_id: messageId } : {});
   },
 
   async markConversationRead(conversationId: string, messageId?: string) {
-    await http.post(`/support/conversations/${conversationId}/read/`, messageId ? { message_id: messageId } : {});
+    await http.post(supportDataPath(`/conversations/${conversationId}/read/`), messageId ? { message_id: messageId } : {});
   },
 
   async listWebsites(signal?: AbortSignal) {

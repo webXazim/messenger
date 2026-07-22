@@ -17,7 +17,7 @@ use crate::{
     command_auth::CommandIdentity,
     command_delivery::deliver_committed,
     commands::error_response,
-    config::ChatCommandBackend,
+    config::ChatCallRuntimeBackend,
     database::CommittedEvent,
     protocol::{AudienceKey, AudienceKind},
     state::AppState,
@@ -48,8 +48,8 @@ struct CallCommandResult {
 }
 
 fn require_axum(state: &AppState) -> Option<axum::response::Response> {
-    (state.config.chat_command_backend != ChatCommandBackend::Axum).then(|| {
-        error_response(StatusCode::NOT_FOUND, "axum_chat_commands_disabled", "Axum chat commands are not active.")
+    (!matches!(state.config.chat_call_runtime_backend, ChatCallRuntimeBackend::SqlxShadow | ChatCallRuntimeBackend::Axum)).then(|| {
+        error_response(StatusCode::NOT_FOUND, "axum_call_runtime_disabled", "Axum call runtime endpoints are not active.")
     })
 }
 
@@ -61,7 +61,9 @@ fn identity(state: &AppState, headers: &HeaderMap) -> std::result::Result<Comman
 
 fn command_error(error: anyhow::Error) -> axum::response::Response {
     let detail = error.to_string();
-    if detail.contains("not an active participant") || detail.contains("call was not found") {
+    if detail.contains("direct conversation is blocked") {
+        error_response(StatusCode::FORBIDDEN, "call_forbidden", "Calls are not allowed between these users.")
+    } else if detail.contains("not an active participant") || detail.contains("call was not found") {
         error_response(StatusCode::NOT_FOUND, "call_not_found", "The call or conversation was not found.")
     } else if detail.contains("already has an active call") || detail.contains("participant is busy") {
         error_response(StatusCode::CONFLICT, "active_call_exists", "A participant already has an active call.")
@@ -98,6 +100,7 @@ pub async fn get_call(
     Path(call_id): Path<Uuid>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    if let Some(response) = require_axum(&state) { return response; }
     let identity = match identity(&state, &headers) { Ok(value) => value, Err(response) => return response };
     match read_call(&state, call_id, &identity).await {
         Ok(Some(payload)) => Json(payload).into_response(),
@@ -111,6 +114,7 @@ pub async fn recent_calls(
     Query(query): Query<RecentCallQuery>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
+    if let Some(response) = require_axum(&state) { return response; }
     let identity = match identity(&state, &headers) { Ok(value) => value, Err(response) => return response };
     match read_recent_calls(&state, &identity, &query.status).await {
         Ok(results) => Json(json!({"results": results, "next": null, "previous": null})).into_response(),
@@ -158,11 +162,11 @@ async fn actor_id(tx: &mut Transaction<'_, Postgres>, identity: &CommandIdentity
 }
 
 async fn start_call_tx(state: &AppState, conversation_id: Uuid, identity: &CommandIdentity, input: &StartCallRequest) -> Result<CallCommandResult> {
-    let pool = state.database.pool.as_ref().context("SQLx command backend is disabled")?;
+    let pool = state.database.pool.as_ref().context("SQLx call runtime backend is disabled")?;
     let mut tx = pool.begin().await?;
     let actor = actor_id(&mut tx, identity).await?;
     let conversation_type = sqlx::query_scalar::<_, String>(
-        "SELECT c.type FROM chat_conversation c JOIN chat_conversationparticipant p ON p.conversation_id=c.id WHERE c.id=$1 AND c.is_active=TRUE AND p.user_id=$2 AND p.left_at IS NULL AND p.banned_at IS NULL FOR UPDATE OF c"
+        "SELECT c.type FROM chat_conversation c JOIN chat_conversationparticipant p ON p.conversation_id=c.id WHERE c.id=$1 AND c.is_active=TRUE AND p.user_id=$2 AND p.left_at IS NULL AND p.banned_at IS NULL AND p.is_blocked=FALSE FOR UPDATE OF c"
     ).bind(conversation_id).bind(actor).persistent(false).fetch_optional(&mut *tx).await?
         .context("actor is not an active participant")?;
 
@@ -174,8 +178,15 @@ async fn start_call_tx(state: &AppState, conversation_id: Uuid, identity: &Comma
         return Ok(CallCommandResult { payload, events: Vec::new() });
     }
 
+    if conversation_type == "direct" {
+        let blocked = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM chat_userblock b JOIN chat_conversationparticipant peer ON peer.conversation_id=$1 AND peer.user_id<>$2 AND peer.left_at IS NULL AND peer.banned_at IS NULL WHERE (b.blocker_id=$2 AND b.blocked_id=peer.user_id) OR (b.blocker_id=peer.user_id AND b.blocked_id=$2))",
+        ).bind(conversation_id).bind(actor).persistent(false).fetch_one(&mut *tx).await?;
+        if blocked { anyhow::bail!("direct conversation is blocked"); }
+    }
+
     let participant_ids = sqlx::query_scalar::<_, i64>(
-        "SELECT user_id FROM chat_conversationparticipant WHERE conversation_id=$1 AND left_at IS NULL AND banned_at IS NULL ORDER BY joined_at"
+        "SELECT user_id FROM chat_conversationparticipant WHERE conversation_id=$1 AND left_at IS NULL AND banned_at IS NULL AND is_blocked=FALSE ORDER BY joined_at"
     ).bind(conversation_id).persistent(false).fetch_all(&mut *tx).await?;
     if participant_ids.len() < 2 { anyhow::bail!("call cannot be started without another participant"); }
     if conversation_type == "group" && participant_ids.len() > 8 { anyhow::bail!("call cannot exceed 8 participants"); }
@@ -205,11 +216,11 @@ async fn start_call_tx(state: &AppState, conversation_id: Uuid, identity: &Comma
 }
 
 async fn mutate_call_tx(state: &AppState, call_id: Uuid, identity: &CommandIdentity, action: &str, reason: &str) -> Result<CallCommandResult> {
-    let pool = state.database.pool.as_ref().context("SQLx command backend is disabled")?;
+    let pool = state.database.pool.as_ref().context("SQLx call runtime backend is disabled")?;
     let mut tx = pool.begin().await?;
     let actor = actor_id(&mut tx, identity).await?;
     let row = sqlx::query_as::<_, (Uuid, String, i64)>(
-        "SELECT c.conversation_id,c.status,c.initiated_by_id FROM chat_callsession c JOIN chat_callparticipant p ON p.call_id=c.id WHERE c.id=$1 AND p.user_id=$2 FOR UPDATE OF c,p"
+        "SELECT c.conversation_id,c.status,c.initiated_by_id FROM chat_callsession c JOIN chat_callparticipant p ON p.call_id=c.id JOIN chat_conversationparticipant cp ON cp.conversation_id=c.conversation_id AND cp.user_id=p.user_id WHERE c.id=$1 AND p.user_id=$2 AND cp.left_at IS NULL AND cp.is_blocked=FALSE FOR UPDATE OF c,p,cp"
     ).bind(call_id).bind(actor).persistent(false).fetch_optional(&mut *tx).await?.context("call was not found")?;
     let (conversation_id, status, initiator) = row;
     if !matches!(status.as_str(), "initiated" | "ringing" | "ongoing") { anyhow::bail!("call cannot be changed from its current state"); }
@@ -249,7 +260,7 @@ async fn mutate_call_tx(state: &AppState, call_id: Uuid, identity: &CommandIdent
 }
 
 async fn read_call(state: &AppState, call_id: Uuid, identity: &CommandIdentity) -> Result<Option<Value>> {
-    let pool = state.database.pool.as_ref().context("SQLx read backend is disabled")?;
+    let pool = state.database.pool.as_ref().context("SQLx call runtime backend is disabled")?;
     let mut tx = pool.begin().await?;
     let actor = actor_id(&mut tx, identity).await?;
     let payload = call_payload_tx(&mut tx, call_id, actor).await?;
@@ -258,11 +269,11 @@ async fn read_call(state: &AppState, call_id: Uuid, identity: &CommandIdentity) 
 }
 
 async fn read_recent_calls(state: &AppState, identity: &CommandIdentity, status: &str) -> Result<Vec<Value>> {
-    let pool = state.database.pool.as_ref().context("SQLx read backend is disabled")?;
+    let pool = state.database.pool.as_ref().context("SQLx call runtime backend is disabled")?;
     let mut tx = pool.begin().await?;
     let actor = actor_id(&mut tx, identity).await?;
     let ids = sqlx::query_scalar::<_, Uuid>(
-        "SELECT DISTINCT c.id FROM chat_callsession c JOIN chat_callparticipant p ON p.call_id=c.id WHERE p.user_id=$1 AND ($2='' OR c.status=$2) ORDER BY c.id LIMIT 100"
+        "SELECT DISTINCT c.id FROM chat_callsession c JOIN chat_callparticipant p ON p.call_id=c.id JOIN chat_conversationparticipant cp ON cp.conversation_id=c.conversation_id AND cp.user_id=p.user_id WHERE p.user_id=$1 AND cp.left_at IS NULL AND cp.is_blocked=FALSE AND ($2='' OR c.status=$2) ORDER BY c.id LIMIT 100"
     ).bind(actor).bind(status).persistent(false).fetch_all(&mut *tx).await?;
     let mut results = Vec::with_capacity(ids.len());
     for id in ids { if let Some(payload) = call_payload_tx(&mut tx, id, actor).await? { results.push(payload); } }
@@ -289,7 +300,9 @@ SELECT jsonb_build_object(
 FROM chat_callsession c
 JOIN accounts_user iu ON iu.id=c.initiated_by_id LEFT JOIN accounts_profile ip ON ip.user_id=iu.id
 LEFT JOIN accounts_user au ON au.id=c.answered_by_id LEFT JOIN accounts_profile ap ON ap.user_id=au.id
-WHERE c.id=$1 AND EXISTS(SELECT 1 FROM chat_callparticipant mine WHERE mine.call_id=c.id AND mine.user_id=$2)
+WHERE c.id=$1
+  AND EXISTS(SELECT 1 FROM chat_callparticipant mine WHERE mine.call_id=c.id AND mine.user_id=$2)
+  AND EXISTS(SELECT 1 FROM chat_conversationparticipant membership WHERE membership.conversation_id=c.conversation_id AND membership.user_id=$2 AND membership.left_at IS NULL AND membership.is_blocked=FALSE)
 "#).bind(call_id).bind(actor).persistent(false).fetch_optional(&mut **tx).await?;
     Ok(payload)
 }
@@ -301,7 +314,7 @@ async fn record_event(tx: &mut Transaction<'_, Postgres>, name: &str, data: Valu
     let audiences_json = json!([{"kind":"conversation","id":conversation_id}]);
     sqlx::query("INSERT INTO common_realtimeoutboxevent (id,created_at,updated_at,event_id,event_name,payload,audiences,status,attempts,available_at,published_at,delivery_target,published_transport,stream_entry_id,last_error) VALUES ($1,NOW(),NOW(),$2,$3,$4,$5,'pending',0,NOW(),NULL,'nats_jetstream','','','')")
         .bind(Uuid::new_v4()).bind(event_id).bind(name).bind(&payload).bind(audiences_json).persistent(false).execute(&mut **tx).await?;
-    Ok(CommittedEvent { event_id, payload, audiences: vec![AudienceKey { kind: AudienceKind::Conversation, identifier: conversation_id.to_string() }] })
+    Ok(CommittedEvent { event_id, event_name: name.to_owned(), payload, audiences: vec![AudienceKey { kind: AudienceKind::Conversation, identifier: conversation_id.to_string() }] })
 }
 
 async fn insert_audit(tx: &mut Transaction<'_, Postgres>, actor: i64, conversation: Uuid, event_type: &str, metadata: Value) -> Result<()> {

@@ -457,6 +457,28 @@ export function AppShell() {
         if (conversation.id) patchConversationCaches(queryClient, conversation);
         return;
       }
+      if ([
+        "conversation.created",
+        "conversation.participants_added",
+        "conversation.participant_removed",
+        "conversation.participant_role_updated",
+        "conversation.participant_muted",
+        "conversation.participant_banned",
+        "conversation.participant_unbanned",
+        "conversation.ownership_transferred",
+        "conversation.participant_left",
+        "conversation.viewer_state_updated",
+      ].includes(payload.event)) {
+        const conversationId = String(payload.data?.conversation_id || payload.data?.id || "");
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        if (conversationId) void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        return;
+      }
+      if (payload.event === "user.blocked" || payload.event === "user.unblocked") {
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["blocks"] });
+        return;
+      }
       if (payload.event === "message.read" || payload.event === "message.delivered") {
         const conversationId = String(payload.data?.conversation_id || payload.data?.conversation || "");
         if (conversationId) {

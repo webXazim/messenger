@@ -728,6 +728,11 @@ class SupportPendingUpload(BaseUUIDModel):
         indexes = [
             models.Index(fields=["support_account", "website", "created_at"], name="sup_upload_acct_site_time_idx"),
             models.Index(fields=["source", "created_at"], name="sup_upload_source_time_idx"),
+            models.Index(
+                fields=["support_conversation", "source", "-created_at"],
+                condition=models.Q(support_conversation__isnull=False),
+                name="sup_data_upload_conv_idx",
+            ),
         ]
         constraints = [
             models.CheckConstraint(
@@ -888,6 +893,12 @@ class SupportConversation(BaseUUIDModel):
         ordering = ["-conversation__last_message_at", "-created_at"]
         indexes = [
             models.Index(fields=["website", "status", "updated_at"], name="sup_conv_site_stat_upd_idx"),
+            models.Index(fields=["website", "status", "-updated_at", "id"], name="sup_data_site_stat_upd_idx"),
+            models.Index(
+                fields=["assigned_agent", "status", "-updated_at", "id"],
+                condition=models.Q(assigned_agent__isnull=False),
+                name="sup_data_agent_stat_upd_idx",
+            ),
             models.Index(fields=["assigned_agent", "status"], name="sup_conv_agent_status_idx"),
             models.Index(fields=["assigned_team", "status"], name="sup_conv_team_status_idx"),
             models.Index(fields=["priority", "status"], name="sup_conv_prio_status_idx"),
@@ -2522,6 +2533,48 @@ class SupportVisitorDeletionRequest(BaseUUIDModel):
 
     def __str__(self):
         return f"SupportVisitorDeletionRequest<{self.website_id}:{self.visitor_external_id}:{self.status}>"
+
+
+class SupportDataPlaneJob(BaseUUIDModel):
+    """Transactional handoff from the Axum Support data plane to Django-owned business workflows."""
+
+    class Kind(models.TextChoices):
+        MESSAGE_CREATED = "message_created", "Message created"
+        CONVERSATION_CREATED = "conversation_created", "Conversation created"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    kind = models.CharField(max_length=40, choices=Kind.choices)
+    dedupe_key = models.CharField(max_length=160, unique=True)
+    support_conversation = models.ForeignKey(
+        SupportConversation,
+        on_delete=models.CASCADE,
+        related_name="data_plane_jobs",
+    )
+    message = models.ForeignKey(
+        "chat.Message",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="support_data_plane_jobs",
+    )
+    payload = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    attempts = models.PositiveIntegerField(default=0)
+    available_at = models.DateTimeField(default=timezone.now, db_index=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["available_at", "created_at", "id"]
+        indexes = [
+            models.Index(fields=["status", "available_at"], name="sup_dp_job_status_due_idx"),
+            models.Index(fields=["support_conversation", "created_at"], name="sup_dp_job_conv_time_idx"),
+        ]
 
 
 class SupportCallSettings(BaseUUIDModel):

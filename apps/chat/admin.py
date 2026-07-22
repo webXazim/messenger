@@ -5,6 +5,7 @@ from .models import (
     CallParticipant,
     CallSession,
     ChatAuditLog,
+    ChatDataPlaneJob,
     Conversation,
     ConversationDraft,
     ConversationInviteLink,
@@ -12,6 +13,7 @@ from .models import (
     ConversationParticipant,
     Message,
     MessageAttachment,
+    MediaProcessingJob,
     MessageDelivery,
     MessageEditHistory,
     MessageReaction,
@@ -301,3 +303,55 @@ class ChatAuditLogAdmin(UUIDAdminMixin, admin.ModelAdmin):
     search_fields = ("actor__username", "actor__email", "conversation__id", "conversation__title", "message__id")
     raw_id_fields = ("actor", "conversation", "message")
     readonly_fields = UUIDAdminMixin.readonly_fields + ("event_type", "actor", "conversation", "message", "metadata")
+
+@admin.register(ChatDataPlaneJob)
+class ChatDataPlaneJobAdmin(UUIDAdminMixin, admin.ModelAdmin):
+    list_display = ("kind", "status", "attempts", "conversation", "message", "available_at", "locked_at", "updated_at")
+    list_filter = ("kind", "status", "available_at", "updated_at")
+    search_fields = ("dedupe_key", "conversation__id", "message__id", "last_error")
+    raw_id_fields = ("conversation", "message")
+    readonly_fields = UUIDAdminMixin.readonly_fields + (
+        "kind",
+        "dedupe_key",
+        "conversation",
+        "message",
+        "payload",
+        "status",
+        "attempts",
+        "available_at",
+        "locked_at",
+        "last_error",
+    )
+    actions = None
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+
+@admin.register(MediaProcessingJob)
+class MediaProcessingJobAdmin(UUIDAdminMixin, admin.ModelAdmin):
+    list_display = ("upload", "status", "attempts", "worker_name", "available_at", "locked_at", "completed_at", "updated_at")
+    list_filter = ("status", "worker_name", "available_at", "completed_at")
+    search_fields = ("upload__id", "upload__original_name", "worker_name", "last_error")
+    raw_id_fields = ("upload",)
+    readonly_fields = UUIDAdminMixin.readonly_fields + (
+        "upload", "status", "attempts", "available_at", "locked_at", "lease_token",
+        "completed_at", "worker_name", "processing_version", "result", "last_error",
+    )
+    actions = None
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useMemo, useState } from "react";
 import { decryptAttachment, decryptAttachmentPreview } from "../lib/e2ee";
-import { API_BASE_URL } from "../lib/config";
+import { API_BASE_URL, CHAT_ATTACHMENT_BACKEND, CHAT_COMMAND_URL } from "../lib/config";
 import { getAccessToken } from "../lib/tokenStore";
 import { http } from "../lib/http";
 import { unwrapData } from "../lib/apiResponse";
@@ -49,7 +49,8 @@ export function hasMediaAccessToken(src: string) {
 }
 
 async function refreshAttachmentUrl(attachmentId: string, disposition: MediaDisposition) {
-  const response = await http.post(`/chat/attachments/${attachmentId}/media-token/`);
+  const prefix = CHAT_ATTACHMENT_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+  const response = await http.post(`${prefix}/attachments/${attachmentId}/media-token/`);
   const payload = unwrapData<MediaTokenPayload>(response.data);
   const candidate = disposition === "attachment"
     ? payload.download_url || payload.url

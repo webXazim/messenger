@@ -148,3 +148,21 @@ def send_support_agent_invitation_email(invitation_id: str, raw_token: str):
     from apps.support.services import deliver_agent_invitation_email
 
     return deliver_agent_invitation_email(invitation_id, raw_token)
+
+@shared_task(name="apps.support.tasks.process_support_data_plane_jobs", ignore_result=True)
+def process_support_data_plane_jobs():
+    from apps.support.data_plane_jobs import process_due_support_data_plane_jobs
+
+    if not support_chat_enabled():
+        return 0
+    batch_size = max(1, min(500, int(getattr(settings, "SUPPORT_DATA_PLANE_JOB_BATCH_SIZE", 100))))
+    lease_seconds = max(30, int(getattr(settings, "SUPPORT_DATA_PLANE_JOB_LEASE_SECONDS", 120)))
+    return process_due_support_data_plane_jobs(batch_size=batch_size, lease_seconds=lease_seconds)
+
+@shared_task(name="apps.support.tasks.cleanup_support_data_plane_jobs", ignore_result=True)
+def cleanup_support_data_plane_jobs():
+    from apps.support.data_plane_jobs import cleanup_completed_support_data_plane_jobs
+
+    retention_days = max(1, int(getattr(settings, "SUPPORT_DATA_PLANE_JOB_RETENTION_DAYS", 7)))
+    return cleanup_completed_support_data_plane_jobs(retention_days=retention_days)
+

@@ -423,6 +423,24 @@ if REALTIME_PRESENCE_BACKEND not in _REALTIME_PRESENCE_BACKENDS:
         f"REALTIME_PRESENCE_BACKEND={REALTIME_PRESENCE_BACKEND!r} is invalid. "
         "Use legacy_redis or local."
     )
+REALTIME_OUTBOX_PUBLISHER = env_str("REALTIME_OUTBOX_PUBLISHER", "celery").strip().lower() or "celery"
+if REALTIME_OUTBOX_PUBLISHER not in {"celery", "axum"}:
+    raise ImproperlyConfigured("REALTIME_OUTBOX_PUBLISHER must be celery or axum.")
+REALTIME_OUTBOX_PUBLISH_TIMEOUT_MS = max(250, min(10000, env_int("REALTIME_OUTBOX_PUBLISH_TIMEOUT_MS", 1500)))
+REALTIME_OUTBOX_MARK_ATTEMPTS = max(1, min(5, env_int("REALTIME_OUTBOX_MARK_ATTEMPTS", 3)))
+
+# Data-plane selectors remain explicit so local development and emergency
+# rollback can still use Django. Production can require the complete Axum/SQLx
+# plane with AXUM_DATA_PLANE_REQUIRED=True.
+AXUM_DATA_PLANE_REQUIRED = env_bool("AXUM_DATA_PLANE_REQUIRED", False)
+CHAT_READ_BACKEND = env_str("CHAT_READ_BACKEND", "django").strip().lower() or "django"
+CHAT_COMMAND_BACKEND = env_str("CHAT_COMMAND_BACKEND", "django").strip().lower() or "django"
+CHAT_INTERACTION_BACKEND = env_str("CHAT_INTERACTION_BACKEND", "django").strip().lower() or "django"
+CHAT_MESSAGE_MUTATION_BACKEND = env_str("CHAT_MESSAGE_MUTATION_BACKEND", "django").strip().lower() or "django"
+CHAT_CALL_RUNTIME_BACKEND = env_str("CHAT_CALL_RUNTIME_BACKEND", "django").strip().lower() or "django"
+CHAT_ATTACHMENT_BACKEND = env_str("CHAT_ATTACHMENT_BACKEND", "django").strip().lower() or "django"
+CHAT_CONVERSATION_COMMAND_BACKEND = env_str("CHAT_CONVERSATION_COMMAND_BACKEND", "django").strip().lower() or "django"
+SUPPORT_DATA_BACKEND = env_str("SUPPORT_DATA_BACKEND", "django").strip().lower() or "django"
 REALTIME_OUTBOX_ENABLED = env_bool("REALTIME_OUTBOX_ENABLED", True)
 REALTIME_OUTBOX_BATCH_SIZE = max(1, env_int("REALTIME_OUTBOX_BATCH_SIZE", 100))
 REALTIME_OUTBOX_LEASE_SECONDS = max(15, env_int("REALTIME_OUTBOX_LEASE_SECONDS", 60))
@@ -631,6 +649,9 @@ AUTH_IP_BLOCK_TTL_SECONDS = env_int("AUTH_IP_BLOCK_TTL_SECONDS", 1800)
 # Messaging / abuse / media
 PENDING_UPLOAD_TTL_SECONDS = env_int("PENDING_UPLOAD_TTL_SECONDS", 86400)
 MEDIA_TOKEN_TTL_SECONDS = env_int("MEDIA_TOKEN_TTL_SECONDS", 300)
+MEDIA_TOKEN_SHARED_SECRET = env_str("MEDIA_TOKEN_SHARED_SECRET", "")
+MEDIA_TOKEN_ISSUER = env_str("MEDIA_TOKEN_ISSUER", "crescentsphere-media")
+MEDIA_TOKEN_AUDIENCE = env_str("MEDIA_TOKEN_AUDIENCE", "crescentsphere-private-media")
 AUTO_HIDE_REPORT_THRESHOLD = env_int("AUTO_HIDE_REPORT_THRESHOLD", 3)
 MESSAGE_DUPLICATE_WINDOW_SECONDS = env_int("MESSAGE_DUPLICATE_WINDOW_SECONDS", 120)
 MESSAGE_DUPLICATE_THRESHOLD = env_int("MESSAGE_DUPLICATE_THRESHOLD", 3)
@@ -642,6 +663,12 @@ MESSAGE_MAX_CIPHERTEXT_BYTES = env_int("MESSAGE_MAX_CIPHERTEXT_BYTES", 256 * 102
 MESSAGE_MAX_ENCRYPTION_ENVELOPE_BYTES = env_int("MESSAGE_MAX_ENCRYPTION_ENVELOPE_BYTES", 300 * 1024)
 MEDIA_SERVER_THUMBNAIL_DIMENSION = env_int("MEDIA_SERVER_THUMBNAIL_DIMENSION", 160)
 MEDIA_SERVER_THUMBNAIL_JPEG_QUALITY = env_int("MEDIA_SERVER_THUMBNAIL_JPEG_QUALITY", 18)
+MEDIA_PROCESSING_BACKEND = env_str("MEDIA_PROCESSING_BACKEND", "django").strip().lower()
+if MEDIA_PROCESSING_BACKEND not in {"django", "rust_shadow", "rust"}:
+    MEDIA_PROCESSING_BACKEND = "django"
+MEDIA_WORKER_DJANGO_FALLBACK_ENABLED = env_bool("MEDIA_WORKER_DJANGO_FALLBACK_ENABLED", False)
+MEDIA_WORKER_DJANGO_FALLBACK_AFTER_ATTEMPTS = max(1, env_int("MEDIA_WORKER_DJANGO_FALLBACK_AFTER_ATTEMPTS", 4))
+MEDIA_WORKER_ENQUEUE_RECOVERY_BATCH_SIZE = max(10, env_int("MEDIA_WORKER_ENQUEUE_RECOVERY_BATCH_SIZE", 250))
 
 # Integrations
 CLAMAV_ENABLED = env_bool("CLAMAV_ENABLED", False)
@@ -839,4 +866,42 @@ if NATS_PROBE_ENABLED or REALTIME_DURABLE_BACKEND in {"nats", "jetstream"} or RE
     if REALTIME_EPHEMERAL_BACKEND == "nats" and (not NATS_EPHEMERAL_SUBJECT or not NATS_NODE_ID):
         raise ImproperlyConfigured("NATS_EPHEMERAL_SUBJECT and NATS_NODE_ID are required for Core NATS ephemeral delivery")
 
+
+CHAT_DATA_PLANE_JOB_BATCH_SIZE = max(1, min(500, env.int("CHAT_DATA_PLANE_JOB_BATCH_SIZE", default=150)))
+CHAT_DATA_PLANE_JOB_LEASE_SECONDS = max(30, env.int("CHAT_DATA_PLANE_JOB_LEASE_SECONDS", default=120))
+CHAT_DATA_PLANE_JOB_RETENTION_DAYS = max(1, env.int("CHAT_DATA_PLANE_JOB_RETENTION_DAYS", default=7))
+SUPPORT_DATA_PLANE_JOB_BATCH_SIZE = max(1, min(500, env.int("SUPPORT_DATA_PLANE_JOB_BATCH_SIZE", default=100)))
+SUPPORT_DATA_PLANE_JOB_LEASE_SECONDS = max(30, env.int("SUPPORT_DATA_PLANE_JOB_LEASE_SECONDS", default=120))
+SUPPORT_DATA_PLANE_JOB_RETENTION_DAYS = max(1, env.int("SUPPORT_DATA_PLANE_JOB_RETENTION_DAYS", default=7))
+
+def _validate_axum_data_plane():
+    expected = {
+        "REALTIME_EPHEMERAL_BACKEND": (REALTIME_EPHEMERAL_BACKEND, "nats"),
+        "REALTIME_PRESENCE_BACKEND": (REALTIME_PRESENCE_BACKEND, "local"),
+        "REALTIME_OUTBOX_PUBLISHER": (REALTIME_OUTBOX_PUBLISHER, "axum"),
+        "CHAT_READ_BACKEND": (CHAT_READ_BACKEND, "sqlx"),
+        "CHAT_COMMAND_BACKEND": (CHAT_COMMAND_BACKEND, "axum"),
+        "CHAT_INTERACTION_BACKEND": (CHAT_INTERACTION_BACKEND, "axum"),
+        "CHAT_MESSAGE_MUTATION_BACKEND": (CHAT_MESSAGE_MUTATION_BACKEND, "axum"),
+        "CHAT_CALL_RUNTIME_BACKEND": (CHAT_CALL_RUNTIME_BACKEND, "axum"),
+        "CHAT_ATTACHMENT_BACKEND": (CHAT_ATTACHMENT_BACKEND, "axum"),
+        "CHAT_CONVERSATION_COMMAND_BACKEND": (CHAT_CONVERSATION_COMMAND_BACKEND, "axum"),
+        "SUPPORT_DATA_BACKEND": (SUPPORT_DATA_BACKEND, "axum"),
+        "MEDIA_PROCESSING_BACKEND": (MEDIA_PROCESSING_BACKEND, "rust"),
+        "DATABASE_RUNTIME_ENDPOINT": (DATABASE_RUNTIME_ENDPOINT, "pgbouncer"),
+    }
+    invalid = [f"{name}={actual!r} (expected {wanted!r})" for name, (actual, wanted) in expected.items() if actual != wanted]
+    if REALTIME_DURABLE_BACKEND not in {"nats", "jetstream"}:
+        invalid.append(f"REALTIME_DURABLE_BACKEND={REALTIME_DURABLE_BACKEND!r} (expected 'nats')")
+    if MEDIA_WORKER_DJANGO_FALLBACK_ENABLED:
+        invalid.append("MEDIA_WORKER_DJANGO_FALLBACK_ENABLED=True (expected False)")
+    if invalid:
+        raise ImproperlyConfigured(
+            "AXUM_DATA_PLANE_REQUIRED is enabled, but the efficient production plane is incomplete: "
+            + "; ".join(invalid)
+        )
+
+
+if AXUM_DATA_PLANE_REQUIRED:
+    _validate_axum_data_plane()
 

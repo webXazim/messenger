@@ -6,6 +6,8 @@ This is the final measurement layer for the single-VPS Django + Axum deployment.
 - Reconnect test
 - Message API test
 - Mixed WebSocket/read/write workload
+- Controlled-overload/load-shedding test
+- Long-running mixed soak test
 - VPS resource capture
 - PostgreSQL index and table-health audit
 - `EXPLAIN ANALYZE` for critical Messenger, Support, outbox, and webhook queries
@@ -61,6 +63,9 @@ export LOADTEST_RESULT_DIR=loadtests/results/final-suite
 MIXED_READ_RATE=20 \
 MIXED_WRITE_RATE=5 \
   ./scripts/run-load-test.sh mixed 500
+
+./scripts/run-load-test.sh overload 300
+./scripts/run-load-test.sh soak 150
 ```
 
 The mixed scenario keeps authenticated sockets open while concurrently loading:
@@ -142,7 +147,9 @@ A passing report requires, among other checks:
 - PostgreSQL connection usage below 85%
 - No PostgreSQL deadlocks and fewer than five new temp files
 - Redis below 85%, with no evictions or rejected connections
-- No Axum Stream errors, malformed events, connection rejection, or container restart
+- No Axum Stream errors, malformed events, execution timeouts, or container restart
+- SQLx never exceeds its configured pool and the high-priority WebSocket queue remains below 75%
+- Overload is returned as a controlled 503 response rather than a reset, timeout, or unbounded queue
 - Healthy outbox and NATS JetStream state for every sample
 - Passing PostgreSQL audit and complete strict `EXPLAIN ANALYZE` coverage
 - One unchanged deployment fingerprint for the complete measurement window

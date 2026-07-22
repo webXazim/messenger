@@ -83,21 +83,52 @@ case "$mode" in
     )
     summary="/results/mixed-production-${target}.json"
     ;;
+  overload)
+    target="${target:-300}"
+    script="/scripts/k6/overload-protection.js"
+    envs=(
+      -e "OVERLOAD_READ_RATE=${OVERLOAD_READ_RATE:-120}"
+      -e "OVERLOAD_WRITE_RATE=${OVERLOAD_WRITE_RATE:-40}"
+      -e "OVERLOAD_DURATION=${OVERLOAD_DURATION:-120s}"
+      -e "OVERLOAD_MAX_VUS=$target"
+    )
+    summary="/results/overload-protection-${target}.json"
+    ;;
+  soak)
+    target="${target:-150}"
+    script="/scripts/k6/mixed-production.js"
+    envs=(
+      -e "MIXED_SOCKET_VUS=$target"
+      -e "MIXED_WARMUP_DURATION=${SOAK_WARMUP_DURATION:-120s}"
+      -e "MIXED_HOLD_DURATION=${SOAK_HOLD_DURATION:-1800s}"
+      -e "MIXED_RAMP_DOWN_DURATION=${SOAK_RAMP_DOWN_DURATION:-60s}"
+      -e "MIXED_SOCKET_LIFETIME_MS=${SOAK_SOCKET_LIFETIME_MS:-1980000}"
+      -e "MIXED_READ_RATE=${SOAK_READ_RATE:-12}"
+      -e "MIXED_WRITE_RATE=${SOAK_WRITE_RATE:-3}"
+      -e "MIXED_READ_PREALLOCATED_VUS=${MIXED_READ_PREALLOCATED_VUS:-30}"
+      -e "MIXED_READ_MAX_VUS=${MIXED_READ_MAX_VUS:-100}"
+      -e "MIXED_WRITE_PREALLOCATED_VUS=${MIXED_WRITE_PREALLOCATED_VUS:-20}"
+      -e "MIXED_WRITE_MAX_VUS=${MIXED_WRITE_MAX_VUS:-60}"
+    )
+    summary="/results/soak-production-${target}.json"
+    ;;
   *)
-    echo "Usage: $0 {smoke|capacity|reconnect|api|mixed} [target]" >&2
+    echo "Usage: $0 {smoke|capacity|reconnect|api|mixed|overload|soak} [target]" >&2
     exit 2
     ;;
 esac
 
 
-if [[ "$mode" == "smoke" || "$mode" == "capacity" || "$mode" == "reconnect" || "$mode" == "mixed" ]]; then
+if [[ "$mode" == "smoke" || "$mode" == "capacity" || "$mode" == "reconnect" || "$mode" == "mixed" || "$mode" == "soak" ]]; then
   (( target <= user_count )) || { echo "Target $target exceeds credential user count $user_count." >&2; exit 1; }
 elif [[ "$mode" == "api" ]]; then
   api_max_vus="${MAX_VUS:-150}"
   (( api_max_vus <= user_count )) || { echo "MAX_VUS=$api_max_vus exceeds credential user count $user_count." >&2; exit 1; }
+elif [[ "$mode" == "overload" ]]; then
+  (( target <= user_count )) || { echo "OVERLOAD_MAX_VUS=$target exceeds credential user count $user_count." >&2; exit 1; }
 fi
 
-if [[ "$mode" == "mixed" ]]; then
+if [[ "$mode" == "mixed" || "$mode" == "soak" ]]; then
   mixed_read_max="${MIXED_READ_MAX_VUS:-120}"
   mixed_write_max="${MIXED_WRITE_MAX_VUS:-80}"
   (( mixed_read_max <= user_count )) || { echo "MIXED_READ_MAX_VUS=$mixed_read_max exceeds credential user count $user_count." >&2; exit 1; }

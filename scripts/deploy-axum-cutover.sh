@@ -143,6 +143,11 @@ fi
 runtime_state="$("${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats)"
 printf '%s\n' "$runtime_state"
 expected_command_backend="$(grep -E '^CHAT_COMMAND_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+expected_interaction_backend="$(grep -E '^CHAT_INTERACTION_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+expected_message_mutation_backend="$(grep -E '^CHAT_MESSAGE_MUTATION_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+expected_call_runtime_backend="$(grep -E '^CHAT_CALL_RUNTIME_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+expected_attachment_backend="$(grep -E '^CHAT_ATTACHMENT_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+expected_conversation_command_backend="$(grep -E '^CHAT_CONVERSATION_COMMAND_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
 expected_read_backend="$(grep -E '^CHAT_READ_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
 if [[ "$expected_command_backend" == "axum" ]]; then
   grep -q '"chat_command_backend":"axum"' <<<"$runtime_state" || fail "Axum command backend was requested but is not active"
@@ -150,8 +155,59 @@ if [[ "$expected_command_backend" == "axum" ]]; then
   call_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/api/v1/chat-fast/calls/recent/)"
   [[ "$call_route_status" == "401" ]] || fail "Axum call API probe expected HTTP 401, got $call_route_status"
 fi
+if [[ "$expected_interaction_backend" == "axum" ]]; then
+  grep -q '"chat_interaction_backend":"axum"' <<<"$runtime_state" || fail "Axum interaction backend was requested but is not active"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum interactions require a healthy SQLx pool"
+  interaction_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:9000/api/v1/chat-fast/conversations/00000000-0000-0000-0000-000000000000/mark-read/)"
+  [[ "$interaction_route_status" == "401" ]] || fail "Axum interaction API probe expected HTTP 401, got $interaction_route_status"
+  expected_frontend_interaction_backend="$(grep -E '^VITE_CHAT_INTERACTION_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_frontend_interaction_backend" == "axum" ]] || fail "CHAT_INTERACTION_BACKEND=axum also requires VITE_CHAT_INTERACTION_BACKEND=axum and a rebuilt frontend image"
+fi
+if [[ "$expected_message_mutation_backend" == "axum" ]]; then
+  grep -q '"chat_message_mutation_backend":"axum"' <<<"$runtime_state" || fail "Axum message mutation backend was requested but is not active"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum message mutations require a healthy SQLx pool"
+  mutation_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:9000/api/v1/chat-fast/messages/00000000-0000-0000-0000-000000000000/restore/)"
+  [[ "$mutation_route_status" == "401" ]] || fail "Axum message mutation API probe expected HTTP 401, got $mutation_route_status"
+  expected_frontend_message_mutation_backend="$(grep -E '^VITE_CHAT_MESSAGE_MUTATION_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_frontend_message_mutation_backend" == "axum" ]] || fail "CHAT_MESSAGE_MUTATION_BACKEND=axum also requires VITE_CHAT_MESSAGE_MUTATION_BACKEND=axum and a rebuilt frontend image"
+fi
+if [[ "$expected_call_runtime_backend" == "axum" ]]; then
+  grep -q '"chat_call_runtime_backend":"axum"' <<<"$runtime_state" || fail "Axum call runtime backend was requested but is not active"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum call runtime requires a healthy SQLx pool"
+  grep -q '"ephemeral_backend":"nats"' <<<"$runtime_state" || fail "Axum call runtime requires Core NATS as its ephemeral transport"
+  grep -q '"ephemeral_ready":true' <<<"$runtime_state" || fail "Axum call runtime Core NATS transport is not ready"
+  call_runtime_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:9000/api/v1/chat-fast/calls/00000000-0000-0000-0000-000000000000/heartbeat/)"
+  [[ "$call_runtime_route_status" == "401" ]] || fail "Axum call runtime API probe expected HTTP 401, got $call_runtime_route_status"
+  expected_frontend_call_runtime_backend="$(grep -E '^VITE_CHAT_CALL_RUNTIME_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_frontend_call_runtime_backend" == "axum" ]] || fail "CHAT_CALL_RUNTIME_BACKEND=axum also requires VITE_CHAT_CALL_RUNTIME_BACKEND=axum and a rebuilt frontend image"
+  expected_ephemeral_backend="$(grep -E '^REALTIME_EPHEMERAL_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_ephemeral_backend" == "nats" ]] || fail "CHAT_CALL_RUNTIME_BACKEND=axum requires REALTIME_EPHEMERAL_BACKEND=nats for multi-node signaling"
+fi
+if [[ "$expected_attachment_backend" == "axum" ]]; then
+  grep -q '"chat_attachment_backend":"axum"' <<<"$runtime_state" || fail "Axum attachment backend was requested but is not active"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum attachments require a healthy SQLx pool"
+  media_secret="$(grep -E '^MEDIA_TOKEN_SHARED_SECRET=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ ${#media_secret} -ge 32 ]] || fail "CHAT_ATTACHMENT_BACKEND=axum requires MEDIA_TOKEN_SHARED_SECRET with at least 32 characters"
+  [[ "$media_secret" != "replace-with-at-least-32-random-characters" ]] || fail "Replace the example MEDIA_TOKEN_SHARED_SECRET first"
+  attachment_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/api/v1/chat-fast/attachments/00000000-0000-0000-0000-000000000000/)"
+  [[ "$attachment_route_status" == "401" ]] || fail "Axum attachment API probe expected HTTP 401, got $attachment_route_status"
+  expected_frontend_attachment_backend="$(grep -E '^VITE_CHAT_ATTACHMENT_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_frontend_attachment_backend" == "axum" ]] || fail "CHAT_ATTACHMENT_BACKEND=axum also requires VITE_CHAT_ATTACHMENT_BACKEND=axum and a rebuilt frontend image"
+fi
+if [[ "$expected_conversation_command_backend" == "axum" ]]; then
+  grep -q '"chat_conversation_command_backend":"axum"' <<<"$runtime_state" || fail "Axum conversation command backend was requested but is not active"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum conversation commands require a healthy SQLx pool"
+  conversation_command_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:9000/api/v1/chat-fast/blocks/)"
+  [[ "$conversation_command_status" == "401" ]] || fail "Axum conversation command API probe expected HTTP 401, got $conversation_command_status"
+  expected_frontend_conversation_command_backend="$(grep -E '^VITE_CHAT_CONVERSATION_COMMAND_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_frontend_conversation_command_backend" == "axum" ]] || fail "CHAT_CONVERSATION_COMMAND_BACKEND=axum also requires VITE_CHAT_CONVERSATION_COMMAND_BACKEND=axum and a rebuilt frontend image"
+fi
 if [[ "$expected_read_backend" == "sqlx" ]]; then
   grep -q '"chat_read_backend":"sqlx"' <<<"$runtime_state" || fail "SQLx read backend was requested but is not active"
+  read_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/api/v1/chat-fast/conversations/)"
+  [[ "$read_route_status" == "401" ]] || fail "Axum conversation read probe expected HTTP 401, got $read_route_status"
+  expected_frontend_read_backend="$(grep -E '^VITE_CHAT_READ_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ "$expected_frontend_read_backend" == "sqlx" ]] || fail "CHAT_READ_BACKEND=sqlx also requires VITE_CHAT_READ_BACKEND=sqlx and a rebuilt frontend image"
 fi
 printf '\n'
 "${compose[@]}" ps

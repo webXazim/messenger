@@ -15,7 +15,10 @@ read_env() {
   printf '%s' "${value:-$default}"
 }
 
-for service in postgres pgbouncer redis nats web worker beat realtime frontend nginx; do
+services=(postgres pgbouncer redis nats web worker beat realtime frontend nginx)
+media_backend="$(read_env MEDIA_PROCESSING_BACKEND django)"
+if [[ "$media_backend" == "rust" || "$media_backend" == "rust_shadow" ]]; then services+=(media-worker); fi
+for service in "${services[@]}"; do
   cid="$("${compose[@]}" ps -q "$service")"
   if [[ -z "$cid" ]]; then failures+=("$service container is missing"); continue; fi
   status="$(docker inspect -f '{{.State.Status}}' "$cid")"
@@ -97,6 +100,40 @@ fi
   || failures+=("Axum internal stats endpoint failed")
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/metrics >"$tmpdir/realtime-metrics.txt" \
   || failures+=("Axum internal metrics endpoint failed")
+
+if [[ -f "$tmpdir/realtime-stats.json" ]]; then
+  if ! pressure_output="$(python3 - "$tmpdir/realtime-stats.json" "$(read_env OPS_AXUM_HIGH_QUEUE_MAX_PERCENT 75)" <<'PY_PRESSURE'
+import json, sys
+from pathlib import Path
+stats=json.loads(Path(sys.argv[1]).read_text())
+queue_limit=float(sys.argv[2])
+http=stats.get('http_admission') or {}
+pool=stats.get('sqlx_pool') or {}
+queues=stats.get('websocket_queues') or {}
+required_http=('read_limit','write_limit','in_flight','available_read','available_write')
+if any(name not in http for name in required_http):
+    raise SystemExit('missing_http_admission_metrics')
+if not pool.get('enabled'):
+    raise SystemExit('sqlx_pool_disabled')
+maximum=int(pool.get('max_connections') or 0)
+in_use=int(pool.get('in_use') or 0)
+if maximum <= 0 or in_use > maximum:
+    raise SystemExit(f'invalid_sqlx_pool:{in_use}/{maximum}')
+read_limit=int(http['read_limit']); write_limit=int(http['write_limit']); in_flight=int(http['in_flight'])
+if in_flight > read_limit + write_limit:
+    raise SystemExit(f'invalid_http_admission:{in_flight}>{read_limit + write_limit}')
+high_capacity=int(queues.get('high_capacity') or 0); high_queued=int(queues.get('high_queued') or 0)
+ratio=(100.0*high_queued/high_capacity) if high_capacity else 0.0
+print(f'http_in_flight={in_flight}/{read_limit + write_limit} sqlx_in_use={in_use}/{maximum} high_queue={ratio:.1f}%')
+if ratio >= queue_limit:
+    print(f'WARNING websocket high-priority queue is {ratio:.1f}% full', file=sys.stderr)
+PY_PRESSURE
+)"; then
+    failures+=("Axum pressure metrics are invalid: ${pressure_output:-unknown error}")
+  else
+    echo "  axum_pressure=$pressure_output"
+  fi
+fi
 
 pg_connections="$("${compose[@]}" exec -T postgres psql -U "$(read_env DB_USER)" -d "$(read_env DB_NAME)" -Atc "SELECT count(*) FROM pg_stat_activity;")"
 pg_max="$("${compose[@]}" exec -T postgres psql -U "$(read_env DB_USER)" -d "$(read_env DB_NAME)" -Atc "SHOW max_connections;")"

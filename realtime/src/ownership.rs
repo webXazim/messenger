@@ -147,6 +147,10 @@ async fn connect_and_run(state: Arc<AppState>) -> Result<()> {
                     Err(error) => { warn!(error=%error, "ignoring malformed targeted delivery"); continue; }
                 };
                 if delivery.version != 1 || delivery.origin_node_id == state.config.nats_node_id { continue; }
+                if !state.event_deduper.remember(&delivery.event_id) {
+                    tracing::debug!(event_id=%delivery.event_id, "duplicate targeted delivery ignored");
+                    continue;
+                }
                 let message = TextFrame::from(delivery.message);
                 match delivery.priority {
                     EphemeralPriority::High => { state.registry.fanout_high_filtered(&delivery.audiences, message, None, delivery.target_actor_id.as_deref()); }

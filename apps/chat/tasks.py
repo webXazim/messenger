@@ -297,3 +297,37 @@ def refresh_active_call_orchestration_task():
         refresh_call_orchestration(call)
         count += 1
     return count
+
+
+@shared_task(name="apps.chat.tasks.process_chat_data_plane_jobs", ignore_result=True)
+def process_chat_data_plane_jobs():
+    from .data_plane_jobs import process_due_chat_data_plane_jobs
+
+    return process_due_chat_data_plane_jobs(
+        batch_size=int(getattr(settings, "CHAT_DATA_PLANE_JOB_BATCH_SIZE", 150)),
+        lease_seconds=int(getattr(settings, "CHAT_DATA_PLANE_JOB_LEASE_SECONDS", 120)),
+    )
+
+
+@shared_task(name="apps.chat.tasks.cleanup_chat_data_plane_jobs", ignore_result=True)
+def cleanup_chat_data_plane_jobs():
+    from .data_plane_jobs import cleanup_completed_chat_data_plane_jobs
+
+    return cleanup_completed_chat_data_plane_jobs(
+        retention_days=int(getattr(settings, "CHAT_DATA_PLANE_JOB_RETENTION_DAYS", 7)),
+    )
+
+
+@shared_task(ignore_result=True)
+def enqueue_missing_media_processing_jobs():
+    from .media_processing import enqueue_missing_media_processing_jobs as enqueue_missing
+
+    batch_size = int(getattr(settings, "MEDIA_WORKER_ENQUEUE_RECOVERY_BATCH_SIZE", 250) or 250)
+    return enqueue_missing(batch_size=batch_size)
+
+
+@shared_task(ignore_result=True)
+def recover_media_processing_with_django():
+    from .media_processing import recover_media_processing_with_django as recover
+
+    return recover(batch_size=10)

@@ -1,15 +1,17 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc};
 
 use anyhow::{Context, Result};
 use sqlx::{postgres::{PgConnectOptions, PgPoolOptions}, PgPool};
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::Value;
 use uuid::Uuid;
 
-use crate::{command_auth::CommandIdentity, config::{ChatReadBackend, Config}, protocol::{AudienceKey, AudienceKind}};
+use crate::{config::{ChatAttachmentBackend, ChatCallRuntimeBackend, ChatCommandBackend, ChatConversationCommandBackend, ChatInteractionBackend, ChatMessageMutationBackend, ChatReadBackend, Config, OutboxPublisherBackend, SupportDataBackend}, protocol::AudienceKey};
 
 #[derive(Clone)]
 pub struct CommittedEvent {
     pub event_id: Uuid,
+    pub event_name: String,
     pub payload: Value,
     pub audiences: Vec<AudienceKey>,
 }
@@ -21,15 +23,43 @@ pub struct SendMessageResult {
     pub events: Vec<CommittedEvent>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PoolSnapshot {
+    pub enabled: bool,
+    pub size: u32,
+    pub idle: usize,
+    pub in_use: usize,
+    pub min_connections: u32,
+    pub max_connections: u32,
+}
+
 pub struct Database {
     pub(crate) pool: Option<PgPool>,
     backend: ChatReadBackend,
+    min_connections: u32,
+    max_connections: u32,
+    pub(crate) message_edit_window_seconds: i64,
 }
 
 impl Database {
     pub fn from_config(config: &Config) -> Result<Arc<Self>> {
-        if config.chat_read_backend == ChatReadBackend::Django && config.chat_command_backend == crate::config::ChatCommandBackend::Django {
-            return Ok(Arc::new(Self { pool: None, backend: config.chat_read_backend }));
+        if config.chat_read_backend == ChatReadBackend::Django
+            && config.chat_command_backend == ChatCommandBackend::Django
+            && config.chat_interaction_backend == ChatInteractionBackend::Django
+            && config.chat_message_mutation_backend == ChatMessageMutationBackend::Django
+            && config.chat_call_runtime_backend == ChatCallRuntimeBackend::Django
+            && config.chat_attachment_backend == ChatAttachmentBackend::Django
+            && config.chat_conversation_command_backend == ChatConversationCommandBackend::Django
+            && config.support_data_backend == SupportDataBackend::Django
+            && config.outbox_publisher_backend == OutboxPublisherBackend::Celery
+        {
+            return Ok(Arc::new(Self {
+                pool: None,
+                backend: config.chat_read_backend,
+                min_connections: 0,
+                max_connections: 0,
+                message_edit_window_seconds: config.message_edit_window_seconds,
+            }));
         }
 
         let options = PgConnectOptions::from_str(&config.sqlx_database_url)
@@ -37,16 +67,46 @@ impl Database {
             .application_name("crescentsphere-realtime");
         let pool = PgPoolOptions::new()
             .max_connections(config.sqlx_max_connections)
-            .min_connections(0)
+            .min_connections(config.sqlx_min_connections)
             .acquire_timeout(config.sqlx_acquire_timeout)
-            .idle_timeout(Some(Duration::from_secs(60)))
-            .max_lifetime(Some(Duration::from_secs(900)))
+            .idle_timeout(Some(config.sqlx_idle_timeout))
+            .max_lifetime(Some(config.sqlx_max_lifetime))
+            .test_before_acquire(true)
             .connect_lazy_with(options);
-        Ok(Arc::new(Self { pool: Some(pool), backend: config.chat_read_backend }))
+        Ok(Arc::new(Self {
+            pool: Some(pool),
+            backend: config.chat_read_backend,
+            min_connections: config.sqlx_min_connections,
+            max_connections: config.sqlx_max_connections,
+            message_edit_window_seconds: config.message_edit_window_seconds,
+        }))
     }
 
     pub const fn backend_name(&self) -> &'static str { self.backend.as_str() }
     pub fn enabled(&self) -> bool { self.pool.is_some() }
+
+    pub fn pool_snapshot(&self) -> PoolSnapshot {
+        let Some(pool) = &self.pool else {
+            return PoolSnapshot {
+                enabled: false,
+                size: 0,
+                idle: 0,
+                in_use: 0,
+                min_connections: 0,
+                max_connections: 0,
+            };
+        };
+        let size = pool.size();
+        let idle = pool.num_idle();
+        PoolSnapshot {
+            enabled: true,
+            size,
+            idle,
+            in_use: (size as usize).saturating_sub(idle),
+            min_connections: self.min_connections,
+            max_connections: self.max_connections,
+        }
+    }
 
     pub async fn check(&self) -> bool {
         let Some(pool) = &self.pool else { return true; };
@@ -70,96 +130,74 @@ impl Database {
         Ok(exists)
     }
 
-
-    pub async fn send_text_message(
-        &self,
-        conversation_id: Uuid,
-        identity: &CommandIdentity,
-        text: &str,
-        client_temp_id: &str,
-    ) -> Result<SendMessageResult> {
-        let pool = self.pool.as_ref().context("SQLx command backend is disabled")?;
-        let mut tx = pool.begin().await?;
-        let actor_id = if let Some(user_id) = identity.claimed_user_id {
-            sqlx::query_scalar::<_, i64>("SELECT id FROM accounts_user WHERE id = $1 AND is_active = TRUE")
-                .bind(user_id).persistent(false).fetch_optional(&mut *tx).await?
-        } else { None };
-        let actor_id = match actor_id {
-            Some(value) => value,
-            None if !identity.email.is_empty() => sqlx::query_scalar::<_, i64>("SELECT id FROM accounts_user WHERE LOWER(email) = $1 AND is_active = TRUE LIMIT 1")
-                .bind(&identity.email).persistent(false).fetch_optional(&mut *tx).await?
-                .context("authenticated user does not exist locally")?,
-            None => anyhow::bail!("authenticated user does not exist locally"),
-        };
-
-        let participant = sqlx::query_as::<_, (bool, bool)>(
-            "SELECT is_blocked, (moderation_muted_until IS NOT NULL AND moderation_muted_until > NOW()) FROM chat_conversationparticipant WHERE conversation_id = $1 AND user_id = $2 AND left_at IS NULL AND banned_at IS NULL FOR UPDATE"
-        )
-        .bind(conversation_id)
-        .bind(actor_id)
-        .persistent(false)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some((is_blocked, is_muted)) = participant else {
-            anyhow::bail!("actor is not an active participant");
-        };
-        if is_blocked { anyhow::bail!("participant is blocked"); }
-        if is_muted { anyhow::bail!("participant is muted"); }
-
-        if !client_temp_id.is_empty() {
-            if let Some(existing) = sqlx::query_scalar::<_, Value>(
-                "SELECT jsonb_build_object('id', id::text, 'conversation_id', conversation_id::text, 'type', type, 'text', text, 'sender', jsonb_build_object('id', sender_id::text), 'created_at', created_at, 'updated_at', updated_at, 'attachments', '[]'::jsonb, 'delivery_status', delivery_status, 'is_deleted', is_deleted, 'metadata', metadata, 'client_temp_id', client_temp_id, 'sequence', sequence, 'was_deduplicated', true) FROM chat_message WHERE conversation_id = $1 AND sender_id = $2 AND client_temp_id = $3 LIMIT 1"
+    pub async fn can_emit_messenger_ephemeral(&self, conversation_id: Uuid, user_id: i64) -> Result<bool> {
+        let Some(pool) = &self.pool else { return Ok(true); };
+        let allowed = sqlx::query_scalar::<_, bool>(r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM chat_conversation c
+                JOIN chat_conversationparticipant cp
+                  ON cp.conversation_id=c.id
+                 AND cp.user_id=$2
+                 AND cp.left_at IS NULL
+                 AND cp.banned_at IS NULL
+                 AND cp.is_blocked=FALSE
+                WHERE c.id=$1
+                  AND c.is_active=TRUE
+                  AND (
+                    c.type <> 'direct'
+                    OR NOT EXISTS(
+                        SELECT 1
+                        FROM chat_conversationparticipant other
+                        JOIN chat_userblock ub ON (
+                            (ub.blocker_id=$2 AND ub.blocked_id=other.user_id)
+                            OR (ub.blocker_id=other.user_id AND ub.blocked_id=$2)
+                        )
+                        WHERE other.conversation_id=c.id
+                          AND other.user_id<>$2
+                          AND other.left_at IS NULL
+                          AND other.banned_at IS NULL
+                    )
+                  )
             )
-            .bind(conversation_id).bind(actor_id).bind(client_temp_id)
-            .persistent(false).fetch_optional(&mut *tx).await? {
-                tx.commit().await?;
-                return Ok(SendMessageResult { payload: existing, was_deduplicated: true, events: Vec::new() });
-            }
-        }
-
-        let sequence = sqlx::query_scalar::<_, i64>(
-            "UPDATE chat_conversation SET next_message_sequence = next_message_sequence + 1, updated_at = NOW() WHERE id = $1 AND is_active = TRUE RETURNING next_message_sequence::bigint"
-        )
+        "#)
         .bind(conversation_id)
+        .bind(user_id)
         .persistent(false)
-        .fetch_optional(&mut *tx)
-        .await?
-        .context("conversation is unavailable")?;
+        .fetch_one(pool)
+        .await?;
+        Ok(allowed)
+    }
 
-        let message_id = Uuid::new_v4();
-        let metadata = json!({"raw_text": text});
-        let payload = sqlx::query_scalar::<_, Value>(
-            "INSERT INTO chat_message (id, created_at, updated_at, conversation_id, sender_id, type, text, metadata, reply_to_id, forwarded_from_id, is_edited, edited_at, edit_locked_at, edit_locked_reason, is_deleted, deleted_at, client_temp_id, sequence, delivery_status, failed_reason, retry_count) VALUES ($1, NOW(), NOW(), $2, $3, 'text', $4, $5, NULL, NULL, FALSE, NULL, NULL, '', FALSE, NULL, $6, $7, 'sent', '', 0) RETURNING jsonb_build_object('id', id::text, 'conversation_id', conversation_id::text, 'type', type, 'text', text, 'sender', jsonb_build_object('id', sender_id::text), 'created_at', created_at, 'updated_at', updated_at, 'attachments', '[]'::jsonb, 'delivery_status', delivery_status, 'failed_reason', NULL, 'retry_count', retry_count, 'is_deleted', is_deleted, 'metadata', metadata, 'client_temp_id', client_temp_id, 'sequence', sequence, 'was_deduplicated', false)"
-        )
-        .bind(message_id).bind(conversation_id).bind(actor_id).bind(text).bind(&metadata).bind(client_temp_id).bind(sequence)
-        .persistent(false).fetch_one(&mut *tx).await?;
 
-        sqlx::query("UPDATE chat_conversation SET last_message_id = $2, last_message_at = NOW(), updated_at = NOW() WHERE id = $1")
-            .bind(conversation_id).bind(message_id).persistent(false).execute(&mut *tx).await?;
-
-        let event_id = Uuid::new_v4();
-        let outbox_id = Uuid::new_v4();
-        let event_payload = json!({
-            "type": "chat.event", "version": 1, "event": "message.created",
-            "event_id": event_id.to_string(), "occurred_at": payload.get("created_at").cloned().unwrap_or(Value::Null), "data": payload.clone()
-        });
-        let audiences = json!([{"kind": "conversation", "id": conversation_id.to_string()}]);
+    pub async fn mark_outbox_published(
+        &self,
+        event_id: Uuid,
+        stream_sequence: u64,
+    ) -> Result<()> {
+        let pool = self.pool.as_ref().context("SQLx outbox publisher is disabled")?;
         sqlx::query(
-            "INSERT INTO common_realtimeoutboxevent (id, created_at, updated_at, event_id, event_name, payload, audiences, status, attempts, available_at, published_at, delivery_target, published_transport, stream_entry_id, last_error) VALUES ($1, NOW(), NOW(), $2, 'message.created', $3, $4, 'pending', 0, NOW(), NULL, 'nats_jetstream', '', '', '')"
+            "UPDATE common_realtimeoutboxevent SET status = 'published', attempts = attempts + 1, published_at = COALESCE(published_at, NOW()), available_at = NOW(), published_transport = 'nats_jetstream_axum', stream_entry_id = $2, last_error = '', updated_at = NOW() WHERE event_id = $1 AND status <> 'published'",
         )
-        .bind(outbox_id).bind(event_id).bind(&event_payload).bind(&audiences)
-        .persistent(false).execute(&mut *tx).await?;
+        .bind(event_id)
+        .bind(stream_sequence.to_string())
+        .persistent(false)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
 
-        tx.commit().await?;
-        Ok(SendMessageResult {
-            payload,
-            was_deduplicated: false,
-            events: vec![CommittedEvent {
-                event_id,
-                payload: event_payload,
-                audiences: vec![AudienceKey { kind: AudienceKind::Conversation, identifier: conversation_id.to_string() }],
-            }],
-        })
+    pub async fn mark_outbox_publish_failed(&self, event_id: Uuid, error: &str) -> Result<()> {
+        let pool = self.pool.as_ref().context("SQLx outbox publisher is disabled")?;
+        sqlx::query(
+            "UPDATE common_realtimeoutboxevent SET status = 'failed', attempts = attempts + 1, available_at = NOW() + INTERVAL '2 seconds', last_error = $2, updated_at = NOW() WHERE event_id = $1 AND status IN ('pending', 'failed')",
+        )
+        .bind(event_id)
+        .bind(error.chars().take(2000).collect::<String>())
+        .persistent(false)
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn latest_conversation_sequence(&self, conversation_id: Uuid) -> Result<i64> {

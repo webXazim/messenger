@@ -76,6 +76,7 @@ pub async fn run(state: Arc<AppState>) {
             Ok(()) => return,
             Err(error) => {
                 state.stream_ready.store(false, Ordering::Release);
+                state.durable_nats.set_client(None).await;
                 state.stream_errors.fetch_add(1, Ordering::Relaxed);
                 state.stream_reconnects.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(error = ?error, "JetStream durable consumer stopped");
@@ -98,7 +99,7 @@ async fn consume(state: Arc<AppState>) -> Result<()> {
     .context("NATS connection timed out")?
     .context("cannot connect to NATS")?;
 
-    let jetstream = jetstream::new(client);
+    let jetstream = jetstream::new(client.clone());
     let stream = jetstream
         .get_stream(&state.config.nats_stream_name)
         .await
@@ -125,6 +126,7 @@ async fn consume(state: Arc<AppState>) -> Result<()> {
         .await
         .context("cannot start JetStream message stream")?;
 
+    state.durable_nats.set_client(Some(client)).await;
     state.stream_ready.store(true, Ordering::Release);
     state.nats_ready.store(true, Ordering::Release);
     tracing::info!(
@@ -168,9 +170,12 @@ async fn process_message(state: &AppState, bytes: &[u8]) -> Result<()> {
         anyhow::bail!("JetStream event_id is empty");
     }
 
-    if !state.event_deduper.remember(&envelope.event_id) {
-        tracing::debug!(event_id = %envelope.event_id, "duplicate JetStream event ignored");
-        return Ok(());
+    let first_local_observation = state.event_deduper.remember(&envelope.event_id);
+    if !first_local_observation {
+        tracing::debug!(
+            event_id = %envelope.event_id,
+            "JetStream event was already delivered locally; remote ownership routing is still evaluated"
+        );
     }
 
     let payload = serde_json::to_string(&envelope.payload)
@@ -180,8 +185,13 @@ async fn process_message(state: &AppState, bytes: &[u8]) -> Result<()> {
     } else {
         None
     };
-    let message = TextFrame::from(payload);
-    let delivered = state.registry.fanout_high(&envelope.audiences, message);
+    let delivered = if first_local_observation {
+        state
+            .registry
+            .fanout_high(&envelope.audiences, TextFrame::from(payload))
+    } else {
+        0
+    };
     if let Some(targeted_payload) = targeted_payload {
         let targeted = TargetedDelivery {
             version: 1,

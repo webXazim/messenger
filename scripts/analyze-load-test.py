@@ -129,6 +129,28 @@ def main() -> int:
     slow_delta = int(delta(records, "axum", "disconnected_slow"))
     stream_errors_delta = int(delta(records, "axum", "stream_errors"))
     malformed_stream_delta = int(delta(records, "axum", "malformed_stream_events"))
+    http_read_delta = delta(records, "axum", "http_read_requests")
+    http_write_delta = delta(records, "axum", "http_write_requests")
+    http_rejected_read_delta = int(delta(records, "axum", "http_rejected_read"))
+    http_rejected_write_delta = int(delta(records, "axum", "http_rejected_write"))
+    http_timeout_delta = int(delta(records, "axum", "http_timed_out"))
+    http_server_error_delta = int(delta(records, "axum", "http_server_errors"))
+    max_sqlx_pool_ratio = max(
+        (
+            float(item.get("axum", {}).get("sqlx_pool_in_use", 0) or 0)
+            / max(1.0, float(item.get("axum", {}).get("sqlx_pool_max", 0) or 0))
+            for item in records
+        ),
+        default=0.0,
+    )
+    max_websocket_high_queue_ratio = max(
+        (
+            float(item.get("axum", {}).get("websocket_high_queued", 0) or 0)
+            / max(1.0, float(item.get("axum", {}).get("websocket_high_capacity", 0) or 0))
+            for item in records
+        ),
+        default=0.0,
+    )
     max_pg_ratio = max(
         (
             float(item.get("postgres", {}).get("connections", 0))
@@ -218,6 +240,10 @@ def main() -> int:
         "slow_disconnect_rate_below_1_percent": slow_delta < max(1, args.target_connections * 0.01),
         "no_axum_stream_errors": stream_errors_delta == 0,
         "no_malformed_stream_events": malformed_stream_delta == 0,
+        "no_axum_http_execution_timeouts": http_timeout_delta == 0,
+        "axum_http_server_error_rate_below_1_percent": http_server_error_delta / max(1.0, http_read_delta + http_write_delta) < 0.01,
+        "sqlx_pool_never_exceeded_capacity": max_sqlx_pool_ratio <= 1.0,
+        "websocket_high_priority_queue_below_75_percent": max_websocket_high_queue_ratio < 0.75,
         "no_container_restarts": restart_delta == 0,
         "durable_outbox_pending_below_250": max_pending < 250,
         "failed_outbox_below_25": max_failed_outbox < 25,
@@ -289,6 +315,14 @@ def main() -> int:
             "slow_disconnects_delta": slow_delta,
             "axum_stream_errors_delta": stream_errors_delta,
             "malformed_stream_events_delta": malformed_stream_delta,
+            "axum_http_read_requests_delta": http_read_delta,
+            "axum_http_write_requests_delta": http_write_delta,
+            "axum_http_rejected_read_delta": http_rejected_read_delta,
+            "axum_http_rejected_write_delta": http_rejected_write_delta,
+            "axum_http_timeouts_delta": http_timeout_delta,
+            "axum_http_server_errors_delta": http_server_error_delta,
+            "sqlx_pool_max_ratio": max_sqlx_pool_ratio,
+            "websocket_high_queue_max_ratio": max_websocket_high_queue_ratio,
             "container_restart_delta_max": restart_delta,
             "durable_outbox_pending_max": max_pending,
             "nats_slow_consumers_delta": nats_slow_delta,

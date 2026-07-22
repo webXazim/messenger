@@ -138,6 +138,8 @@ export type Message = {
   can_edit?: boolean;
   edit_locked_reason?: string;
   edit_deadline?: string;
+  can_restore?: boolean;
+  restore_locked_reason?: string;
   transcript?: { text?: string } | null;
   voice_note?: { is_voice_note: boolean; duration_seconds?: number | string | null; waveform?: number[] } | null;
   call_event?: {

@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 suite="${1:-loadtests/results/final-suite}"
 [[ -d "$suite" ]] || { echo "Missing suite directory: $suite" >&2; exit 1; }
 
-for mode in smoke capacity api reconnect mixed; do
+for mode in smoke capacity api reconnect mixed overload soak; do
   marker="$suite/passed-${mode}.json"
   [[ -f "$marker" ]] || { echo "Missing successful $mode marker in $suite" >&2; exit 1; }
   python3 - "$marker" <<'PY'

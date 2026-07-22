@@ -58,6 +58,29 @@ def _claim_realtime_outbox_rows(batch_size: int) -> list[RealtimeOutboxEvent]:
     return rows
 
 
+def _update_claimed_outbox_row(row: RealtimeOutboxEvent, **changes) -> bool:
+    """Update only the lease still owned by this recovery worker.
+
+    Axum can publish and mark the same row while a periodic Celery sweep is in
+    flight. Matching the unique claim marker prevents the recovery worker from
+    downgrading an already-published row to failed or overwriting Axum's stream
+    acknowledgement.
+    """
+
+    claim_marker = str(row.last_error or "")
+    if not claim_marker.startswith("claim:"):
+        return False
+    changes["attempts"] = F("attempts") + 1
+    return (
+        RealtimeOutboxEvent.objects.filter(
+            pk=row.pk,
+            status=RealtimeOutboxEvent.Status.PROCESSING,
+            last_error=claim_marker,
+        ).update(**changes)
+        == 1
+    )
+
+
 def schedule_realtime_outbox_publish() -> bool:
     """Coalesce request-side wakeups into one Celery task.
 
@@ -66,6 +89,9 @@ def schedule_realtime_outbox_publish() -> bool:
     pressure. The shared cache key allows only one immediate publisher wakeup;
     the periodic beat sweep remains the durable fallback.
     """
+
+    if str(getattr(settings, "REALTIME_OUTBOX_PUBLISHER", "celery")).lower() == "axum":
+        return False
 
     wake_key = str(getattr(settings, "REALTIME_OUTBOX_WAKE_KEY", "realtime:outbox:wake"))
     wake_ttl = max(3, int(getattr(settings, "REALTIME_OUTBOX_WAKE_TTL_SECONDS", 10)))
@@ -85,7 +111,7 @@ def schedule_realtime_outbox_publish() -> bool:
 
 @shared_task(name="apps.common.tasks.publish_realtime_outbox_events", ignore_result=True)
 def publish_realtime_outbox_events() -> dict[str, int]:
-    """Publish one claimed batch over one NATS connection and bulk-update rows."""
+    """Publish one claimed recovery batch with lease-aware status updates."""
 
     batch_size = max(1, min(500, int(getattr(settings, "REALTIME_OUTBOX_BATCH_SIZE", 100))))
     wake_key = str(getattr(settings, "REALTIME_OUTBOX_WAKE_KEY", "realtime:outbox:wake"))
@@ -103,51 +129,44 @@ def publish_realtime_outbox_events() -> dict[str, int]:
         except Exception as exc:
             now = timezone.now()
             error_text = str(exc)[:2000]
+            failed_updates = 0
             for row in rows:
-                row.attempts = int(row.attempts or 0) + 1
-                retry_seconds = min(300, max(2, 2 ** min(row.attempts, 8)))
-                row.status = RealtimeOutboxEvent.Status.FAILED
-                row.available_at = now + timedelta(seconds=retry_seconds)
-                row.last_error = error_text
-                row.updated_at = now
-            RealtimeOutboxEvent.objects.bulk_update(
-                rows,
-                ["status", "attempts", "available_at", "last_error", "updated_at"],
-                batch_size=batch_size,
-            )
-            return {"published": 0, "failed": len(rows), "disabled": 0}
+                next_attempt = int(row.attempts or 0) + 1
+                retry_seconds = min(300, max(2, 2 ** min(next_attempt, 8)))
+                if _update_claimed_outbox_row(
+                    row,
+                    status=RealtimeOutboxEvent.Status.FAILED,
+                    available_at=now + timedelta(seconds=retry_seconds),
+                    last_error=error_text,
+                    updated_at=now,
+                ):
+                    failed_updates += 1
+            return {"published": 0, "failed": failed_updates, "disabled": 0}
 
         now = timezone.now()
         for row in rows:
-            row.attempts = int(row.attempts or 0) + 1
-            row.updated_at = now
             sequence = sequences.get(str(row.event_id))
             if sequence is None:
-                failed += 1
-                row.status = RealtimeOutboxEvent.Status.FAILED
-                row.available_at = now + timedelta(seconds=2)
-                row.last_error = "JetStream publish returned no acknowledgement for this event."
+                if _update_claimed_outbox_row(
+                    row,
+                    status=RealtimeOutboxEvent.Status.FAILED,
+                    available_at=now + timedelta(seconds=2),
+                    last_error="JetStream publish returned no acknowledgement for this event.",
+                    updated_at=now,
+                ):
+                    failed += 1
                 continue
-            published += 1
-            row.status = RealtimeOutboxEvent.Status.PUBLISHED
-            row.published_at = now
-            row.published_transport = "nats_jetstream"
-            row.stream_entry_id = str(sequence)
-            row.last_error = ""
-        RealtimeOutboxEvent.objects.bulk_update(
-            rows,
-            [
-                "status",
-                "attempts",
-                "available_at",
-                "published_at",
-                "published_transport",
-                "stream_entry_id",
-                "last_error",
-                "updated_at",
-            ],
-            batch_size=batch_size,
-        )
+            if _update_claimed_outbox_row(
+                row,
+                status=RealtimeOutboxEvent.Status.PUBLISHED,
+                available_at=now,
+                published_at=now,
+                published_transport="nats_jetstream",
+                stream_entry_id=str(sequence),
+                last_error="",
+                updated_at=now,
+            ):
+                published += 1
         return {"published": published, "failed": failed, "disabled": 0}
     finally:
         try:
@@ -168,7 +187,10 @@ def publish_realtime_outbox_events() -> dict[str, int]:
                 available_at__lte=timezone.now(),
             ).exists()
             if has_more:
-                schedule_realtime_outbox_publish()
+                if str(getattr(settings, "REALTIME_OUTBOX_PUBLISHER", "celery")).lower() == "axum":
+                    publish_realtime_outbox_events.apply_async(countdown=1)
+                else:
+                    schedule_realtime_outbox_publish()
         except Exception:
             logger.exception("Unable to inspect remaining realtime outbox work")
 

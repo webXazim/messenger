@@ -109,6 +109,18 @@ async fn connect_and_consume(state: Arc<AppState>) -> Result<()> {
                 if envelope.version != 1 || envelope.origin_node_id == state.config.nats_node_id {
                     continue;
                 }
+                state.call_signals.ingest_event_message(
+                    &envelope.message,
+                    envelope.target_actor_id.as_deref(),
+                    state.config.call_signal_ttl,
+                    state.config.call_signal_queue_capacity,
+                );
+                state.support_signals.ingest_event_message(
+                    &envelope.message,
+                    envelope.target_actor_id.as_deref(),
+                    state.config.support_signal_ttl,
+                    state.config.support_signal_queue_capacity,
+                );
                 let message = TextFrame::from(envelope.message);
                 match envelope.priority {
                     EphemeralPriority::High => {
@@ -176,6 +188,33 @@ pub async fn publish_after_local(
     if let Err(error) = state.core_nats.publish(&state.config.nats_ephemeral_subject, &envelope).await {
         state.ephemeral_errors.fetch_add(1, Ordering::Relaxed);
         warn!(error = %error, "Core NATS ephemeral publish failed; local delivery was preserved");
+    } else {
+        state.ephemeral_published.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+
+pub async fn publish_shared_after_local(
+    state: &AppState,
+    audiences: Vec<AudienceKey>,
+    message: TextFrame,
+    priority: EphemeralPriority,
+    target_actor_id: Option<String>,
+) {
+    if state.config.ephemeral_backend.as_str() != "nats" { return; }
+    let envelope = EphemeralEnvelope {
+        version: 1,
+        origin_node_id: state.config.nats_node_id.clone(),
+        event_id: Uuid::new_v4(),
+        audiences,
+        message: message.to_string(),
+        priority,
+        exclude_connection_id: None,
+        target_actor_id,
+    };
+    if let Err(error) = state.core_nats.publish(&state.config.nats_ephemeral_subject, &envelope).await {
+        state.ephemeral_errors.fetch_add(1, Ordering::Relaxed);
+        warn!(error = %error, "shared Core NATS publish failed; local delivery and fallback queue were preserved");
     } else {
         state.ephemeral_published.fetch_add(1, Ordering::Relaxed);
     }

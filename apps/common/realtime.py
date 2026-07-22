@@ -153,9 +153,15 @@ def publish_realtime_event(
             # connection inside the HTTP request. The outbox row stays pending
             # if Redis/Celery is temporarily unavailable, and the periodic beat
             # sweep retries it.
-            from apps.common.tasks import schedule_realtime_outbox_publish
+            if getattr(settings, "REALTIME_OUTBOX_PUBLISHER", "celery") == "celery":
+                from apps.common.tasks import schedule_realtime_outbox_publish
 
-            schedule_realtime_outbox_publish()
+                schedule_realtime_outbox_publish()
+            else:
+                logger.debug(
+                    "Axum is the primary durable publisher; Celery beat will recover Django-originated pending rows",
+                    extra={"event": event_name, "outbox_event_id": str(outbox_event.event_id)},
+                )
         except Exception:
             logger.exception(
                 "Unable to wake realtime outbox worker; periodic recovery will retry",

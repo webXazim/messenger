@@ -848,7 +848,7 @@ class MessageEncryptionEnvelopeSerializer(serializers.Serializer):
 class MessageSerializer(serializers.ModelSerializer):
     sender = UserLiteSerializer(read_only=True)
     forwarded_from = serializers.SerializerMethodField()
-    attachments = MessageAttachmentSerializer(many=True, read_only=True)
+    attachments = serializers.SerializerMethodField()
     reactions = MessageReactionSerializer(many=True, read_only=True)
     deliveries = MessageDeliverySerializer(many=True, read_only=True)
     edit_history = MessageEditHistorySerializer(many=True, read_only=True)
@@ -865,6 +865,8 @@ class MessageSerializer(serializers.ModelSerializer):
     can_edit = serializers.SerializerMethodField()
     edit_locked_reason = serializers.SerializerMethodField()
     edit_deadline = serializers.SerializerMethodField()
+    can_restore = serializers.SerializerMethodField()
+    restore_locked_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -903,6 +905,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "can_edit",
             "edit_locked_reason",
             "edit_deadline",
+            "can_restore",
+            "restore_locked_reason",
             "created_at",
             "updated_at",
         )
@@ -933,11 +937,40 @@ class MessageSerializer(serializers.ModelSerializer):
             "can_edit",
             "edit_locked_reason",
             "edit_deadline",
+            "can_restore",
+            "restore_locked_reason",
             "created_at",
             "updated_at",
         )
 
+    def get_attachments(self, obj) -> list[dict[str, Any]]:
+        if obj.is_deleted:
+            return []
+        return MessageAttachmentSerializer(obj.attachments.all(), many=True, context=self.context).data
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_deleted:
+            # Soft deletion must revoke message content from every API response.
+            # The database keeps the original state only for authorized restore.
+            data.update({
+                "text": "",
+                "metadata": {},
+                "attachments": [],
+                "edit_history": [],
+                "voice_note": None,
+                "transcript": None,
+                "entities": [],
+                "links": [],
+                "mentioned_user_ids": [],
+                "is_encrypted": False,
+                "encryption": None,
+            })
+        return data
+
     def get_voice_note(self, obj) -> dict[str, Any] | None:
+        if obj.is_deleted:
+            return None
         metadata = obj.metadata or {}
         if obj.type != Message.MessageType.AUDIO and not metadata.get("voice_note"):
             return None
@@ -964,6 +997,30 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_edit_deadline(self, obj) -> str:
         return self._edit_policy(obj)["deadline"].isoformat()
 
+    def get_can_restore(self, obj) -> bool:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        return bool(
+            actor
+            and getattr(actor, "is_authenticated", False)
+            and obj.sender_id == actor.id
+            and obj.is_deleted
+            and obj.deletion_source == Message.DeletionSource.SENDER
+        )
+
+    def get_restore_locked_reason(self, obj) -> str:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        if not actor or not getattr(actor, "is_authenticated", False) or obj.sender_id != actor.id:
+            return "Only the sender can restore this message."
+        if not obj.is_deleted:
+            return "This message is not deleted."
+        if obj.deletion_source == Message.DeletionSource.MODERATION:
+            return "A message hidden by moderation cannot be restored by its sender."
+        if obj.deletion_source != Message.DeletionSource.SENDER:
+            return "This deleted message cannot be restored."
+        return ""
+
     def get_forwarded_from(self, obj) -> str | None:
         return str(obj.forwarded_from_id) if obj.forwarded_from_id else None
 
@@ -980,20 +1037,22 @@ class MessageSerializer(serializers.ModelSerializer):
         return [{"emoji": emoji, "count": count} for emoji, count in sorted(counts.items())]
 
     def get_entities(self, obj) -> list[dict[str, Any]]:
-        return (obj.metadata or {}).get("entities", [])
+        return [] if obj.is_deleted else (obj.metadata or {}).get("entities", [])
 
     def get_links(self, obj) -> list[dict[str, Any]]:
-        return (obj.metadata or {}).get("links", [])
+        return [] if obj.is_deleted else (obj.metadata or {}).get("links", [])
 
     def get_mentioned_user_ids(self, obj) -> list[str]:
-        return (obj.metadata or {}).get("mentioned_user_ids", [])
+        return [] if obj.is_deleted else (obj.metadata or {}).get("mentioned_user_ids", [])
 
     @extend_schema_field(serializers.BooleanField)
     def get_is_encrypted(self, obj):
-        return bool((obj.metadata or {}).get("encrypted"))
+        return False if obj.is_deleted else bool((obj.metadata or {}).get("encrypted"))
 
     @extend_schema_field(MessageEncryptionEnvelopeSerializer(allow_null=True))
     def get_encryption(self, obj):
+        if obj.is_deleted:
+            return None
         metadata = obj.metadata or {}
         return metadata.get("encryption") if metadata.get("encrypted") else None
 
@@ -1044,7 +1103,7 @@ class ParticipantPreviewSerializer(serializers.ModelSerializer):
 class MessagePreviewSerializer(serializers.ModelSerializer):
     sender = UserCompactSerializer(read_only=True)
     forwarded_from = serializers.SerializerMethodField()
-    attachments = MessageAttachmentPreviewSerializer(many=True, read_only=True)
+    attachments = serializers.SerializerMethodField()
     reaction_summary = serializers.SerializerMethodField()
     voice_note = serializers.SerializerMethodField()
     entities = serializers.SerializerMethodField()
@@ -1086,7 +1145,32 @@ class MessagePreviewSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    def get_attachments(self, obj) -> list[dict[str, Any]]:
+        if obj.is_deleted:
+            return []
+        return MessageAttachmentPreviewSerializer(obj.attachments.all(), many=True, context=self.context).data
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_deleted:
+            # Soft deletion must revoke message content from every API response.
+            # The database keeps the original state only for authorized restore.
+            data.update({
+                "text": "",
+                "metadata": {},
+                "attachments": [],
+                "voice_note": None,
+                "entities": [],
+                "links": [],
+                "mentioned_user_ids": [],
+                "is_encrypted": False,
+                "encryption": None,
+            })
+        return data
+
     def get_voice_note(self, obj) -> dict[str, Any] | None:
+        if obj.is_deleted:
+            return None
         metadata = obj.metadata or {}
         if obj.type != Message.MessageType.AUDIO and not metadata.get("voice_note"):
             return None
@@ -1113,20 +1197,22 @@ class MessagePreviewSerializer(serializers.ModelSerializer):
         return [{"emoji": emoji, "count": count} for emoji, count in sorted(counts.items())]
 
     def get_entities(self, obj) -> list[dict[str, Any]]:
-        return (obj.metadata or {}).get("entities", [])
+        return [] if obj.is_deleted else (obj.metadata or {}).get("entities", [])
 
     def get_links(self, obj) -> list[dict[str, Any]]:
-        return (obj.metadata or {}).get("links", [])
+        return [] if obj.is_deleted else (obj.metadata or {}).get("links", [])
 
     def get_mentioned_user_ids(self, obj) -> list[str]:
-        return (obj.metadata or {}).get("mentioned_user_ids", [])
+        return [] if obj.is_deleted else (obj.metadata or {}).get("mentioned_user_ids", [])
 
     @extend_schema_field(serializers.BooleanField)
     def get_is_encrypted(self, obj):
-        return bool((obj.metadata or {}).get("encrypted"))
+        return False if obj.is_deleted else bool((obj.metadata or {}).get("encrypted"))
 
     @extend_schema_field(MessageEncryptionEnvelopeSerializer(allow_null=True))
     def get_encryption(self, obj):
+        if obj.is_deleted:
+            return None
         metadata = obj.metadata or {}
         return metadata.get("encryption") if metadata.get("encrypted") else None
 

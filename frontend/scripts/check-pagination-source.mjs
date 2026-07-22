@@ -9,14 +9,24 @@ const conversation = read("src/pages/ConversationPage.tsx");
 const accountsViews = read("../apps/accounts/api/views.py");
 
 for (const required of [
-  'collectChatPages("/chat/conversations/"',
-  'collectChatPages("/chat/calls/recent/"',
-  'collectChatPages(`/chat/conversations/${conversationId}/media/`',
+  'collectChatPages(readPath("/chat/conversations/", "/conversations/")',
+  'collectChatPages(`${callsBase}/recent/`',
+  'collectChatPages(readPath(`/chat/conversations/${conversationId}/media/`, `/conversations/${conversationId}/media/`)',
   'collectChatPages("/chat/e2ee/devices/"',
   'collectChatPages("/chat/blocks/"',
   'collectChatPages("/chat/devices/"',
 ]) {
   assert.ok(chatApi.includes(required), `Missing paginated chat collection: ${required}`);
+}
+
+for (const required of [
+  'CHAT_READ_BACKEND === "sqlx"',
+  '`${CHAT_READ_URL}${sqlxPath}`',
+  'readPath(`/chat/conversations/${id}/`, `/conversations/${id}/`)',
+  'readPath(`/chat/conversations/${conversationId}/messages/`, `/conversations/${conversationId}/messages/`)',
+  'readPath(`/chat/messages/${messageId}/context/`, `/messages/${messageId}/context/`)',
+]) {
+  assert.ok(chatApi.includes(required), `Missing SQLx read routing contract: ${required}`);
 }
 
 for (const required of [

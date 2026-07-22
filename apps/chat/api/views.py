@@ -104,6 +104,7 @@ from apps.chat.services import (
     remove_reaction,
     report_message,
     resolve_message_report,
+    restore_message,
     restore_message_by_staff,
     join_group_via_invite,
     scan_upload_file,
@@ -841,6 +842,8 @@ class MessageEditHistoryView(generics.ListAPIView):
             ).distinct(),
             id=self.kwargs["message_id"],
         )
+        if message.is_deleted:
+            return MessageEditHistory.objects.none()
         return message.edit_history.select_related("edited_by", "edited_by__profile").order_by("-created_at")
 
 
@@ -871,6 +874,21 @@ class MessageUpdateDeleteView(views.APIView):
         output = MessageSerializer(message, context={"request": request}).data
         _broadcast_to_conversation(str(message.conversation_id), "message.deleted", output)
         return Response(output, status=status.HTTP_200_OK)
+
+
+class MessageRestoreView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, message_id):
+        message = get_object_or_404(
+            Message.objects.select_related("conversation", "sender"),
+            id=message_id,
+            conversation__participants__user=request.user,
+        )
+        message = restore_message(request.user, message)
+        output = MessageSerializer(message, context={"request": request}).data
+        _broadcast_to_conversation(str(message.conversation_id), "message.restored", output)
+        return Response(output)
 
 
 class MessageForwardView(views.APIView):
@@ -1380,7 +1398,12 @@ class AttachmentDownloadView(views.APIView):
                 user=request.user if getattr(request.user, "is_authenticated", False) else None,
             )
             from apps.chat.models import MessageAttachment
-            attachment = get_object_or_404(MessageAttachment, id=attachment_id, scan_status=MessageAttachment.ScanStatus.CLEAN)
+            attachment = get_object_or_404(
+                MessageAttachment.objects.select_related("message", "message__conversation"),
+                id=attachment_id,
+                scan_status=MessageAttachment.ScanStatus.CLEAN,
+                message__is_deleted=False,
+            )
             attachment._media_token_payload = token_payload
             return attachment
         if not request.user.is_authenticated:

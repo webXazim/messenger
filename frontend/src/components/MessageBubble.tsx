@@ -40,6 +40,7 @@ export type MessageBubbleProps = {
   onToggleReaction: (message: Message, emoji: string) => void;
   onEdit: (message: Message) => void;
   onDelete: (message: Message) => void;
+  onRestore: (message: Message) => void;
   onRetry?: (message: Message) => void;
   onReport?: (message: Message) => void;
   onPreviewAttachment?: (attachmentId: string) => void;
@@ -65,6 +66,7 @@ export function MessageBubble({
   onToggleReaction,
   onEdit,
   onDelete,
+  onRestore,
   onRetry,
   onReport,
   onPreviewAttachment,
@@ -235,6 +237,7 @@ export function MessageBubble({
             onForward={onForward}
             onEdit={onEdit}
             onDelete={onDelete}
+            onRestore={onRestore}
             onReport={onReport}
             disabled={actionPending}
           /> : null}

@@ -110,6 +110,14 @@ impl PresenceStore {
         format!("{}:{}", session.device_id, connection_id)
     }
 
+    pub async fn user_snapshot(&self, user_id: &str) -> Result<Value> {
+        if self.backend == RealtimeBackend::Local {
+            return Ok(self.local_user_snapshot(user_id));
+        }
+        let mut connection = self.connection().await?;
+        self.redis_user_snapshot_with(&mut connection, user_id).await
+    }
+
     pub async fn touch_user(
         &self,
         session: &AuthenticatedSession,

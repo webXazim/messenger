@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from uuid import uuid4
 import mimetypes
 import uuid
+import jwt
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -2312,7 +2313,18 @@ def scan_upload_file(upload, initial_bytes=None):
     upload.scanned_at = timezone.now()
     upload.save(update_fields=["scan_status", "status", "scan_notes", "scanned_at", "updated_at"])
     if upload.scan_status == PendingUpload.ScanStatus.CLEAN and upload.status == PendingUpload.UploadStatus.PENDING:
-        enrich_pending_upload_media(upload)
+        media_backend = str(getattr(settings, "MEDIA_PROCESSING_BACKEND", "django") or "django").strip().lower()
+        if media_backend == "rust":
+            from .media_processing import enqueue_media_processing
+
+            enqueue_media_processing(upload)
+        elif media_backend == "rust_shadow":
+            enrich_pending_upload_media(upload)
+            from .media_processing import enqueue_media_processing
+
+            enqueue_media_processing(upload, force=True)
+        else:
+            enrich_pending_upload_media(upload)
     log_chat_event(
         ChatAuditLog.EventType.UPLOAD_SCANNED,
         actor=upload.user,
@@ -2343,6 +2355,25 @@ def make_realtime_safe(value):
     return normalize_realtime_value(value)
 
 def build_media_access_token(*, resource_type, resource_id, user_id=None, purpose="standard"):
+    """Issue short-lived bearer capabilities for private media access."""
+    shared_secret = str(getattr(settings, "MEDIA_TOKEN_SHARED_SECRET", "") or "").strip()
+    if shared_secret:
+        now = timezone.now()
+        ttl = int(getattr(settings, "MEDIA_TOKEN_TTL_SECONDS", 300) or 300)
+        payload = {
+            "iss": str(getattr(settings, "MEDIA_TOKEN_ISSUER", "crescentsphere-media")),
+            "aud": str(getattr(settings, "MEDIA_TOKEN_AUDIENCE", "crescentsphere-private-media")),
+            "sub": str(user_id) if user_id else "",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(seconds=ttl)).timestamp()),
+            "jti": uuid4().hex,
+            "token_type": "media_access",
+            "resource_type": resource_type,
+            "resource_id": str(resource_id),
+            "purpose": purpose,
+        }
+        return jwt.encode(payload, shared_secret, algorithm="HS256")
+
     payload = {
         "resource_type": resource_type,
         "resource_id": str(resource_id),
@@ -2350,28 +2381,40 @@ def build_media_access_token(*, resource_type, resource_id, user_id=None, purpos
         "issued_at": timezone.now().isoformat(),
         "purpose": purpose,
     }
-    token = signing.dumps(payload, salt=MEDIA_TOKEN_SALT)
-    return token
+    return signing.dumps(payload, salt=MEDIA_TOKEN_SALT)
 
 
 def validate_media_access_token(token, *, resource_type, resource_id, user=None):
-    max_age = int(getattr(settings, "MEDIA_TOKEN_TTL_SECONDS", 300) or 300)
-    try:
-        payload = signing.loads(token, salt=MEDIA_TOKEN_SALT, max_age=max_age)
-    except signing.BadSignature:
-        raise PermissionDenied("Invalid or expired media token.")
+    shared_secret = str(getattr(settings, "MEDIA_TOKEN_SHARED_SECRET", "") or "").strip()
+    if shared_secret and str(token).count(".") == 2:
+        try:
+            payload = jwt.decode(
+                token,
+                shared_secret,
+                algorithms=["HS256"],
+                audience=str(getattr(settings, "MEDIA_TOKEN_AUDIENCE", "crescentsphere-private-media")),
+                issuer=str(getattr(settings, "MEDIA_TOKEN_ISSUER", "crescentsphere-media")),
+                options={"require": ["exp", "iat", "iss", "aud", "resource_type", "resource_id", "token_type"]},
+            )
+        except jwt.PyJWTError:
+            raise PermissionDenied("Invalid or expired media token.")
+        if payload.get("token_type") != "media_access":
+            raise PermissionDenied("Invalid media token type.")
+        expected_user_id = payload.get("sub") or None
+    else:
+        max_age = int(getattr(settings, "MEDIA_TOKEN_TTL_SECONDS", 300) or 300)
+        try:
+            payload = signing.loads(token, salt=MEDIA_TOKEN_SALT, max_age=max_age)
+        except signing.BadSignature:
+            raise PermissionDenied("Invalid or expired media token.")
+        expected_user_id = payload.get("user_id")
+
     if payload.get("resource_type") != resource_type or str(payload.get("resource_id")) != str(resource_id):
         raise PermissionDenied("Media token does not match requested resource.")
-    expected_user_id = payload.get("user_id")
-    # Media tokens are short-lived bearer capabilities so native <video> and
-    # <audio> elements can stream and seek without exposing the account JWT in
-    # a URL. When an authenticated identity is present, still reject a token
-    # issued for a different account.
     if expected_user_id and user and getattr(user, "is_authenticated", False):
         if str(user.id) != str(expected_user_id):
             raise PermissionDenied("Media token does not belong to this user.")
     return payload
-
 
 def create_media_access_payload(*, actor, resource_type, resource_id, request=None, disposition="attachment", purpose="standard"):
     """Build signed media access metadata for preview/download use cases.
@@ -2761,6 +2804,7 @@ def attach_pending_uploads_to_message(
             scanned_at=upload.scanned_at,
             metadata={
                 **dict(upload.metadata or {}),
+                "source_pending_upload_id": str(upload.id),
                 **(
                     {"encrypted_attachment": True, "encryption": encryption_payloads[str(upload.id)]}
                     if str(upload.id) in encryption_payloads
@@ -3062,6 +3106,8 @@ def edit_message(actor, message, text, entities=None, encryption=None):
             field_name="encryption",
             label="Encrypted edit",
         )
+        if was_encrypted and existing_metadata.get("encryption") == encryption_payload:
+            return message
         MessageEditHistory.objects.create(
             message=message,
             edited_by=actor,
@@ -3108,15 +3154,39 @@ def edit_message(actor, message, text, entities=None, encryption=None):
 
 @transaction.atomic
 def soft_delete_message(actor, message):
+    message = Message.objects.select_for_update().select_related("conversation", "sender").get(pk=message.pk)
+    ensure_participant(message.conversation, actor)
     if message.sender_id != actor.id:
         raise PermissionDenied("You can delete only your own messages.")
     if message.is_deleted:
         return message
+    message.deleted_text_backup = message.text or ""
+    message.deletion_source = Message.DeletionSource.SENDER
     message.text = ""
     message.is_deleted = True
     message.deleted_at = timezone.now()
-    message.save(update_fields=["text", "is_deleted", "deleted_at", "updated_at"])
+    message.save(update_fields=["text", "is_deleted", "deleted_at", "deleted_text_backup", "deletion_source", "updated_at"])
     log_chat_event(ChatAuditLog.EventType.MESSAGE_DELETED, actor=actor, conversation=message.conversation, message=message)
+    return message
+
+
+@transaction.atomic
+def restore_message(actor, message):
+    message = Message.objects.select_for_update().select_related("conversation", "sender").get(pk=message.pk)
+    ensure_participant(message.conversation, actor)
+    if message.sender_id != actor.id:
+        raise PermissionDenied("You can restore only your own messages.")
+    if not message.is_deleted:
+        return message
+    if message.deletion_source != Message.DeletionSource.SENDER:
+        raise PermissionDenied("This deleted message cannot be restored by its sender.")
+    message.text = message.deleted_text_backup or ""
+    message.deleted_text_backup = ""
+    message.deletion_source = ""
+    message.is_deleted = False
+    message.deleted_at = None
+    message.save(update_fields=["text", "is_deleted", "deleted_at", "deleted_text_backup", "deletion_source", "updated_at"])
+    log_chat_event(ChatAuditLog.EventType.MESSAGE_RESTORED, actor=actor, conversation=message.conversation, message=message)
     return message
 
 
@@ -3138,6 +3208,8 @@ def retry_message(actor, message):
     if message.sender_id != actor.id:
         raise PermissionDenied("You can retry only your own message.")
     if message.delivery_status != Message.DeliveryStatus.FAILED:
+        if message.delivery_status == Message.DeliveryStatus.SENT and int(message.retry_count or 0) > 0:
+            return message
         raise ValidationError({"message": "Only failed messages can be retried."})
     message.delivery_status = Message.DeliveryStatus.SENT
     message.failed_reason = ""
@@ -4040,6 +4112,7 @@ def secure_attachment_queryset_for_user(user):
     return MessageAttachment.objects.filter(
         message__conversation__participants__user=user,
         message__conversation__participants__left_at__isnull=True,
+        message__is_deleted=False,
         scan_status=MessageAttachment.ScanStatus.CLEAN,
     ).distinct()
 
@@ -4063,10 +4136,12 @@ def list_message_reports(actor):
 def resolve_message_report(actor, report, notes="", hide_message=False):
     action = ModerationAction.objects.create(report=report, message=report.message, actor=actor, action_type=ModerationAction.ActionType.RESOLVE_REPORT, notes=notes)
     if hide_message and report.message and not report.message.is_deleted:
+        report.message.deleted_text_backup = report.message.text or ""
+        report.message.deletion_source = Message.DeletionSource.MODERATION
         report.message.text = ""
         report.message.is_deleted = True
         report.message.deleted_at = timezone.now()
-        report.message.save(update_fields=["text", "is_deleted", "deleted_at", "updated_at"])
+        report.message.save(update_fields=["text", "is_deleted", "deleted_at", "deleted_text_backup", "deletion_source", "updated_at"])
         ModerationAction.objects.create(report=report, message=report.message, actor=actor, action_type=ModerationAction.ActionType.HIDE_MESSAGE, notes=notes)
     log_chat_event(ChatAuditLog.EventType.MODERATION_ACTION, actor=actor, conversation=getattr(report.message, 'conversation', None), message=report.message, metadata={"action": "resolve_report", "hide_message": hide_message})
     return action
@@ -4081,9 +4156,13 @@ def dismiss_message_report(actor, report, notes=""):
 
 @transaction.atomic
 def restore_message_by_staff(actor, message, notes=""):
+    message = Message.objects.select_for_update().get(pk=message.pk)
+    message.text = message.deleted_text_backup or message.text or ""
+    message.deleted_text_backup = ""
+    message.deletion_source = ""
     message.is_deleted = False
     message.deleted_at = None
-    message.save(update_fields=["is_deleted", "deleted_at", "updated_at"])
+    message.save(update_fields=["text", "is_deleted", "deleted_at", "deleted_text_backup", "deletion_source", "updated_at"])
     action = ModerationAction.objects.create(message=message, actor=actor, action_type=ModerationAction.ActionType.RESTORE_MESSAGE, notes=notes)
     log_chat_event(ChatAuditLog.EventType.MESSAGE_RESTORED, actor=actor, conversation=message.conversation, message=message)
     return action

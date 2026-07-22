@@ -139,6 +139,15 @@ case "$durable_backend" in
   *) failures+=("REALTIME_DURABLE_BACKEND must be nats") ;;
 esac
 [[ "$(read_env REALTIME_OUTBOX_ENABLED)" =~ ^([Tt]rue|1|yes|on)$ ]] || failures+=("REALTIME_OUTBOX_ENABLED must be true")
+outbox_publisher="$(read_env REALTIME_OUTBOX_PUBLISHER)"
+case "$outbox_publisher" in
+  celery|axum) ;;
+  *) failures+=("REALTIME_OUTBOX_PUBLISHER must be celery or axum") ;;
+esac
+if [[ "$outbox_publisher" == "axum" ]]; then
+  require_value SQLX_DATABASE_URL
+  require_value NATS_DURABLE_SUBJECT_PREFIX
+fi
 require_value REALTIME_ALLOWED_ORIGINS
 realtime_origins=",$(read_env REALTIME_ALLOWED_ORIGINS),"
 realtime_origins="${realtime_origins//[[:space:]]/}"

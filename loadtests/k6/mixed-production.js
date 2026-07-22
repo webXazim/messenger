@@ -198,7 +198,7 @@ export function mixedRead() {
   const user = userForVu(exec.vu.idInTest);
 
   let started = Date.now();
-  const conversations = http.get(`${baseUrl}/api/v1/chat/conversations/`, {
+  const conversations = http.get(`${baseUrl}/api/v1/chat-fast/conversations/`, {
     headers: authHeaders(user),
     tags: { endpoint: 'mixed_conversations' },
     timeout: '10s',
@@ -210,7 +210,7 @@ export function mixedRead() {
 
   started = Date.now();
   const messages = http.get(
-    `${baseUrl}/api/v1/chat/conversations/${user.conversation_id}/messages/?page_size=30`,
+    `${baseUrl}/api/v1/chat-fast/conversations/${user.conversation_id}/messages/?page_size=30`,
     {
       headers: authHeaders(user),
       tags: { endpoint: 'mixed_messages' },
@@ -230,7 +230,7 @@ export function mixedWrite() {
   const clientTempId = `mixed-${runId}-${exec.scenario.iterationInTest}-${exec.vu.idInTest}-${Date.now()}`;
   const started = Date.now();
   const response = http.post(
-    `${baseUrl}/api/v1/chat/conversations/${user.conversation_id}/messages/`,
+    `${baseUrl}/api/v1/chat-fast/conversations/${user.conversation_id}/messages/`,
     JSON.stringify({
       type: 'text',
       text: `Mixed load ${runId} ${clientTempId}`,
