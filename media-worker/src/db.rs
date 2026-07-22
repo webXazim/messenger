@@ -84,7 +84,7 @@ pub async fn claim_job(pool: &PgPool, config: &Config) -> Result<Option<ClaimedJ
     .context("claim media-processing job")?;
 
     row.map(|row| {
-        Ok(ClaimedJob {
+        Ok::<ClaimedJob, sqlx::Error>(ClaimedJob {
             job_id: row.try_get("job_id")?,
             lease_token: row.try_get("lease_token")?,
             upload_id: row.try_get("upload_id")?,
