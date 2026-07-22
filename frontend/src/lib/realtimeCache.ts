@@ -4,6 +4,7 @@ import type { Call, Conversation, Message } from "../types/chat";
 import { mergeConversationReceipts, mergeParticipantReceipts } from "./messageReceipts";
 import { applyActiveConversationReadState } from "./activeConversationView";
 import { mergeNewestPresence } from "./presenceState";
+import { upsertMessagePages } from "./messageTimeline";
 
 export type ChatSyncPayload = {
   conversations: Conversation[];
@@ -86,26 +87,10 @@ export function markConversationReadInCaches(queryClient: QueryClient, conversat
 }
 
 export function patchMessageCache(queryClient: QueryClient, conversationId: string, incoming: Message) {
-  queryClient.setQueryData<InfiniteData<MessagePage>>(["messages", conversationId], (current) => {
-    if (!current?.pages?.length) return current;
-    let found = false;
-    const pages = current.pages.map((page) => ({
-      ...page,
-      results: page.results.map((message) => {
-        const matches = message.id === incoming.id || (!!incoming.client_temp_id && message.client_temp_id === incoming.client_temp_id);
-        if (!matches) return message;
-        found = true;
-        return { ...message, ...incoming };
-      }),
-    }));
-    if (!found) {
-      pages[0] = {
-        ...pages[0],
-        results: [...pages[0].results, incoming].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
-      };
-    }
-    return { ...current, pages };
-  });
+  queryClient.setQueryData<InfiniteData<MessagePage>>(
+    ["messages", conversationId],
+    (current) => current?.pages?.length ? upsertMessagePages(current, incoming) : current,
+  );
 }
 
 export function patchCallCaches(queryClient: QueryClient, incoming: Call) {

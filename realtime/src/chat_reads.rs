@@ -448,7 +448,35 @@ jsonb_build_object(
     'deleted_at', m.deleted_at,
     'client_temp_id', m.client_temp_id,
     'sequence', m.sequence,
-    'delivery_status', m.delivery_status,
+    'delivery_status', CASE
+        WHEN m.sender_id = (SELECT id FROM actor) AND EXISTS(
+            SELECT 1
+            FROM chat_conversationparticipant receipt_participant
+            JOIN chat_message read_pointer ON read_pointer.id = receipt_participant.last_read_message_id
+            WHERE receipt_participant.conversation_id = m.conversation_id
+              AND receipt_participant.user_id <> (SELECT id FROM actor)
+              AND receipt_participant.left_at IS NULL
+              AND receipt_participant.banned_at IS NULL
+              AND read_pointer.sequence >= m.sequence
+        ) THEN 'read'
+        WHEN m.sender_id = (SELECT id FROM actor) AND (
+            EXISTS(
+                SELECT 1
+                FROM chat_conversationparticipant receipt_participant
+                JOIN chat_message delivered_pointer ON delivered_pointer.id = receipt_participant.last_delivered_message_id
+                WHERE receipt_participant.conversation_id = m.conversation_id
+                  AND receipt_participant.user_id <> (SELECT id FROM actor)
+                  AND receipt_participant.left_at IS NULL
+                  AND receipt_participant.banned_at IS NULL
+                  AND delivered_pointer.sequence >= m.sequence
+            )
+            OR EXISTS(
+                SELECT 1 FROM chat_messagedelivery delivery
+                WHERE delivery.message_id = m.id AND delivery.user_id <> (SELECT id FROM actor)
+            )
+        ) THEN 'delivered'
+        ELSE m.delivery_status
+    END,
     'failed_reason', NULLIF(m.failed_reason, ''),
     'retry_count', m.retry_count,
     'attachments', COALESCE((
@@ -735,7 +763,7 @@ impl Database {
         builder.push(" AND (rm.id IS NULL OR (um.created_at, um.id) > (rm.created_at, rm.id))), ");
         builder.push("'participants', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', cp.id::text, 'user', ");
         builder.push(USER_COMPACT_JSON);
-        builder.push(", 'role', cp.role, 'joined_at', cp.joined_at, 'left_at', cp.left_at, 'is_muted', cp.is_muted, 'is_archived', cp.is_archived, 'is_pinned', cp.is_pinned, 'is_blocked', cp.is_blocked) ORDER BY cp.joined_at, cp.id) FROM chat_conversationparticipant cp JOIN accounts_user u ON u.id = cp.user_id LEFT JOIN accounts_profile p ON p.user_id = u.id WHERE cp.conversation_id = c.id), '[]'::jsonb), ");
+        builder.push(", 'role', cp.role, 'joined_at', cp.joined_at, 'left_at', cp.left_at, 'is_muted', cp.is_muted, 'is_archived', cp.is_archived, 'is_pinned', cp.is_pinned, 'is_blocked', cp.is_blocked, 'last_read_message', cp.last_read_message_id::text, 'last_read_at', cp.last_read_at, 'last_delivered_message', cp.last_delivered_message_id::text, 'last_delivered_at', cp.last_delivered_at) ORDER BY cp.joined_at, cp.id) FROM chat_conversationparticipant cp JOIN accounts_user u ON u.id = cp.user_id LEFT JOIN accounts_profile p ON p.user_id = u.id WHERE cp.conversation_id = c.id), '[]'::jsonb), ");
         builder.push("'draft', CASE WHEN EXISTS (SELECT 1 FROM chat_conversationparticipant ecp JOIN chat_usere2eedevicekey ekey ON ekey.user_id = ecp.user_id AND ekey.is_active = TRUE WHERE ecp.conversation_id = c.id AND ecp.left_at IS NULL AND ecp.banned_at IS NULL) THEN NULL ELSE (SELECT jsonb_build_object('id', d.id::text, 'conversation', d.conversation_id::text, 'text', d.text, 'reply_to', NULL, 'metadata', d.metadata, 'has_draft', true, 'created_at', d.created_at, 'updated_at', d.updated_at) FROM chat_conversationdraft d WHERE d.conversation_id = c.id AND d.user_id = ");
         builder.push_bind(user_id);
         builder.push(" ORDER BY d.updated_at DESC LIMIT 1) END, 'created_at', c.created_at, '_cursor_at', COALESCE(c.last_message_at, c.created_at)) ");

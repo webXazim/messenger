@@ -60,12 +60,15 @@ export function advanceMessageReceiptPages(
 ) {
   const pointer = findMessageInPages(current, pointerMessageId);
   if (!pointer) return current;
+  const pointerSequence = Number(pointer.sequence);
   const pointerTime = Date.parse(pointer.created_at);
-  if (!Number.isFinite(pointerTime)) return current;
+  if (!Number.isFinite(pointerSequence) && !Number.isFinite(pointerTime)) return current;
   return mapMessagePages(
     current,
     (message) => String(message.sender.id) === String(senderUserId)
-      && Date.parse(message.created_at) <= pointerTime
+      && (Number.isFinite(pointerSequence) && Number.isFinite(Number(message.sequence))
+        ? Number(message.sequence) <= pointerSequence
+        : Date.parse(message.created_at) <= pointerTime)
       && String(message.delivery_status || "").toLowerCase() !== "failed",
     (message) => ({
       ...message,

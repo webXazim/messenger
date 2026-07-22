@@ -424,6 +424,7 @@ export function normalizeMessage(value: unknown): Message {
     sender,
     created_at: firstString(item.created_at, item.sent_at) || new Date().toISOString(),
     updated_at: firstString(item.updated_at, item.edited_at) || undefined,
+    sequence: firstNumber(item.sequence) ?? undefined,
     attachments: rawAttachments.map(normalizeAttachment).filter((entry) => entry.id),
     delivery_status: firstString(item.delivery_status, item.status) || undefined,
     failed_reason: firstString(item.failed_reason, item.error_message) || null,

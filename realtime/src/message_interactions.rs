@@ -313,23 +313,34 @@ async fn resolve_receipt_target(
     exclude_actor: bool,
 ) -> Result<Option<Uuid>> {
     if let Some(message_id) = requested_message_id {
-        let found = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM chat_message WHERE id = $1 AND conversation_id = $2",
+        let target_sequence = sqlx::query_scalar::<_, i64>(
+            "SELECT sequence FROM chat_message WHERE id = $1 AND conversation_id = $2",
         )
         .bind(message_id)
         .bind(conversation_id)
         .persistent(false)
         .fetch_optional(&mut **tx)
         .await?;
-        if found.is_none() {
+        let Some(target_sequence) = target_sequence else {
             anyhow::bail!("message does not belong to this conversation");
+        };
+        if exclude_actor {
+            return Ok(sqlx::query_scalar::<_, Uuid>(
+                "SELECT id FROM chat_message WHERE conversation_id = $1 AND sender_id IS DISTINCT FROM $2 AND sequence <= $3 ORDER BY sequence DESC, id DESC LIMIT 1",
+            )
+            .bind(conversation_id)
+            .bind(actor_id)
+            .bind(target_sequence)
+            .persistent(false)
+            .fetch_optional(&mut **tx)
+            .await?);
         }
-        return Ok(found);
+        return Ok(Some(message_id));
     }
 
     if exclude_actor {
         let result = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM chat_message WHERE conversation_id = $1 AND sender_id IS DISTINCT FROM $2 ORDER BY created_at DESC, id DESC LIMIT 1",
+            "SELECT id FROM chat_message WHERE conversation_id = $1 AND sender_id IS DISTINCT FROM $2 ORDER BY sequence DESC, id DESC LIMIT 1",
         )
         .bind(conversation_id)
         .bind(actor_id)
@@ -339,7 +350,7 @@ async fn resolve_receipt_target(
         return Ok(result);
     }
     let result = sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM chat_message WHERE conversation_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        "SELECT id FROM chat_message WHERE conversation_id = $1 ORDER BY sequence DESC, id DESC LIMIT 1",
     )
     .bind(conversation_id)
     .persistent(false)
@@ -354,7 +365,7 @@ async fn advance_delivery_pointer(
     target_message_id: Uuid,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "UPDATE chat_conversationparticipant cp SET last_delivered_message_id = $2, last_delivered_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_delivered_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_delivered_message_id WHERE target.id = $2 AND (target.created_at, target.id) > (current.created_at, current.id)))",
+        "UPDATE chat_conversationparticipant cp SET last_delivered_message_id = $2, last_delivered_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_delivered_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_delivered_message_id WHERE target.id = $2 AND target.sequence > current.sequence))",
     )
     .bind(participant_id)
     .bind(target_message_id)
@@ -370,7 +381,7 @@ async fn advance_read_pointer(
     target_message_id: Uuid,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "UPDATE chat_conversationparticipant cp SET last_read_message_id = $2, last_read_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_read_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_read_message_id WHERE target.id = $2 AND (target.created_at, target.id) > (current.created_at, current.id)))",
+        "UPDATE chat_conversationparticipant cp SET last_read_message_id = $2, last_read_at = NOW(), updated_at = NOW() WHERE cp.id = $1 AND (cp.last_read_message_id IS NULL OR EXISTS (SELECT 1 FROM chat_message target JOIN chat_message current ON current.id = cp.last_read_message_id WHERE target.id = $2 AND target.sequence > current.sequence))",
     )
     .bind(participant_id)
     .bind(target_message_id)
@@ -410,7 +421,7 @@ async fn insert_missing_deliveries(
     target_message_id: Uuid,
 ) -> Result<()> {
     let message_ids = sqlx::query_scalar::<_, Uuid>(
-        "SELECT m.id FROM chat_message m JOIN chat_message target ON target.id = $3 WHERE m.conversation_id = $1 AND m.sender_id IS DISTINCT FROM $2 AND (m.created_at, m.id) <= (target.created_at, target.id) AND NOT EXISTS (SELECT 1 FROM chat_messagedelivery d WHERE d.message_id = m.id AND d.user_id = $2) ORDER BY m.created_at, m.id",
+        "SELECT m.id FROM chat_message m JOIN chat_message target ON target.id = $3 WHERE m.conversation_id = $1 AND m.sender_id IS DISTINCT FROM $2 AND m.sequence <= target.sequence AND NOT EXISTS (SELECT 1 FROM chat_messagedelivery d WHERE d.message_id = m.id AND d.user_id = $2) ORDER BY m.sequence, m.id",
     )
     .bind(conversation_id)
     .bind(actor_id)
@@ -595,7 +606,7 @@ impl Database {
             conversation_id,
             actor_id,
             requested_message_id,
-            false,
+            true,
         )
         .await?;
 

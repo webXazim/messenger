@@ -47,12 +47,15 @@ const data = {
 const confirmed = makeMessage("server-1", "2026-07-13T10:00:05Z", {
   client_temp_id: "client-1",
   delivery_status: "sent",
+  sequence: 3,
 });
+const sameTimestamp = "2026-07-13T12:01:00.000Z";
 const confirmedData = upsertMessagePages(data, confirmed);
 assert.equal(confirmedData.pages.length, 2, "Realtime updates must preserve page boundaries.");
 assert.equal(confirmedData.pages[0].results.length, 2, "Optimistic replacement must not add a duplicate.");
 assert.equal(confirmedData.pages[0].results[0].id, "server-1");
 assert.equal(confirmedData.pages[0].results[0].created_at, optimistic.created_at, "Server confirmation must preserve the optimistic timeline position.");
+assert.equal(confirmedData.pages[0].results[0].sequence, 3, "Server confirmation must enrich the optimistic message with its durable sequence.");
 assert.equal(confirmedData.pages[1].results[0].id, "oldest");
 assert.equal(flattenMessagePages(confirmedData).filter((message) => message.client_temp_id === "client-1").length, 1);
 
@@ -60,6 +63,25 @@ const readData = advanceMessageReceiptPages(confirmedData, "server-1", "read", "
 assert.equal(readData.pages[0].results[0].delivery_status, "read", "A live read receipt must update the message immediately.");
 const staleSentData = upsertMessagePages(readData, confirmed);
 assert.equal(staleSentData.pages[0].results[0].delivery_status, "read", "A late sent payload must not downgrade a read receipt.");
+
+const sameTimeReceiptData = {
+  pages: [{
+    results: [
+      makeMessage("sequence-1", sameTimestamp, { sequence: 1, delivery_status: "sent" }),
+      makeMessage("sequence-2", sameTimestamp, { sequence: 2, delivery_status: "sent" }),
+      makeMessage("sequence-3", sameTimestamp, { sequence: 3, delivery_status: "sent" }),
+    ],
+    next: null,
+    previous: null,
+  }],
+  pageParams: [null],
+};
+const sequenceReceiptData = advanceMessageReceiptPages(sameTimeReceiptData, "sequence-2", "delivered", "user-1");
+assert.deepEqual(
+  sequenceReceiptData.pages[0].results.map((message) => message.delivery_status),
+  ["delivered", "delivered", "sent"],
+  "Receipt advancement must use durable sequence order when timestamps are identical.",
+);
 
 const failedData = mapMessagePages(
   confirmedData,
@@ -106,7 +128,6 @@ assert.ok(!flattenMessagePages(removedData).some((message) => message.id === "co
 const emptyData = upsertMessagePages(undefined, makeMessage("first", "2026-07-13T12:00:00Z"));
 assert.equal(emptyData.pages[0].results[0].id, "first", "Optimistic sends must work before the first page settles.");
 
-const sameTimestamp = "2026-07-13T12:01:00.000Z";
 const rapidFirst = makeMessage("z-random-id", sameTimestamp);
 const rapidSecond = makeMessage("a-random-id", sameTimestamp);
 assert.deepEqual(

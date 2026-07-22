@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type MessageIdentity = {
   id: string;
@@ -20,48 +20,53 @@ export function useMessageEntranceKeys(
     scope: string;
     hydrated: boolean;
     known: Set<string>;
-    entering: Set<string>;
   }>({
     scope,
     hydrated: false,
     known: new Set(),
-    entering: new Set(),
   });
+  const [entering, setEntering] = useState<Set<string>>(() => new Set());
 
   if (stateRef.current.scope !== scope) {
     stateRef.current = {
       scope,
       hydrated: false,
       known: new Set(),
-      entering: new Set(),
     };
   }
 
-  const state = stateRef.current;
-  if (ready && state.hydrated) {
-    let lastKnownIndex = -1;
-    for (let index = 0; index < messages.length; index += 1) {
-      if (state.known.has(stableMessageRenderKey(messages[index]))) {
-        lastKnownIndex = index;
-      }
-    }
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index];
-      const key = stableMessageRenderKey(message);
-      if (!state.known.has(key) && index > lastKnownIndex) {
-        state.entering.add(key);
-      }
-    }
-  }
-
   useEffect(() => {
-    const current = stateRef.current;
-    if (!ready || current.scope !== scope) return;
-    for (const message of messages) {
-      current.known.add(stableMessageRenderKey(message));
+    const state = stateRef.current;
+    if (!ready || state.scope !== scope) return;
+    const keys = messages.map(stableMessageRenderKey);
+    if (!state.hydrated) {
+      keys.forEach((key) => state.known.add(key));
+      state.hydrated = true;
+      setEntering(new Set());
+      return;
     }
-    current.hydrated = true;
+
+    let lastKnownIndex = -1;
+    for (let index = 0; index < keys.length; index += 1) {
+      if (state.known.has(keys[index])) lastKnownIndex = index;
+    }
+    const added = new Set(
+      keys.filter((key, index) => !state.known.has(key) && index > lastKnownIndex),
+    );
+    keys.forEach((key) => state.known.add(key));
+    if (!added.size) return;
+
+    setEntering((current) => new Set([...current, ...added]));
+    const timer = window.setTimeout(() => {
+      setEntering((current) => {
+        if (![...added].some((key) => current.has(key))) return current;
+        const next = new Set(current);
+        added.forEach((key) => next.delete(key));
+        return next;
+      });
+    }, 220);
+    return () => window.clearTimeout(timer);
   }, [messages, ready, scope]);
 
-  return state.entering;
+  return entering;
 }

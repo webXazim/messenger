@@ -130,6 +130,7 @@ export type Message = {
   sender: UserLite;
   created_at: string;
   updated_at?: string;
+  sequence?: number;
   attachments: MessageAttachment[];
   delivery_status?: string;
   failed_reason?: string | null;

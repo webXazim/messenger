@@ -779,6 +779,12 @@ export function ConversationPage() {
         ) {
           scheduleTypingRemoval(String(normalized.sender.id), TYPING_MESSAGE_TRANSITION_MS);
         }
+        if (payload.event === "message.created") {
+          // A newly received reply commonly follows a read acknowledgement.
+          // Refresh only the lightweight conversation metadata so a missed
+          // receipt frame is recovered without replacing the message timeline.
+          void queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] });
+        }
         void queryClient.invalidateQueries({ queryKey: ["conversations"] }).then(() => {
           if (isConversationActivelyViewedAtLatest(conversationId)) {
             markConversationReadInCaches(queryClient, conversationId);
