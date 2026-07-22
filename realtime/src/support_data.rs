@@ -1075,7 +1075,7 @@ async fn create_message(
     let metadata=if input.voice_note {json!({"voice_note":true})} else {json!({})};
     let sender_id=team.map(|v|v.user_id);
     sqlx::query("INSERT INTO chat_message (id,created_at,updated_at,conversation_id,sender_id,type,text,metadata,reply_to_id,forwarded_from_id,is_edited,edited_at,edit_locked_at,edit_locked_reason,is_deleted,deleted_at,deleted_text_backup,deletion_source,client_temp_id,sequence,delivery_status,failed_reason,retry_count) VALUES ($1,NOW(),NOW(),$2,$3,$4,$5,$6,NULL,NULL,FALSE,NULL,NULL,'',FALSE,NULL,'','',$7,$8,'sent','',0)")
-        .bind(message_id).bind(chat_id).bind(sender_id).bind(message_type).bind(&text).bind(&metadata).bind(&client_temp_id).bind(sequence)
+        .bind(message_id).bind(chat_id).bind(sender_id).bind(&message_type).bind(&text).bind(&metadata).bind(&client_temp_id).bind(sequence)
         .persistent(false).execute(&mut *tx).await.map_err(internal_error)?;
     if let Some(widget)=widget {
         sqlx::query("INSERT INTO support_supportmessageauthor (id,created_at,updated_at,message_id,visitor_id,session_id,display_name) VALUES ($1,NOW(),NOW(),$2,$3,$4,$5)")
