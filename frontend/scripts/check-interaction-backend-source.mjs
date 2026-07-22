@@ -12,9 +12,11 @@ for (const route of ["mark-delivered", "mark-read", "reactions"]) {
   assert.ok(chatApi.includes(route), `missing ${route} route`);
 }
 assert.ok(
-  (chatApi.match(/CHAT_INTERACTION_BACKEND === "axum"/g) || []).length >= 4,
-  "receipt and reaction methods must use the independent interaction backend",
+  (chatApi.match(/CHAT_INTERACTION_BACKEND === "axum"/g) || []).length >= 2,
+  "reaction methods must use the independent interaction backend",
 );
 assert.match(chatApi, /CHAT_COMMAND_URL : "\/chat"/);
+assert.match(chatApi, /postAxumReceipt\(conversationId, "mark-delivered", payload\)/, "Delivery receipts must always use the permanent Axum route.");
+assert.match(chatApi, /postAxumReceipt\(conversationId, "mark-read", payload\)/, "Read receipts must always use the permanent Axum route.");
 
 console.log("Message interaction backend source checks passed.");

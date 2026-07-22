@@ -44,6 +44,26 @@ export type MessageContext = {
   results: Message[];
 };
 
+async function postAxumReceipt(conversationId: string, action: "mark-delivered" | "mark-read", payload: Record<string, unknown>) {
+  let lastError: unknown;
+  for (const delay of [0, 350, 1000]) {
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+    try {
+      const response = await http.post(`${CHAT_COMMAND_URL}/conversations/${conversationId}/${action}/`, payload);
+      return unwrapObject<Record<string, unknown>>(response.data, {});
+    } catch (error) {
+      lastError = error;
+      const status = typeof error === "object" && error !== null && "response" in error
+        ? Number((error as { response?: { status?: number } }).response?.status)
+        : 0;
+      // Authentication, authorization, and invalid targets need a fresh user
+      // action or deployment fix; retry only transient transport/server errors.
+      if (status >= 400 && status < 500) throw error;
+    }
+  }
+  throw lastError;
+}
+
 export type UserBlock = {
   id: string;
   blocked: import("../types/chat").UserLite;
@@ -1015,14 +1035,10 @@ export const chatApi = {
     return items.filter((item) => Boolean(item.id));
   },
   async markConversationDelivered(conversationId: string, payload: Record<string, unknown> = {}) {
-    const prefix = CHAT_INTERACTION_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
-    const response = await http.post(`${prefix}/conversations/${conversationId}/mark-delivered/`, payload);
-    return unwrapObject<Record<string, unknown>>(response.data, {});
+    return postAxumReceipt(conversationId, "mark-delivered", payload);
   },
   async markConversationRead(conversationId: string, payload: Record<string, unknown> = {}) {
-    const prefix = CHAT_INTERACTION_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
-    const response = await http.post(`${prefix}/conversations/${conversationId}/mark-read/`, payload);
-    return unwrapObject<Record<string, unknown>>(response.data, {});
+    return postAxumReceipt(conversationId, "mark-read", payload);
   },
   async retryMessage(messageId: string) {
     const response = await http.post(messageMutationPath(`/chat/messages/${messageId}/retry/`, `/messages/${messageId}/retry/`));

@@ -50,10 +50,7 @@ import {
   TYPING_STOP_GRACE_MS,
   typingRemovalDelay,
 } from "../lib/typingPresence";
-import {
-  stableMessageRenderKey,
-  useMessageEntranceKeys,
-} from "../hooks/useMessageEntrance";
+import { stableMessageRenderKey } from "../hooks/useMessageEntrance";
 import { isSameUserIdentity } from "../lib/userIdentity";
 import { findActiveCallForConversation, findActiveCallForUser } from "../lib/callLifecycle";
 import { getCallMediaErrorMessage, preflightCallMedia } from "../lib/mediaPermissions";
@@ -1004,14 +1001,19 @@ export function ConversationPage() {
     },
     [conversationId, decryptedTexts, decryptionStates, e2eeIdentityQuery.isError, pagedMessages, readyConversationIds],
   );
-  const latestMessageId = useMemo(() => {
+  const latestIncomingMessageId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       const status = String(message.delivery_status || "").toLowerCase();
-      if (!message.id.startsWith("temp-") && status !== "sending" && status !== "failed") return message.id;
+      if (
+        !isSameUserIdentity(message.sender, localCurrentUser)
+        && !message.id.startsWith("temp-")
+        && status !== "sending"
+        && status !== "failed"
+      ) return message.id;
     }
     return "";
-  }, [messages]);
+  }, [localCurrentUser, messages]);
   const {
     scrollerRef,
     showJumpToLatest,
@@ -1043,16 +1045,16 @@ export function ConversationPage() {
   }, [conversationId, pageVisible, timelineAtLatest]);
 
   useEffect(() => {
-    if (!conversationId || !latestMessageId) return;
-    const receiptKey = `${conversationId}:${latestMessageId}`;
+    if (!conversationId || !latestIncomingMessageId) return;
+    const receiptKey = `${conversationId}:${latestIncomingMessageId}`;
     if (lastDeliveredReceiptMessageRef.current === receiptKey) return;
     lastDeliveredReceiptMessageRef.current = receiptKey;
-    void chatApi.markConversationDelivered(conversationId, { message_id: latestMessageId }).then((receipt) => {
+    void chatApi.markConversationDelivered(conversationId, { message_id: latestIncomingMessageId }).then((receipt) => {
       applyParticipantReceiptInCache(conversationId, "message.delivered", receipt, queryClient);
     }).catch(() => {
       if (lastDeliveredReceiptMessageRef.current === receiptKey) lastDeliveredReceiptMessageRef.current = "";
     });
-  }, [conversationId, latestMessageId, queryClient, socket]);
+  }, [conversationId, latestIncomingMessageId, queryClient]);
 
   useEffect(() => {
     if (socketStatus !== "open" || !conversationId) return;
@@ -1060,9 +1062,9 @@ export function ConversationPage() {
   }, [conversationId, queryClient, socketStatus]);
 
   useEffect(() => {
-    if (!conversationId || !latestMessageId || !pageVisible) return;
+    if (!conversationId || !latestIncomingMessageId || !pageVisible) return;
     const scroller = scrollerRef.current;
-    const messageNode = getMessageNode(latestMessageId);
+    const messageNode = getMessageNode(latestIncomingMessageId);
     if (!scroller || !messageNode) return;
 
     const markSeen = () => {
@@ -1072,7 +1074,7 @@ export function ConversationPage() {
       const visible = messageRect.bottom > scrollerRect.top && messageRect.top < scrollerRect.bottom;
       if (!visible) return;
       markConversationReadInCaches(queryClient, conversationId);
-      acknowledgeConversationRead(conversationId, latestMessageId);
+      acknowledgeConversationRead(conversationId, latestIncomingMessageId);
     };
 
     markSeen();
@@ -1082,7 +1084,7 @@ export function ConversationPage() {
     }, { root: scroller, threshold: 0.01 });
     observer.observe(messageNode);
     return () => observer.disconnect();
-  }, [acknowledgeConversationRead, conversationId, getMessageNode, latestMessageId, pageVisible, queryClient, scrollerRef]);
+  }, [acknowledgeConversationRead, conversationId, getMessageNode, latestIncomingMessageId, pageVisible, queryClient, scrollerRef]);
   const encryptionReadinessMessage = useMemo(() => {
     if (encryptionReadiness.code !== "participant_device_missing" || !encryptionReadiness.missingParticipantIds.length) {
       return encryptionReadiness.message;
@@ -1898,12 +1900,6 @@ export function ConversationPage() {
     }
     return notices;
   }, [callError, conversationError, conversationStateError, encryptionReadiness.status, encryptionReadinessMessage, messages.length, showRealtimeNotice, socketStatus]);
-  const enteringMessageKeys = useMessageEntranceKeys(
-    conversationId,
-    messages,
-    !isInitialChatLoading && !chatError,
-  );
-
   return (
     <div ref={conversationViewRef} className={`ms-conversation-view ${showDetails ? "ms-conversation-view--details-open" : ""}`} style={shellStyle}>
       <aside className="ms-conversation-view__inbox" aria-label="Conversations">
@@ -2025,7 +2021,7 @@ export function ConversationPage() {
               <div
                 key={renderKey}
                 data-message-id={message.id}
-                className={`ms-message-block is-group-${groupPosition} ${groupedBefore ? "is-group-continuation" : ""} ${enteringMessageKeys.has(renderKey) ? "is-message-entering" : ""} ${highlightedMessageId === message.id ? "message-search-active message-reference-active" : ""}`}
+                className={`ms-message-block is-group-${groupPosition} ${groupedBefore ? "is-group-continuation" : ""} ${highlightedMessageId === message.id ? "message-search-active message-reference-active" : ""}`}
                 ref={(node) => registerMessageRef(message.id, node)}
               >
                 {showDate ? <div className="ms-timeline-chip">{new Date(message.created_at).toLocaleDateString()}</div> : null}

@@ -57,6 +57,9 @@ for (const required of [
 }
 
 assert.ok(conversation.includes("stableMessageRenderKey(message)"), "Messenger confirmation can remount and blink optimistic messages.");
+assert.ok(!conversation.includes("useMessageEntranceKeys"), "Messenger still reapplies entrance opacity after an optimistic message has already painted.");
+assert.ok(conversation.includes("latestIncomingMessageId"), "Delivery and read receipts are not pinned to the newest incoming message.");
+assert.match(conversation, /!isSameUserIdentity\(message\.sender, localCurrentUser\)/, "Receipt targeting can still acknowledge the current user's own outgoing message.");
 assert.ok(messageEntrance.includes("index > lastKnownIndex"), "Older history pages incorrectly replay new-message entrance motion.");
 
 for (const required of [
