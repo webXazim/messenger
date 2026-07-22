@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::{config::ChatCommandBackend, state::AppState};
+use crate::{command_delivery::deliver_committed, config::ChatCommandBackend, state::AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
@@ -59,6 +59,7 @@ pub async fn send_message(
     let client_temp_id = input.client_temp_id.trim().chars().take(100).collect::<String>();
     match state.database.send_text_message(conversation_id, &identity, &text, &client_temp_id).await {
         Ok(result) => {
+            deliver_committed(&state, &result.events).await;
             let status = if result.was_deduplicated { StatusCode::OK } else { StatusCode::CREATED };
             (status, Json(result.payload)).into_response()
         }
@@ -80,6 +81,6 @@ fn error(status: StatusCode, code: &str, detail: &str) -> axum::response::Respon
     error_response(status, code, detail)
 }
 
-fn error_response(status: StatusCode, code: &str, detail: &str) -> axum::response::Response {
+pub(crate) fn error_response(status: StatusCode, code: &str, detail: &str) -> axum::response::Response {
     (status, Json(json!({"code": code, "detail": detail}))).into_response()
 }

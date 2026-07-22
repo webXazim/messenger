@@ -5,16 +5,24 @@ use sqlx::{postgres::{PgConnectOptions, PgPoolOptions}, PgPool};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::{command_auth::CommandIdentity, config::{ChatReadBackend, Config}};
+use crate::{command_auth::CommandIdentity, config::{ChatReadBackend, Config}, protocol::{AudienceKey, AudienceKind}};
+
+#[derive(Clone)]
+pub struct CommittedEvent {
+    pub event_id: Uuid,
+    pub payload: Value,
+    pub audiences: Vec<AudienceKey>,
+}
 
 #[derive(Clone)]
 pub struct SendMessageResult {
     pub payload: Value,
     pub was_deduplicated: bool,
+    pub events: Vec<CommittedEvent>,
 }
 
 pub struct Database {
-    pool: Option<PgPool>,
+    pub(crate) pool: Option<PgPool>,
     backend: ChatReadBackend,
 }
 
@@ -49,7 +57,7 @@ impl Database {
             .is_ok()
     }
 
-    pub async fn is_active_participant(&self, conversation_id: Uuid, user_id: Uuid) -> Result<bool> {
+    pub async fn is_active_participant(&self, conversation_id: Uuid, user_id: i64) -> Result<bool> {
         let pool = self.pool.as_ref().context("SQLx read backend is disabled")?;
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM chat_conversationparticipant WHERE conversation_id = $1 AND user_id = $2 AND left_at IS NULL AND banned_at IS NULL)"
@@ -73,12 +81,12 @@ impl Database {
         let pool = self.pool.as_ref().context("SQLx command backend is disabled")?;
         let mut tx = pool.begin().await?;
         let actor_id = if let Some(user_id) = identity.claimed_user_id {
-            sqlx::query_scalar::<_, Uuid>("SELECT id FROM accounts_user WHERE id = $1 AND is_active = TRUE")
+            sqlx::query_scalar::<_, i64>("SELECT id FROM accounts_user WHERE id = $1 AND is_active = TRUE")
                 .bind(user_id).persistent(false).fetch_optional(&mut *tx).await?
         } else { None };
         let actor_id = match actor_id {
             Some(value) => value,
-            None if !identity.email.is_empty() => sqlx::query_scalar::<_, Uuid>("SELECT id FROM accounts_user WHERE LOWER(email) = $1 AND is_active = TRUE LIMIT 1")
+            None if !identity.email.is_empty() => sqlx::query_scalar::<_, i64>("SELECT id FROM accounts_user WHERE LOWER(email) = $1 AND is_active = TRUE LIMIT 1")
                 .bind(&identity.email).persistent(false).fetch_optional(&mut *tx).await?
                 .context("authenticated user does not exist locally")?,
             None => anyhow::bail!("authenticated user does not exist locally"),
@@ -105,7 +113,7 @@ impl Database {
             .bind(conversation_id).bind(actor_id).bind(client_temp_id)
             .persistent(false).fetch_optional(&mut *tx).await? {
                 tx.commit().await?;
-                return Ok(SendMessageResult { payload: existing, was_deduplicated: true });
+                return Ok(SendMessageResult { payload: existing, was_deduplicated: true, events: Vec::new() });
             }
         }
 
@@ -143,7 +151,15 @@ impl Database {
         .persistent(false).execute(&mut *tx).await?;
 
         tx.commit().await?;
-        Ok(SendMessageResult { payload, was_deduplicated: false })
+        Ok(SendMessageResult {
+            payload,
+            was_deduplicated: false,
+            events: vec![CommittedEvent {
+                event_id,
+                payload: event_payload,
+                audiences: vec![AudienceKey { kind: AudienceKind::Conversation, identifier: conversation_id.to_string() }],
+            }],
+        })
     }
 
     pub async fn latest_conversation_sequence(&self, conversation_id: Uuid) -> Result<i64> {

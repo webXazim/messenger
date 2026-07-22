@@ -35,5 +35,15 @@ for _ in $(seq 1 30); do
 done
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/live >/dev/null
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null
-"${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats
+runtime_state="$("${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats)"
+printf '%s\n' "$runtime_state"
+if [[ -f .env ]] && grep -Eq '^CHAT_COMMAND_BACKEND=axum([[:space:]]*)$' .env; then
+  grep -q '"chat_command_backend":"axum"' <<<"$runtime_state"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state"
+  call_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/api/v1/chat-fast/calls/recent/)"
+  [[ "$call_route_status" == "401" ]]
+fi
+if [[ -f .env ]] && grep -Eq '^CHAT_READ_BACKEND=sqlx([[:space:]]*)$' .env; then
+  grep -q '"chat_read_backend":"sqlx"' <<<"$runtime_state"
+fi
 printf '\nAxum runtime verification passed.\n'

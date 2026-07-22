@@ -95,7 +95,7 @@ case "$profile" in
   commands)
     central=$(read_env CENTRAL_PAYMENTS_ENABLED)
     case "$central" in True|true|1|yes|on) fail "Axum command cutover is blocked while CENTRAL_PAYMENTS_ENABLED is active";; esac
-    set_profile REALTIME_DURABLE_BACKEND=nats REALTIME_EPHEMERAL_BACKEND=local REALTIME_PRESENCE_BACKEND=legacy_redis REALTIME_CONNECTION_OWNERSHIP_BACKEND=local DATABASE_RUNTIME_ENDPOINT=pgbouncer CHAT_READ_BACKEND=django CHAT_COMMAND_BACKEND=axum VITE_CHAT_COMMAND_BACKEND=axum DJANGO_SERVER=granian
+    set_profile REALTIME_DURABLE_BACKEND=nats REALTIME_EPHEMERAL_BACKEND=local REALTIME_PRESENCE_BACKEND=legacy_redis REALTIME_CONNECTION_OWNERSHIP_BACKEND=local DATABASE_RUNTIME_ENDPOINT=pgbouncer CHAT_READ_BACKEND=sqlx CHAT_COMMAND_BACKEND=axum VITE_CHAT_COMMAND_BACKEND=axum DJANGO_SERVER=granian
     docker compose up -d --build frontend realtime web worker beat
     for service in frontend realtime web worker; do wait_healthy "$service"; done
     ;;

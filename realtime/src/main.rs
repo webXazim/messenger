@@ -1,6 +1,8 @@
 mod auth;
 mod command_auth;
+mod command_delivery;
 mod commands;
+mod call_commands;
 mod config;
 mod database;
 mod nats_connection;
@@ -60,7 +62,13 @@ async fn main() -> Result<()> {
         .route("/internal/stats", get(stats))
         .route("/internal/metrics", get(metrics))
         .route("/ws", get(websocket::authenticated_websocket_handler))
-        .route("/api/v1/chat-fast/conversations/{conversation_id}/messages/", axum::routing::post(commands::send_message));
+        .route("/api/v1/chat-fast/conversations/{conversation_id}/messages/", axum::routing::post(commands::send_message))
+        .route("/api/v1/chat-fast/conversations/{conversation_id}/calls/start/", axum::routing::post(call_commands::start_call))
+        .route("/api/v1/chat-fast/calls/recent/", get(call_commands::recent_calls))
+        .route("/api/v1/chat-fast/calls/{call_id}/", get(call_commands::get_call))
+        .route("/api/v1/chat-fast/calls/{call_id}/accept/", axum::routing::post(call_commands::accept_call))
+        .route("/api/v1/chat-fast/calls/{call_id}/decline/", axum::routing::post(call_commands::decline_call))
+        .route("/api/v1/chat-fast/calls/{call_id}/end/", axum::routing::post(call_commands::end_call));
     let app = if state.config.internal_test_enabled {
         app.route("/internal/ws-test", get(websocket::test_websocket_handler))
     } else {

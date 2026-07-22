@@ -140,7 +140,19 @@ wait_running beat
 if grep -Eiq '^TURN_PROVIDER=cloudflare([[:space:]]*)$' .env; then
   "${compose[@]}" exec -T web python manage.py check_call_readiness --probe
 fi
-"${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats
+runtime_state="$("${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/internal/stats)"
+printf '%s\n' "$runtime_state"
+expected_command_backend="$(grep -E '^CHAT_COMMAND_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+expected_read_backend="$(grep -E '^CHAT_READ_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
+if [[ "$expected_command_backend" == "axum" ]]; then
+  grep -q '"chat_command_backend":"axum"' <<<"$runtime_state" || fail "Axum command backend was requested but is not active"
+  grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum commands require a healthy SQLx pool"
+  call_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/api/v1/chat-fast/calls/recent/)"
+  [[ "$call_route_status" == "401" ]] || fail "Axum call API probe expected HTTP 401, got $call_route_status"
+fi
+if [[ "$expected_read_backend" == "sqlx" ]]; then
+  grep -q '"chat_read_backend":"sqlx"' <<<"$runtime_state" || fail "SQLx read backend was requested but is not active"
+fi
 printf '\n'
 "${compose[@]}" ps
 

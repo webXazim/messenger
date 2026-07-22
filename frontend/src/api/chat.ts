@@ -1063,7 +1063,8 @@ export const chatApi = {
     await http.delete(`/chat/statuses/${statusId}/`);
   },
   async listCalls(status?: string, signal?: AbortSignal) {
-    const items = await collectChatPages("/chat/calls/recent/", normalizeCall, {
+    const callsBase = CHAT_COMMAND_BACKEND === "axum" ? `${CHAT_COMMAND_URL}/calls` : "/chat/calls";
+    const items = await collectChatPages(`${callsBase}/recent/`, normalizeCall, {
       params: status ? { status } : undefined,
       signal,
       getKey: (item) => item.id,
@@ -1071,23 +1072,28 @@ export const chatApi = {
     return items.filter((item) => Boolean(item.id));
   },
   async startCall(conversationId: string, payload: { call_type: "voice" | "video"; metadata?: Record<string, unknown> }) {
-    const response = await http.post(`/chat/conversations/${conversationId}/calls/start/`, payload);
+    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/conversations/${conversationId}/calls/start/`, payload);
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async getCall(callId: string) {
-    const response = await http.get(`/chat/calls/${callId}/`);
+    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.get(`${prefix}/calls/${callId}/`);
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async acceptCall(callId: string) {
-    const response = await http.post(`/chat/calls/${callId}/accept/`);
+    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/accept/`, {});
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async declineCall(callId: string, reason?: string) {
-    const response = await http.post(`/chat/calls/${callId}/decline/`, reason ? { reason } : {});
+    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/decline/`, reason ? { reason } : {});
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async endCall(callId: string, reason?: string) {
-    const response = await http.post(`/chat/calls/${callId}/end/`, reason ? { reason } : {});
+    const prefix = CHAT_COMMAND_BACKEND === "axum" ? CHAT_COMMAND_URL : "/chat";
+    const response = await http.post(`${prefix}/calls/${callId}/end/`, reason ? { reason } : {});
     return normalizeCall(unwrapData<unknown>(response.data));
   },
   async sendCallSignal(callId: string, signal_type: string, payload?: Record<string, unknown>) {

@@ -4,17 +4,17 @@ use anyhow::{Context, Result};
 use axum::http::{header::AUTHORIZATION, HeaderMap};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
+use serde_json::Value;
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::config::Config;
 
 #[derive(Debug, Deserialize)]
 struct AccessClaims {
     #[serde(default)]
-    user_id: String,
+    user_id: Value,
     #[serde(default)]
-    sub: String,
+    sub: Value,
     #[serde(default)]
     token_type: String,
     #[serde(default)]
@@ -31,7 +31,7 @@ pub enum CommandAuthError {
 
 #[derive(Clone, Debug)]
 pub struct CommandIdentity {
-    pub claimed_user_id: Option<Uuid>,
+    pub claimed_user_id: Option<i64>,
     pub email: String,
 }
 
@@ -67,8 +67,16 @@ impl CommandAuthenticator {
         let token = value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer ")).ok_or(CommandAuthError::Invalid)?;
         let claims = decode::<AccessClaims>(token, &self.key, &self.validation).map_err(|_| CommandAuthError::Invalid)?.claims;
         if !claims.token_type.is_empty() && claims.token_type != "access" { return Err(CommandAuthError::Invalid); }
-        let raw_id = if claims.user_id.trim().is_empty() { &claims.sub } else { &claims.user_id };
-        let claimed_user_id = Uuid::parse_str(raw_id).ok();
+        let raw_id = match &claims.user_id {
+            Value::Number(value) => value.to_string(),
+            Value::String(value) if !value.trim().is_empty() => value.trim().to_owned(),
+            _ => match &claims.sub {
+                Value::Number(value) => value.to_string(),
+                Value::String(value) => value.trim().to_owned(),
+                _ => String::new(),
+            },
+        };
+        let claimed_user_id = raw_id.parse::<i64>().ok().filter(|value| *value > 0);
         let email = claims.email.trim().to_ascii_lowercase();
         if claimed_user_id.is_none() && email.is_empty() { return Err(CommandAuthError::Invalid); }
         Ok(CommandIdentity { claimed_user_id, email })
