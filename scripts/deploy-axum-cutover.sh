@@ -109,8 +109,8 @@ bash ./scripts/backup-postgres.sh
 
 run_web=("${compose[@]}" run --rm --no-deps -e RUN_MIGRATIONS=0 -e RUN_COLLECTSTATIC=0 -e ENSURE_NATS_STREAM=0)
 info "Checking model and migration consistency"
-"${run_web[@]}" -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py makemigrations --check --dry-run
-"${run_web[@]}" -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --noinput
+"${run_web[@]}" -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py makemigrations --check --dry-run
+"${run_web[@]}" -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --noinput
 "${run_web[@]}" -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
 "${run_web[@]}" web python manage.py check --deploy
 
