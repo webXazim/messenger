@@ -199,7 +199,7 @@ fi
 if [[ "$expected_conversation_command_backend" == "axum" ]]; then
   grep -q '"chat_conversation_command_backend":"axum"' <<<"$runtime_state" || fail "Axum conversation command backend was requested but is not active"
   grep -q '"sqlx_enabled":true' <<<"$runtime_state" || fail "Axum conversation commands require a healthy SQLx pool"
-  conversation_command_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:9000/api/v1/chat-fast/blocks/)"
+  conversation_command_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"blocked_user_id":1}' http://127.0.0.1:9000/api/v1/chat-fast/blocks/)"
   [[ "$conversation_command_status" == "401" ]] || fail "Axum conversation command API probe expected HTTP 401, got $conversation_command_status"
   expected_frontend_conversation_command_backend="$(grep -E '^VITE_CHAT_CONVERSATION_COMMAND_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
   [[ "$expected_frontend_conversation_command_backend" == "axum" ]] || fail "CHAT_CONVERSATION_COMMAND_BACKEND=axum also requires VITE_CHAT_CONVERSATION_COMMAND_BACKEND=axum and a rebuilt frontend image"
