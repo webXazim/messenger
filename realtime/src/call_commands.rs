@@ -16,10 +16,9 @@ use uuid::Uuid;
 use crate::{
     command_auth::CommandIdentity,
     command_delivery::deliver_committed,
-    commands::error_response,
+    commands::{conversation_event_audiences, error_response},
     config::ChatCallRuntimeBackend,
     database::CommittedEvent,
-    protocol::{AudienceKey, AudienceKind},
     state::AppState,
 };
 
@@ -311,10 +310,11 @@ async fn record_event(tx: &mut Transaction<'_, Postgres>, name: &str, data: Valu
     let event_id = Uuid::new_v4();
     let occurred_at = OffsetDateTime::now_utc().format(&Rfc3339).unwrap_or_default();
     let payload = json!({"type":"chat.event","version":1,"event":name,"event_id":event_id,"occurred_at":occurred_at,"data":data});
-    let audiences_json = json!([{"kind":"conversation","id":conversation_id}]);
+    let audiences = conversation_event_audiences(tx, conversation_id).await?;
+    let audiences_json = json!(&audiences);
     sqlx::query("INSERT INTO common_realtimeoutboxevent (id,created_at,updated_at,event_id,event_name,payload,audiences,status,attempts,available_at,published_at,delivery_target,published_transport,stream_entry_id,last_error) VALUES ($1,NOW(),NOW(),$2,$3,$4,$5,'pending',0,NOW(),NULL,'nats_jetstream','','','')")
         .bind(Uuid::new_v4()).bind(event_id).bind(name).bind(&payload).bind(audiences_json).persistent(false).execute(&mut **tx).await?;
-    Ok(CommittedEvent { event_id, event_name: name.to_owned(), payload, audiences: vec![AudienceKey { kind: AudienceKind::Conversation, identifier: conversation_id.to_string() }] })
+    Ok(CommittedEvent { event_id, event_name: name.to_owned(), payload, audiences })
 }
 
 async fn insert_audit(tx: &mut Transaction<'_, Postgres>, actor: i64, conversation: Uuid, event_type: &str, metadata: Value) -> Result<()> {

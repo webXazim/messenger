@@ -15,10 +15,9 @@ use uuid::Uuid;
 use crate::{
     command_auth::{CommandAuthError, CommandIdentity},
     command_delivery::deliver_committed,
-    commands::error_response,
+    commands::{conversation_event_audiences, error_response},
     config::ChatInteractionBackend,
     database::{CommittedEvent, Database},
-    protocol::{AudienceKey, AudienceKind},
     state::AppState,
 };
 
@@ -491,7 +490,8 @@ async fn insert_conversation_event(
     .persistent(false)
     .fetch_one(&mut **tx)
     .await?;
-    let audiences = json!([{"kind": "conversation", "id": conversation_id.to_string()}]);
+    let audiences = conversation_event_audiences(tx, conversation_id).await?;
+    let audiences_json = json!(&audiences);
     sqlx::query(
         "INSERT INTO common_realtimeoutboxevent (id, created_at, updated_at, event_id, event_name, payload, audiences, status, attempts, available_at, published_at, delivery_target, published_transport, stream_entry_id, last_error) VALUES ($1, NOW(), NOW(), $2, $3, $4, $5, 'pending', 0, NOW(), NULL, 'nats_jetstream', '', '', '')",
     )
@@ -499,7 +499,7 @@ async fn insert_conversation_event(
     .bind(event_id)
     .bind(event_name)
     .bind(&event_payload)
-    .bind(&audiences)
+    .bind(&audiences_json)
     .persistent(false)
     .execute(&mut **tx)
     .await?;
@@ -507,10 +507,7 @@ async fn insert_conversation_event(
         event_id,
         event_name: event_name.to_owned(),
         payload: event_payload,
-        audiences: vec![AudienceKey {
-            kind: AudienceKind::Conversation,
-            identifier: conversation_id.to_string(),
-        }],
+        audiences,
     })
 }
 

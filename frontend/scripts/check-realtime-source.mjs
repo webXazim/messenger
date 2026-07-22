@@ -24,6 +24,7 @@ const views = read("../apps/chat/api/views.py");
 const devicePresence = read("src/lib/devicePresence.ts");
 const personPresentation = read("src/lib/personPresentation.ts");
 const messageEntrance = read("src/hooks/useMessageEntrance.ts");
+const userIdentity = read("src/lib/userIdentity.ts");
 
 for (const required of [
   "event_id?: string",
@@ -57,6 +58,7 @@ for (const required of [
 }
 
 assert.ok(conversation.includes("stableMessageRenderKey(message)"), "Messenger confirmation can remount and blink optimistic messages.");
+assert.ok(userIdentity.includes("if (ids[0] && ids[1]) return ids[0] === ids[1]"), "Conflicting user IDs can fall through to an unsafe display-name match.");
 assert.ok(!conversation.includes("useMessageEntranceKeys"), "Messenger still reapplies entrance opacity after an optimistic message has already painted.");
 assert.ok(conversation.includes("latestIncomingMessageId"), "Delivery and read receipts are not pinned to the newest incoming message.");
 assert.match(conversation, /!isSameUserIdentity\(message\.sender, localCurrentUser\)/, "Receipt targeting can still acknowledge the current user's own outgoing message.");

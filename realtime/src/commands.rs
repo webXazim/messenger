@@ -233,6 +233,29 @@ async fn resolve_actor_id(tx: &mut Transaction<'_, Postgres>, identity: &Command
     anyhow::bail!("authenticated user does not exist locally")
 }
 
+pub(crate) async fn conversation_event_audiences(
+    tx: &mut Transaction<'_, Postgres>,
+    conversation_id: Uuid,
+) -> Result<Vec<AudienceKey>> {
+    let participant_ids = sqlx::query_scalar::<_, i64>(
+        "SELECT user_id FROM chat_conversationparticipant WHERE conversation_id = $1 AND left_at IS NULL AND banned_at IS NULL ORDER BY user_id",
+    )
+    .bind(conversation_id)
+    .persistent(false)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut audiences = Vec::with_capacity(participant_ids.len() + 1);
+    audiences.push(AudienceKey {
+        kind: AudienceKind::Conversation,
+        identifier: conversation_id.to_string(),
+    });
+    audiences.extend(participant_ids.into_iter().map(|user_id| AudienceKey {
+        kind: AudienceKind::User,
+        identifier: user_id.to_string(),
+    }));
+    Ok(audiences)
+}
+
 async fn insert_event(
     tx: &mut Transaction<'_, Postgres>,
     event_name: &str,
@@ -248,8 +271,12 @@ async fn insert_event(
         "occurred_at": data.get("updated_at").or_else(|| data.get("created_at")).cloned().unwrap_or(Value::Null),
         "data": data,
     });
-    let audiences = vec![AudienceKey { kind: AudienceKind::Conversation, identifier: conversation_id.to_string() }];
-    let audiences_json = json!([{"kind":"conversation","id":conversation_id.to_string()}]);
+    // Conversation subscriptions cover the open chat. User audiences also
+    // reach every participant while the chat is closed, which is required for
+    // background notifications, unread state, delivery acks, and multi-device
+    // synchronization.
+    let audiences = conversation_event_audiences(tx, conversation_id).await?;
+    let audiences_json = json!(&audiences);
     sqlx::query(
         "INSERT INTO common_realtimeoutboxevent (id,created_at,updated_at,event_id,event_name,payload,audiences,status,attempts,available_at,published_at,delivery_target,published_transport,stream_entry_id,last_error) VALUES ($1,NOW(),NOW(),$2,$3,$4,$5,'pending',0,NOW(),NULL,'nats_jetstream','','','')",
     )
