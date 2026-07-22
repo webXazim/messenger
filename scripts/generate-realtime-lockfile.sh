@@ -24,11 +24,11 @@ run_cargo() {
 }
 
 # Keep an existing lockfile only when it exactly matches Cargo.toml.
-# `cargo metadata --locked --no-deps` is a cheap consistency check and does
-# not compile the realtime service.
+# Resolve the complete dependency graph. `--no-deps` cannot detect every
+# Cargo.toml change and previously allowed a stale lockfile into production.
 if [[ -s realtime/Cargo.lock ]]; then
   echo "Checking realtime/Cargo.lock against Cargo.toml..."
-  if run_cargo cargo metadata --locked --no-deps --format-version 1 >/dev/null; then
+  if run_cargo cargo metadata --locked --format-version 1 >/dev/null; then
     echo "realtime/Cargo.lock is current."
     exit 0
   fi

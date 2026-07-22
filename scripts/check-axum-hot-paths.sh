@@ -39,9 +39,13 @@ require config/celery.py '"process-chat-data-plane-jobs"' "Chat data-plane recov
 require scripts/stack-profile.sh "prepare_chat_data_plane" "Cutover profiles do not apply the Django-owned migration first"
 require scripts/stack-profile.sh "commands|hot-paths)" "Hot-path cutover alias is missing"
 
-node frontend/scripts/check-attachment-backend-source.mjs
-node frontend/scripts/check-conversation-command-backend-source.mjs
-node frontend/scripts/check-hot-path-backend-source.mjs
+if command -v node >/dev/null 2>&1; then
+  node frontend/scripts/check-attachment-backend-source.mjs
+  node frontend/scripts/check-conversation-command-backend-source.mjs
+  node frontend/scripts/check-hot-path-backend-source.mjs
+else
+  printf '%s\n' 'Node.js is not installed; skipping optional frontend source checks.'
+fi
 
 python3 - <<'PY'
 from pathlib import Path

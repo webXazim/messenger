@@ -66,6 +66,10 @@ print('Compose YAML parsed.')
 PY
 sh -n scripts/stack-profile.sh scripts/check-axum-support-data.sh
 bash -n scripts/verify-axum-runtime.sh scripts/deploy-axum-cutover.sh
-node --check frontend/public/support-widget/v1/widget.js
-node frontend/scripts/check-support-data-backend-source.mjs
+if command -v node >/dev/null 2>&1; then
+  node --check frontend/public/support-widget/v1/widget.js
+  node frontend/scripts/check-support-data-backend-source.mjs
+else
+  printf '%s\n' 'Node.js is not installed; skipping optional Support frontend source checks.'
+fi
 printf '%s\n' 'Axum Support data-plane source contracts passed.'

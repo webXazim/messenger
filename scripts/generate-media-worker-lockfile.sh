@@ -21,7 +21,7 @@ run_cargo() {
 
 if [[ -s media-worker/Cargo.lock ]]; then
   echo "Checking media-worker/Cargo.lock against Cargo.toml..."
-  if run_cargo cargo metadata --locked --no-deps --format-version 1 >/dev/null; then
+  if run_cargo cargo metadata --locked --format-version 1 >/dev/null; then
     echo "media-worker/Cargo.lock is current."
     exit 0
   fi
