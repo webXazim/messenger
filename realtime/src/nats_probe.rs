@@ -32,7 +32,7 @@ pub async fn run(state: Arc<AppState>) {
                     continue;
                 }
             }
-            Ok(Err(error)) => tracing::warn!(error = %error, "NATS connectivity probe failed"),
+            Ok(Err(error)) => tracing::warn!(error = ?error, "NATS connectivity probe failed"),
             Err(_) => tracing::warn!("NATS connectivity probe timed out"),
         }
 

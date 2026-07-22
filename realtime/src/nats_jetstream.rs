@@ -78,7 +78,7 @@ pub async fn run(state: Arc<AppState>) {
                 state.stream_ready.store(false, Ordering::Release);
                 state.stream_errors.fetch_add(1, Ordering::Relaxed);
                 state.stream_reconnects.fetch_add(1, Ordering::Relaxed);
-                tracing::error!(error = %error, "JetStream durable consumer stopped");
+                tracing::error!(error = ?error, "JetStream durable consumer stopped");
                 tokio::select! {
                     _ = state.shutdown.cancelled() => return,
                     _ = time::sleep(backoff) => {}

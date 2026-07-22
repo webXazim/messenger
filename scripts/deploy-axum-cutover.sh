@@ -117,7 +117,10 @@ info "Ensuring the NATS JetStream resources exist"
 "${run_web[@]}" web python manage.py ensure_nats_stream
 
 info "Replacing the complete production stack"
-"${compose[@]}" up -d --remove-orphans "${all_services[@]}"
+if ! "${compose[@]}" up -d --remove-orphans "${all_services[@]}"; then
+  "${compose[@]}" logs --tail=150 nats realtime >&2 || true
+  fail "production stack replacement failed"
+fi
 
 # Git can replace the inode behind Nginx's bind-mounted configuration. Always
 # recreate Nginx so it reads the configuration from the deployed release.
