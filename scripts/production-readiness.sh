@@ -182,6 +182,10 @@ cf_ranges="$(grep -c '^set_real_ip_from ' nginx/cloudflare-real-ip.conf 2>/dev/n
 (( cf_ranges >= 10 )) || failures+=("Cloudflare trusted IP file is not populated; run scripts/update-cloudflare-ips.sh")
 
 compose=(docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml)
+media_backend="$(read_env MEDIA_PROCESSING_BACKEND)"
+if [[ "$media_backend" == "rust" || "$media_backend" == "rust_shadow" ]]; then
+  compose+=(--profile rust-media)
+fi
 if command -v docker >/dev/null; then
   "${compose[@]}" config >/dev/null || failures+=("Docker Compose configuration is invalid")
 fi
@@ -200,14 +204,22 @@ echo "Production preflight passed."
 [[ "$mode" == "preflight" ]] && exit 0
 
 running_services="$("${compose[@]}" ps --status running --services)"
-for service in postgres pgbouncer redis nats web worker beat realtime frontend nginx; do
+required_services=(postgres pgbouncer redis nats web worker beat realtime frontend nginx)
+if [[ "$media_backend" == "rust" || "$media_backend" == "rust_shadow" ]]; then
+  required_services+=(media-worker)
+fi
+for service in "${required_services[@]}"; do
   if ! grep -qx "$service" <<<"$running_services"; then
     echo "Required service is not running: $service" >&2
     exit 1
   fi
 done
 
-for service in postgres pgbouncer redis nats web realtime frontend nginx; do
+healthy_services=(postgres pgbouncer redis nats web realtime frontend nginx)
+if [[ "$media_backend" == "rust" || "$media_backend" == "rust_shadow" ]]; then
+  healthy_services+=(media-worker)
+fi
+for service in "${healthy_services[@]}"; do
   cid="$("${compose[@]}" ps -q "$service")"
   health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid")"
   if [[ "$health" != "healthy" ]]; then

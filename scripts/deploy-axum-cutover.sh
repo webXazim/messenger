@@ -12,10 +12,10 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 
 compose=(docker compose --env-file .env -f docker-compose.yml -f docker-compose.production.yml)
 infrastructure=(postgres redis nats pgbouncer)
-applications=(web worker beat realtime frontend nginx)
+applications=(web worker beat realtime media-worker frontend nginx)
 all_services=("${infrastructure[@]}" "${applications[@]}")
-build_services=(pgbouncer web worker beat realtime frontend)
-rollback_services=(pgbouncer web worker beat realtime frontend)
+build_services=(pgbouncer web worker beat realtime media-worker frontend)
+rollback_services=(pgbouncer web worker beat realtime media-worker frontend)
 
 wait_healthy() {
   local service="$1" attempts=0 cid status
@@ -66,6 +66,7 @@ if grep -Eiq '^MESSENGER_ENVIRONMENT=production([[:space:]]*)$' .env; then
   bash ./scripts/production-readiness.sh --preflight
 fi
 bash ./scripts/generate-realtime-lockfile.sh
+bash ./scripts/generate-media-worker-lockfile.sh
 [[ -s secrets/realtime-private.pem ]] || fail "Missing realtime private key; run ./scripts/generate-realtime-keys.sh"
 [[ -s secrets/realtime-public.pem ]] || fail "Missing realtime public key; run ./scripts/generate-realtime-keys.sh"
 "${compose[@]}" config --quiet
@@ -126,7 +127,7 @@ fi
 # recreate Nginx so it reads the configuration from the deployed release.
 "${compose[@]}" up -d --force-recreate --no-deps nginx
 
-for service in "${infrastructure[@]}" web realtime frontend nginx; do
+for service in "${infrastructure[@]}" web realtime media-worker frontend nginx; do
   wait_healthy "$service"
 done
 wait_running worker

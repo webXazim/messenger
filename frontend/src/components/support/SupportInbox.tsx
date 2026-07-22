@@ -342,6 +342,7 @@ function SupportMessageBubble({
       onToggleReaction={() => undefined}
       onEdit={() => undefined}
       onDelete={() => undefined}
+      onRestore={() => undefined}
     />
   );
 }

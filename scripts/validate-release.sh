@@ -25,7 +25,7 @@ for path in [Path('docker-compose.yml'), Path('docker-compose.local.yml'), Path(
     yaml.safe_load(path.read_text())
 expected_services = {
     'postgres', 'pgbouncer', 'redis', 'nats', 'web',
-    'worker', 'beat', 'realtime', 'frontend', 'nginx',
+    'worker', 'beat', 'realtime', 'media-worker', 'frontend', 'nginx',
 }
 compose_services = set(yaml.safe_load(Path('docker-compose.yml').read_text())['services'])
 missing = expected_services - compose_services

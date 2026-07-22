@@ -4,6 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ -f .env ]] || { echo "Missing .env. Copy .env.production.example to .env and fill it first." >&2; exit 1; }
 
+bash ./scripts/check-final-efficiency.sh
+bash ./scripts/production-readiness.sh --preflight
 bash ./scripts/update-cloudflare-ips.sh
 bash ./scripts/production-readiness.sh --preflight
 
