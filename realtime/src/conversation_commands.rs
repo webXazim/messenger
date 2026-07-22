@@ -18,8 +18,8 @@ use crate::{
     commands::error_response,
     config::ChatConversationCommandBackend,
     database::{CommittedEvent, Database},
-    nats_core,
-    protocol::{event_message, AudienceKey, AudienceKind, EphemeralPriority},
+    nats_core::{self, EphemeralPriority},
+    protocol::{event_message, AudienceKey, AudienceKind},
     state::AppState,
 };
 
@@ -1051,4 +1051,3 @@ mod tests {
         assert!(normalize_slug(&"a".repeat(200)).chars().count() <= 80);
     }
 }
-

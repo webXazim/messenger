@@ -1069,7 +1069,7 @@ async fn create_message(
     let sequence=sqlx::query_scalar::<_,i64>("UPDATE chat_conversation SET next_message_sequence=next_message_sequence+1,updated_at=NOW() WHERE id=$1 RETURNING next_message_sequence::bigint")
         .bind(chat_id).persistent(false).fetch_one(&mut *tx).await.map_err(internal_error)?;
     let message_id=Uuid::new_v4();
-    let message_type=if input.voice_note {"audio"} else if text.is_empty() && input.attachment_ids.len()==1 {
+    let message_type=if input.voice_note {"audio".to_owned()} else if text.is_empty() && input.attachment_ids.len()==1 {
         sqlx::query_scalar::<_,String>("SELECT pu.media_kind FROM chat_pendingupload pu WHERE pu.id=$1").bind(input.attachment_ids[0]).persistent(false).fetch_optional(&mut *tx).await.map_err(internal_error)?.unwrap_or_else(||"file".to_owned())
     } else {"text".to_owned()};
     let metadata=if input.voice_note {json!({"voice_note":true})} else {json!({})};
