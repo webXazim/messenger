@@ -231,7 +231,7 @@ done
 "${compose[@]}" ps
 "${compose[@]}" exec -T nginx nginx -t
 "${compose[@]}" exec -T web python manage.py check --deploy
-"${compose[@]}" exec -T -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
+"${compose[@]}" exec -T -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres web python manage.py migrate --check
 "${compose[@]}" exec -T web python manage.py check_chat_readiness
 "${compose[@]}" exec -T web python manage.py check_support_readiness --fail-on-warning
 "${compose[@]}" exec -T realtime curl -fsS http://127.0.0.1:9000/health/ready >/dev/null

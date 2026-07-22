@@ -43,7 +43,7 @@ done
   -e RUN_MIGRATIONS=0 \
   -e RUN_COLLECTSTATIC=0 \
   -e ENSURE_NATS_STREAM=0 \
-  -e DATABASE_RUNTIME_ENDPOINT=postgres \
+  -e AXUM_DATA_PLANE_REQUIRED=False -e DATABASE_RUNTIME_ENDPOINT=postgres \
   web python manage.py migrate --noinput
 "${compose[@]}" run --rm \
   -e RUN_MIGRATIONS=0 \
