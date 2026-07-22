@@ -304,6 +304,9 @@ pub struct Config {
     pub chat_conversation_command_backend: ChatConversationCommandBackend,
     pub support_data_backend: SupportDataBackend,
     pub central_payments_enabled: bool,
+    pub chat_command_jwt_algorithm: String,
+    pub chat_command_jwt_public_key: String,
+    pub chat_command_jwt_signing_key: String,
     pub chat_command_jwt_issuer: String,
     pub chat_command_jwt_audience: String,
     pub chat_read_backend: ChatReadBackend,
@@ -419,8 +422,30 @@ impl Config {
             chat_conversation_command_backend: ChatConversationCommandBackend::from_env()?,
             support_data_backend: SupportDataBackend::from_env()?,
             central_payments_enabled: boolean("CENTRAL_PAYMENTS_ENABLED", true)?,
-            chat_command_jwt_issuer: value("CHAT_COMMAND_JWT_ISSUER", &value("REALTIME_TOKEN_ISSUER", "crescentsphere-django")),
-            chat_command_jwt_audience: value("CHAT_COMMAND_JWT_AUDIENCE", ""),
+            chat_command_jwt_algorithm: value(
+                "CHAT_COMMAND_JWT_ALGORITHM",
+                &value("AUTH_PAYMENT_JWT_ALGORITHM", "HS256"),
+            )
+            .to_ascii_uppercase(),
+            chat_command_jwt_public_key: value(
+                "CHAT_COMMAND_JWT_PUBLIC_KEY",
+                &value("AUTH_PAYMENT_JWT_PUBLIC_KEY", ""),
+            )
+                .replace("\\n", "\n")
+                .trim()
+                .to_owned(),
+            chat_command_jwt_signing_key: value(
+                "CHAT_COMMAND_JWT_SIGNING_KEY",
+                &value("AUTH_PAYMENT_JWT_SIGNING_KEY", ""),
+            ),
+            chat_command_jwt_issuer: value(
+                "CHAT_COMMAND_JWT_ISSUER",
+                &value("AUTH_PAYMENT_JWT_ISSUER", "crescentsphere-django"),
+            ),
+            chat_command_jwt_audience: value(
+                "CHAT_COMMAND_JWT_AUDIENCE",
+                &value("AUTH_PAYMENT_JWT_AUDIENCE", ""),
+            ),
             chat_read_backend: ChatReadBackend::from_env()?,
             media_token_signing_key: value("MEDIA_TOKEN_SHARED_SECRET", ""),
             media_token_issuer: value("MEDIA_TOKEN_ISSUER", "crescentsphere-media"),

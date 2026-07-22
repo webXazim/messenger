@@ -38,6 +38,12 @@ require apps/chat/tasks.py "process_chat_data_plane_jobs" "Chat data-plane worke
 require config/celery.py '"process-chat-data-plane-jobs"' "Chat data-plane recovery schedule is missing"
 require scripts/stack-profile.sh "prepare_chat_data_plane" "Cutover profiles do not apply the Django-owned migration first"
 require scripts/stack-profile.sh "commands|hot-paths)" "Hot-path cutover alias is missing"
+require realtime/src/command_auth.rs "config.chat_command_jwt_signing_key" "Axum command authentication is not using the access-token HMAC key"
+require realtime/src/command_auth.rs "config.chat_command_jwt_public_key" "Axum command authentication is not using the access-token public key"
+reject realtime/src/command_auth.rs "config.auth_public_key" "Axum command authentication still reuses the websocket-ticket public key"
+require docker-compose.yml 'CHAT_COMMAND_JWT_ALGORITHM: ${CHAT_COMMAND_JWT_ALGORITHM:-${AUTH_PAYMENT_JWT_ALGORITHM:-HS256}}' "Compose does not inherit the Django access-token algorithm for Axum"
+require docker-compose.yml 'CHAT_COMMAND_JWT_AUDIENCE: ${CHAT_COMMAND_JWT_AUDIENCE:-${AUTH_PAYMENT_JWT_AUDIENCE:-}}' "Compose does not inherit the Django access-token audience for Axum"
+require scripts/deploy-axum-cutover.sh "Axum rejected a Django-issued access token" "Production cutover does not test Django-to-Axum access-token compatibility"
 
 if command -v node >/dev/null 2>&1; then
   node frontend/scripts/check-attachment-backend-source.mjs

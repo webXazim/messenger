@@ -115,14 +115,29 @@ fi
 require_value AUTH_PAYMENT_JWT_ISSUER
 require_value AUTH_PAYMENT_JWT_AUDIENCE
 jwt_algorithm="$(read_env AUTH_PAYMENT_JWT_ALGORITHM)"
+chat_jwt_algorithm="$(read_env CHAT_COMMAND_JWT_ALGORITHM)"
+chat_jwt_issuer="$(read_env CHAT_COMMAND_JWT_ISSUER)"
+chat_jwt_audience="$(read_env CHAT_COMMAND_JWT_AUDIENCE)"
+[[ -n "$chat_jwt_algorithm" ]] || chat_jwt_algorithm="$jwt_algorithm"
+[[ -n "$chat_jwt_issuer" ]] || chat_jwt_issuer="$(read_env AUTH_PAYMENT_JWT_ISSUER)"
+[[ -n "$chat_jwt_audience" ]] || chat_jwt_audience="$(read_env AUTH_PAYMENT_JWT_AUDIENCE)"
+[[ "$chat_jwt_algorithm" == "$jwt_algorithm" ]] || failures+=("CHAT_COMMAND_JWT_ALGORITHM must match AUTH_PAYMENT_JWT_ALGORITHM")
+[[ "$chat_jwt_issuer" == "$(read_env AUTH_PAYMENT_JWT_ISSUER)" ]] || failures+=("CHAT_COMMAND_JWT_ISSUER must match AUTH_PAYMENT_JWT_ISSUER")
+[[ "$chat_jwt_audience" == "$(read_env AUTH_PAYMENT_JWT_AUDIENCE)" ]] || failures+=("CHAT_COMMAND_JWT_AUDIENCE must match AUTH_PAYMENT_JWT_AUDIENCE")
 if [[ "$(read_env CENTRAL_AUTH_ENABLED)" == "True" || "$(read_env CENTRAL_AUTH_ENABLED)" == "true" ]]; then
   require_value AUTH_PAYMENT_JWT_PUBLIC_KEY
-  [[ "$jwt_algorithm" == RS* || "$jwt_algorithm" == ES* ]] || failures+=("Central authentication requires an asymmetric JWT algorithm such as RS256")
+  [[ "$jwt_algorithm" =~ ^(RS256|RS384|RS512|ES256|ES384)$ ]] || failures+=("Central authentication requires an Axum-supported asymmetric JWT algorithm: RS256, RS384, RS512, ES256, or ES384")
+  chat_jwt_public_key="$(read_env CHAT_COMMAND_JWT_PUBLIC_KEY)"
+  [[ -n "$chat_jwt_public_key" ]] || chat_jwt_public_key="$(read_env AUTH_PAYMENT_JWT_PUBLIC_KEY)"
+  [[ "$chat_jwt_public_key" == "$(read_env AUTH_PAYMENT_JWT_PUBLIC_KEY)" ]] || failures+=("CHAT_COMMAND_JWT_PUBLIC_KEY must match AUTH_PAYMENT_JWT_PUBLIC_KEY")
 else
   require_value AUTH_PAYMENT_JWT_SIGNING_KEY
   local_jwt_secret="$(read_env AUTH_PAYMENT_JWT_SIGNING_KEY)"
   (( ${#local_jwt_secret} >= 64 )) || failures+=("AUTH_PAYMENT_JWT_SIGNING_KEY must contain at least 64 characters for standalone auth")
-  [[ "$jwt_algorithm" == HS* ]] || failures+=("Standalone authentication requires an HMAC JWT algorithm such as HS256")
+  [[ "$jwt_algorithm" =~ ^(HS256|HS384|HS512)$ ]] || failures+=("Standalone authentication requires an Axum-supported HMAC JWT algorithm: HS256, HS384, or HS512")
+  chat_jwt_secret="$(read_env CHAT_COMMAND_JWT_SIGNING_KEY)"
+  [[ -n "$chat_jwt_secret" ]] || chat_jwt_secret="$local_jwt_secret"
+  [[ "$chat_jwt_secret" == "$local_jwt_secret" ]] || failures+=("CHAT_COMMAND_JWT_SIGNING_KEY must match AUTH_PAYMENT_JWT_SIGNING_KEY")
 fi
 
 if [[ "$(read_env CENTRAL_ADMIN_ENABLED)" == "True" || "$(read_env CENTRAL_ADMIN_ENABLED)" == "true" ]]; then

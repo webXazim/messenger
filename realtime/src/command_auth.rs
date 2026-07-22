@@ -1,6 +1,6 @@
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use axum::http::{header::AUTHORIZATION, HeaderMap};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
@@ -42,15 +42,36 @@ pub struct CommandAuthenticator {
 
 impl CommandAuthenticator {
     pub fn from_config(config: &Config) -> Result<Arc<Self>> {
-        let public_key = if !config.auth_public_key.trim().is_empty() {
-            config.auth_public_key.as_bytes().to_vec()
-        } else {
-            fs::read(&config.auth_public_key_path).with_context(|| {
-                format!("cannot read command JWT public key: {}", config.auth_public_key_path)
-            })?
+        let algorithm = match config.chat_command_jwt_algorithm.as_str() {
+            "HS256" => Algorithm::HS256,
+            "HS384" => Algorithm::HS384,
+            "HS512" => Algorithm::HS512,
+            "RS256" => Algorithm::RS256,
+            "RS384" => Algorithm::RS384,
+            "RS512" => Algorithm::RS512,
+            "ES256" => Algorithm::ES256,
+            "ES384" => Algorithm::ES384,
+            unsupported => return Err(anyhow!("unsupported CHAT_COMMAND_JWT_ALGORITHM: {unsupported}")),
         };
-        let key = DecodingKey::from_rsa_pem(&public_key).context("command JWT public key is invalid")?;
-        let mut validation = Validation::new(Algorithm::RS256);
+        let key = match algorithm {
+            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
+                let secret = config.chat_command_jwt_signing_key.as_bytes();
+                if secret.is_empty() {
+                    return Err(anyhow!("CHAT_COMMAND_JWT_SIGNING_KEY is required for HMAC access tokens"));
+                }
+                DecodingKey::from_secret(secret)
+            }
+            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
+                DecodingKey::from_rsa_pem(config.chat_command_jwt_public_key.as_bytes())
+                    .context("CHAT_COMMAND_JWT_PUBLIC_KEY is not valid RSA PEM")?
+            }
+            Algorithm::ES256 | Algorithm::ES384 => {
+                DecodingKey::from_ec_pem(config.chat_command_jwt_public_key.as_bytes())
+                    .context("CHAT_COMMAND_JWT_PUBLIC_KEY is not valid EC PEM")?
+            }
+            _ => unreachable!("command JWT algorithms are restricted above"),
+        };
+        let mut validation = Validation::new(algorithm);
         validation.set_issuer(&[config.chat_command_jwt_issuer.as_str()]);
         if !config.chat_command_jwt_audience.trim().is_empty() {
             validation.set_audience(&[config.chat_command_jwt_audience.as_str()]);

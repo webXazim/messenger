@@ -208,6 +208,13 @@ if [[ "$expected_read_backend" == "sqlx" ]]; then
   grep -q '"chat_read_backend":"sqlx"' <<<"$runtime_state" || fail "SQLx read backend was requested but is not active"
   read_route_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/api/v1/chat-fast/conversations/)"
   [[ "$read_route_status" == "401" ]] || fail "Axum conversation read probe expected HTTP 401, got $read_route_status"
+  if ! grep -Eiq '^CENTRAL_AUTH_ENABLED=(True|true|1|yes|on)([[:space:]]*)$' .env; then
+    probe_access_token="$("${compose[@]}" exec -T web python manage.py shell -c 'from django.contrib.auth import get_user_model; from rest_framework_simplejwt.tokens import RefreshToken; user = get_user_model().objects.filter(is_active=True).order_by("pk").first(); assert user is not None, "an active user is required for the Axum access-token probe"; print(RefreshToken.for_user(user).access_token)' | tail -n 1 | tr -d '\r')"
+    [[ -n "$probe_access_token" ]] || fail "Django did not issue an access token for the Axum authentication probe"
+    authenticated_read_status="$("${compose[@]}" exec -T realtime curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${probe_access_token}" http://127.0.0.1:9000/api/v1/chat-fast/conversations/)"
+    unset probe_access_token
+    [[ "$authenticated_read_status" == "200" ]] || fail "Axum rejected a Django-issued access token: expected HTTP 200, got $authenticated_read_status"
+  fi
   expected_frontend_read_backend="$(grep -E '^VITE_CHAT_READ_BACKEND=' .env | tail -n1 | cut -d= -f2- | tr -d '\r' || true)"
   [[ "$expected_frontend_read_backend" == "sqlx" ]] || fail "CHAT_READ_BACKEND=sqlx also requires VITE_CHAT_READ_BACKEND=sqlx and a rebuilt frontend image"
 fi
